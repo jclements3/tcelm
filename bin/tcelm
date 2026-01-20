@@ -1,0 +1,180 @@
+#!/bin/bash
+#
+# tcelm - Elm to RTEMS compiler
+#
+# Usage: tcelm [options] <input.elm> [-o output]
+#
+# Options:
+#   -target <target>    Target platform (i386-rtems-nuc, host)
+#   -c                  Compile only (don't link)
+#   -o <file>           Output file name
+#   -v                  Verbose output
+#   --help              Show this help
+#
+# Example:
+#   tcelm -target i386-rtems-nuc hello.elm -o hello.elf
+#
+
+set -e
+
+# Paths
+TCELM_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TCC_DIR="$TCELM_ROOT/tcc"
+BSP_DIR="$TCELM_ROOT/tcc-nuc-bsp/build"
+RUNTIME_DIR="$TCELM_ROOT/runtime"
+
+# Default values
+TARGET="i386-rtems-nuc"
+COMPILE_ONLY=false
+OUTPUT=""
+VERBOSE=false
+INPUT=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -target)
+            TARGET="$2"
+            shift 2
+            ;;
+        -c)
+            COMPILE_ONLY=true
+            shift
+            ;;
+        -o)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        -v)
+            VERBOSE=true
+            shift
+            ;;
+        --help|-h)
+            head -25 "$0" | tail -n +2 | sed 's/^# //'
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            if [[ -z "$INPUT" ]]; then
+                INPUT="$1"
+            else
+                echo "Multiple input files not supported yet" >&2
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate input
+if [[ -z "$INPUT" ]]; then
+    echo "Usage: tcelm [options] <input.elm> [-o output]" >&2
+    echo "Try 'tcelm --help' for more information." >&2
+    exit 1
+fi
+
+if [[ ! -f "$INPUT" ]]; then
+    echo "Error: Input file not found: $INPUT" >&2
+    exit 1
+fi
+
+# Determine output name
+BASENAME=$(basename "$INPUT" .elm)
+if [[ -z "$OUTPUT" ]]; then
+    if $COMPILE_ONLY; then
+        OUTPUT="${BASENAME}.o"
+    elif [[ "$TARGET" == "native" ]]; then
+        OUTPUT="${BASENAME}"
+    else
+        OUTPUT="${BASENAME}.elf"
+    fi
+fi
+
+# Temporary files
+TMP_DIR=$(mktemp -d)
+trap "rm -rf $TMP_DIR" EXIT
+
+C_FILE="$TMP_DIR/${BASENAME}.c"
+O_FILE="$TMP_DIR/${BASENAME}.o"
+
+log() {
+    if $VERBOSE; then
+        echo "$@"
+    fi
+}
+
+# Step 1: Compile Elm to C
+log "Compiling Elm to C..."
+node "$TCELM_ROOT/bin/tcelm-compile.js" "$INPUT" --target "$TARGET" > "$C_FILE" 2>/dev/null
+if [[ $? -ne 0 ]]; then
+    echo "Error: Failed to compile Elm to C" >&2
+    node "$TCELM_ROOT/bin/tcelm-compile.js" "$INPUT" --target "$TARGET" 2>&1
+    exit 1
+fi
+
+# Step 2: Compile C to object file
+log "Compiling C to object file..."
+case "$TARGET" in
+    i386-rtems-nuc)
+        "$TCC_DIR/tcc" -c "$C_FILE" -o "$O_FILE" \
+            -I"$BSP_DIR/../include" \
+            -I"$RUNTIME_DIR"
+        ;;
+    native)
+        gcc -c "$C_FILE" -o "$O_FILE"
+        ;;
+    host)
+        gcc -c "$C_FILE" -o "$O_FILE" \
+            -I"$RUNTIME_DIR" -m32
+        ;;
+    *)
+        echo "Unknown target: $TARGET" >&2
+        exit 1
+        ;;
+esac
+
+if $COMPILE_ONLY; then
+    cp "$O_FILE" "$OUTPUT"
+    log "Output: $OUTPUT"
+    exit 0
+fi
+
+# Step 3: Link
+log "Linking..."
+case "$TARGET" in
+    i386-rtems-nuc)
+        # Create RTEMS stub for testing (normally provided by BSP)
+        cat > "$TMP_DIR/rtems_stub.c" << 'STUB'
+typedef unsigned int rtems_id;
+void rtems_task_delete(rtems_id id) {
+    (void)id;
+    while (1) { __asm__ volatile("hlt"); }
+}
+STUB
+        "$TCC_DIR/tcc" -c "$TMP_DIR/rtems_stub.c" -o "$TMP_DIR/rtems_stub.o" \
+            -I"$BSP_DIR/../include"
+
+        # Link with multiboot support for QEMU
+        ld -m elf_i386 -static \
+            -T "$BSP_DIR/../linkcmds.nuc" \
+            "$BSP_DIR/multiboot.o" \
+            "$BSP_DIR/crt0.o" \
+            "$BSP_DIR/crti.o" \
+            "$O_FILE" \
+            "$TMP_DIR/rtems_stub.o" \
+            "$BSP_DIR/crtn.o" \
+            -o "$OUTPUT"
+        ;;
+    native)
+        gcc -o "$OUTPUT" "$O_FILE"
+        ;;
+    host)
+        gcc -m32 -o "$OUTPUT" "$O_FILE" -L"$RUNTIME_DIR"
+        ;;
+esac
+
+log "Output: $OUTPUT"
+file "$OUTPUT"

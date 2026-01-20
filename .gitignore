@@ -30,3 +30,7 @@ runtime/test_rtems_tcc
 
 # Build directories
 build/
+
+# External repos (submodules or separate)
+elm-compiler-src/
+tcc/

@@ -1,0 +1,217 @@
+/*
+ * linkcmds.nuc - Linker script for TCC-NUC-BSP (32-bit)
+ *
+ * Memory layout for Intel NUC running RTEMS in 32-bit mode
+ * Based on RTEMS pc686 BSP linker script
+ *
+ * NUC Hardware: 32 GB RAM, but 32-bit RTEMS uses lower 512MB
+ */
+
+OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
+OUTPUT_ARCH(i386)
+ENTRY(_boot)
+
+/*
+ * Memory regions
+ *
+ * RTEMS on x86_64 typically uses memory starting at 1MB
+ * to avoid BIOS/legacy regions
+ */
+MEMORY
+{
+    /* Main RAM: 1MB to 512MB (conservative, RTEMS managed) */
+    RAM (rwx) : ORIGIN = 0x100000, LENGTH = 511M
+
+    /* Stack region (grows down from top of RAM region) */
+    STACK (rw) : ORIGIN = 0x1FF00000, LENGTH = 1M
+}
+
+/*
+ * Stack configuration
+ */
+_stack_size = 64K;
+_stack_top = ORIGIN(STACK) + LENGTH(STACK);
+
+SECTIONS
+{
+    /*
+     * Multiboot header - must be in first 8KB
+     */
+    .multiboot : ALIGN(4)
+    {
+        KEEP(*(.multiboot))
+    } > RAM
+
+    /*
+     * Boot code
+     */
+    .text.boot : ALIGN(4)
+    {
+        *(.text.boot)
+    } > RAM
+
+    /*
+     * Text section - executable code
+     */
+    .text : ALIGN(4096)
+    {
+        _text_start = .;
+
+        /* RTEMS BSP startup (if linked) */
+        *(.text.startup)
+
+        /* TCC CRT startup */
+        *crt0.o(.text)
+
+        /* Application code */
+        *(.text)
+        *(.text.*)
+        *(.gnu.linkonce.t.*)
+
+        /* Read-only data that can go with code */
+        *(.rodata)
+        *(.rodata.*)
+        *(.gnu.linkonce.r.*)
+
+        _text_end = .;
+    } > RAM
+
+    /*
+     * Constructor/destructor tables
+     */
+    .ctors : ALIGN(8)
+    {
+        __CTOR_LIST__ = .;
+        KEEP(*(.ctors.begin))
+        KEEP(*(.ctors))
+        KEEP(*(SORT(.ctors.*)))
+        KEEP(*(.ctors.end))
+        __CTOR_END__ = .;
+    } > RAM
+
+    .dtors : ALIGN(8)
+    {
+        __DTOR_LIST__ = .;
+        KEEP(*(.dtors.begin))
+        KEEP(*(.dtors))
+        KEEP(*(SORT(.dtors.*)))
+        KEEP(*(.dtors.end))
+        __DTOR_END__ = .;
+    } > RAM
+
+    /*
+     * Exception handling (C++)
+     */
+    .eh_frame : ALIGN(8)
+    {
+        *(.eh_frame)
+        *(.eh_frame.*)
+    } > RAM
+
+    .eh_frame_hdr : ALIGN(8)
+    {
+        *(.eh_frame_hdr)
+    } > RAM
+
+    /*
+     * Initialized data
+     */
+    .data : ALIGN(4096)
+    {
+        _data_start = .;
+
+        *(.data)
+        *(.data.*)
+        *(.gnu.linkonce.d.*)
+
+        /* Small data (for GP-relative addressing) */
+        *(.sdata)
+        *(.sdata.*)
+
+        _data_end = .;
+    } > RAM
+
+    /*
+     * Uninitialized data (BSS)
+     */
+    .bss : ALIGN(4096)
+    {
+        _bss_start = .;
+
+        *(.bss)
+        *(.bss.*)
+        *(.gnu.linkonce.b.*)
+        *(.sbss)
+        *(.sbss.*)
+        *(COMMON)
+
+        _bss_end = .;
+    } > RAM
+
+    /*
+     * RTEMS workspace and heap
+     * These are managed by RTEMS, we just reserve space
+     */
+    .rtemswork (NOLOAD) : ALIGN(4096)
+    {
+        _rtemswork_start = .;
+        . += 16M;  /* 16 MB workspace */
+        _rtemswork_end = .;
+    } > RAM
+
+    .heap (NOLOAD) : ALIGN(4096)
+    {
+        _heap_start = .;
+        . += 64M;  /* 64 MB heap */
+        _heap_end = .;
+    } > RAM
+
+    /*
+     * End of used memory
+     */
+    _end = .;
+    PROVIDE(end = .);
+
+    /*
+     * Stack (in separate region, grows down)
+     */
+    .stack (NOLOAD) : ALIGN(4096)
+    {
+        _stack_bottom = .;
+        . += _stack_size;
+        _stack_end = .;
+    } > STACK
+
+    /*
+     * Debug sections (not loaded)
+     */
+    .debug_info     0 : { *(.debug_info) }
+    .debug_abbrev   0 : { *(.debug_abbrev) }
+    .debug_line     0 : { *(.debug_line) }
+    .debug_frame    0 : { *(.debug_frame) }
+    .debug_str      0 : { *(.debug_str) }
+    .debug_loc      0 : { *(.debug_loc) }
+    .debug_ranges   0 : { *(.debug_ranges) }
+
+    /*
+     * Discard sections we don't need
+     */
+    /DISCARD/ :
+    {
+        *(.comment)
+        *(.note.*)
+    }
+}
+
+/*
+ * Symbols for RTEMS/Newlib
+ */
+PROVIDE(_bss_size = _bss_end - _bss_start);
+PROVIDE(_data_size = _data_end - _data_start);
+PROVIDE(_text_size = _text_end - _text_start);
+
+/* For RTEMS configuration */
+PROVIDE(RamBase = ORIGIN(RAM));
+PROVIDE(RamSize = LENGTH(RAM));
+PROVIDE(WorkAreaBase = _rtemswork_start);
+PROVIDE(HeapSize = _heap_end - _heap_start);

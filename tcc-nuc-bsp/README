@@ -1,0 +1,93 @@
+TCC-NUC-BSP: TCC Board Support Package for Intel NUC RTEMS
+==========================================================
+
+A 32-bit i386 BSP enabling TCC (Tiny C Compiler) to cross-compile
+applications for the 60-node Intel NUC HWIL cluster running RTEMS.
+
+Target Architecture
+-------------------
+  - CPU: Intel i386 (32-bit mode)
+  - OS: RTEMS 7
+  - BSP: pc686
+  - Application: HWIL-SBI 240 Hz real-time console
+
+Why 32-bit?
+-----------
+TCC's 32-bit x86 backend is more mature and well-tested than 64-bit.
+For the HWIL-SBI application (80-byte telemetry frames, 60 nodes,
+240 Hz), 32-bit addressing is sufficient and gives us a more
+reliable compilation path.
+
+Files
+-----
+  build/crt0.o      - C runtime startup (calls Init)
+  build/crti.o      - Init section prologue
+  build/crtn.o      - Init section epilogue
+  build/libsyscalls.a - Syscall stubs for RTEMS
+  linkcmds.nuc      - Linker script (32-bit memory layout)
+  config.h          - Target configuration
+  include/tcc_nuc.h - HWIL helper definitions
+
+Building
+--------
+  make              # Build CRT and syscalls
+  make install      # Install to TCC lib directory
+
+Requirements
+------------
+For full RTEMS builds, you need i386-rtems7 toolchain:
+
+  ../rtems-source-builder/source-builder/sb-set-builder \
+      --prefix=$HOME/projects/hwil/rtems/7 \
+      7/rtems-i386
+
+Usage Example
+-------------
+Compile a simple RTEMS application:
+
+  tcc -m32 -nostdlib -nostdinc \
+      -I/path/to/i386-rtems7/include \
+      -L/path/to/tcc-nuc-bsp/build \
+      build/crt0.o \
+      myapp.c \
+      -Tlinkcmds.nuc \
+      -lsyscalls -lc -lm
+
+Or use the wrapper script:
+
+  ./build/tcc-nuc myapp.c -o myapp
+
+Memory Layout (linkcmds.nuc)
+----------------------------
+  RAM:   0x00100000 - 0x20000000 (511 MB)
+  STACK: 0x1FF00000 - 0x20000000 (1 MB, grows down)
+
+  Sections:
+    .text      - Code and read-only data
+    .ctors     - Constructor table
+    .dtors     - Destructor table
+    .data      - Initialized data
+    .bss       - Uninitialized data
+    .rtemswork - RTEMS workspace (16 MB)
+    .heap      - Heap space (64 MB)
+    .stack     - Stack (64 KB default)
+
+HWIL Integration
+----------------
+Include <tcc_nuc.h> for HWIL-specific definitions:
+
+  - HWIL_NODE_COUNT (60)
+  - HWIL_FRAME_RATE_HZ (240)
+  - hwil_telemetry_t (80-byte packed struct)
+  - hwil_clock_ns() - Nanosecond timing
+
+Entry Point
+-----------
+Your application must define Init():
+
+  void Init(rtems_task_argument arg) {
+      // Your RTEMS application starts here
+  }
+
+The CRT calls global constructors, then Init(), then global
+destructors, then rtems_task_delete(RTEMS_SELF).
