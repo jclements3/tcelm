@@ -1,0 +1,32 @@
+# Elm build artifacts
+elm-stuff/
+*.js
+!bin/tcelm-compile.js
+
+# C build artifacts
+*.o
+*.a
+*.exe
+*.elf
+
+# Test artifacts
+/tmp/tcelm_*
+tests/unit/runtime/test_types
+tests/unit/runtime/test_list
+tests/unit/runtime/test_string
+tests/fixtures/
+
+# Runtime test executables
+runtime/test_runtime
+runtime/test_rtems
+runtime/test_shell_ops
+runtime/test_runtime_tcc
+runtime/test_rtems_tcc
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Build directories
+build/

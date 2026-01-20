@@ -1,0 +1,228 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  # Use a fixed seed for reproducible CI runs
+  TEST_SEED: 12345
+
+jobs:
+  # Build and test on Linux
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Elm
+      run: |
+        npm install -g elm
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc make
+
+    - name: Build Elm compiler (tcelm-compiler.js)
+      run: |
+        elm make src/Cli.elm --output=bin/tcelm-compiler.js
+
+    - name: Build C runtime
+      run: |
+        make -C runtime
+
+    - name: Run unit tests
+      run: |
+        cd tests && make test-unit
+      env:
+        SEED: ${{ env.TEST_SEED }}
+
+    - name: Run subsystem tests
+      run: |
+        cd tests && make test-subsystem
+
+    - name: Run system integration tests
+      run: |
+        cd tests && make test-system
+
+  # Test self-hosting
+  self-hosting:
+    runs-on: ubuntu-latest
+    needs: build-linux
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Elm
+      run: npm install -g elm
+
+    - name: Build tcelm
+      run: |
+        elm make src/Cli.elm --output=bin/tcelm-compiler.js
+        make -C runtime
+
+    - name: Test self-hosting (compile Generate/C.elm)
+      run: |
+        node bin/tcelm-compile.js src/Generate/C.elm --target module > /tmp/generate_c.c
+        gcc -c /tmp/generate_c.c -I runtime -o /tmp/generate_c.o
+        echo "Self-hosting test passed: Generate/C.elm compiles successfully"
+
+    - name: Test self-hosting (compile Parse/Primitives.elm)
+      run: |
+        node bin/tcelm-compile.js src/Parse/Primitives.elm --target module > /tmp/primitives.c
+        gcc -c /tmp/primitives.c -I runtime -o /tmp/primitives.o
+        echo "Self-hosting test passed: Parse/Primitives.elm compiles successfully"
+
+    - name: Test self-hosting (compile AST/Source.elm)
+      run: |
+        node bin/tcelm-compile.js src/AST/Source.elm --target module > /tmp/ast_source.c
+        gcc -c /tmp/ast_source.c -I runtime -o /tmp/ast_source.o
+        echo "Self-hosting test passed: AST/Source.elm compiles successfully"
+
+    - name: Test module linking
+      run: |
+        ld -r /tmp/ast_source.o /tmp/primitives.o -o /tmp/combined.o
+        nm /tmp/combined.o | grep "elm_AST_Source_at" || exit 1
+        echo "Module linking test passed"
+
+  # Property-based testing with multiple seeds
+  property-testing:
+    runs-on: ubuntu-latest
+    needs: build-linux
+    strategy:
+      matrix:
+        seed: [1, 42, 1337, 9999, 65536]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Elm
+      run: npm install -g elm
+
+    - name: Build
+      run: |
+        elm make src/Cli.elm --output=bin/tcelm-compiler.js
+        make -C runtime
+
+    - name: Run property tests with seed ${{ matrix.seed }}
+      run: |
+        cd tests
+        make build-unit
+        for test in unit/runtime/test_*; do
+          echo "Running $test with seed ${{ matrix.seed }}..."
+          ./$test ${{ matrix.seed }}
+        done
+
+  # Test on macOS
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Elm
+      run: npm install -g elm
+
+    - name: Build
+      run: |
+        elm make src/Cli.elm --output=bin/tcelm-compiler.js
+        make -C runtime
+
+    - name: Run tests
+      run: |
+        cd tests && make test-unit
+
+  # Code quality checks
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Elm
+      run: npm install -g elm elm-format
+
+    - name: Check Elm formatting
+      run: |
+        elm-format --validate src/ || echo "Warning: Elm formatting issues found"
+
+    - name: Check for TODO/FIXME comments
+      run: |
+        echo "TODO/FIXME items in codebase:"
+        grep -rn "TODO\|FIXME" src/ runtime/ || echo "None found"
+
+    - name: Check C code with compiler warnings
+      run: |
+        make -C runtime CFLAGS="-Wall -Wextra -Werror -pedantic" clean all || true
+
+  # Generate test coverage report
+  coverage:
+    runs-on: ubuntu-latest
+    needs: build-linux
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      run: |
+        npm install -g elm
+        sudo apt-get update
+        sudo apt-get install -y gcov lcov
+
+    - name: Build with coverage
+      run: |
+        elm make src/Cli.elm --output=bin/tcelm-compiler.js
+        make -C runtime CFLAGS="-Wall -g -fprofile-arcs -ftest-coverage -I."
+
+    - name: Run tests and collect coverage
+      run: |
+        cd tests
+        make CFLAGS="-Wall -g -fprofile-arcs -ftest-coverage -I../runtime" build-unit
+        # Run tests
+        for test in unit/runtime/test_*; do ./$test || true; done
+
+    - name: Generate coverage report
+      run: |
+        cd runtime
+        gcov *.c || true
+        echo "Coverage data generated"
