@@ -77,8 +77,14 @@ extract_c_result() {
 
     # Int result - compile and run to evaluate
     # Extract user-defined functions and elm_main
+    local ctor_defines=""
     local user_funcs=""
     local elm_main_func=""
+
+    # Extract custom type constructor defines if present
+    if grep -q '/\* Custom type constructors \*/' "$c_file" 2>/dev/null; then
+        ctor_defines=$(sed -n '/^\/\* Custom type constructors \*\//,/^$/p' "$c_file" 2>/dev/null)
+    fi
 
     # Extract user-defined functions if present
     if grep -q '/\* User-defined functions \*/' "$c_file" 2>/dev/null; then
@@ -96,6 +102,7 @@ extract_c_result() {
     # Create test program
     cat > "$test_prog" << EOF
 #include <stdio.h>
+$ctor_defines
 $user_funcs
 $elm_main_func
 int main(void) {

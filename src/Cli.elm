@@ -137,6 +137,32 @@ generateRtemsCode ast =
                     )
                 |> String.join "\n\n"
 
+        -- Generate constructor defines for custom types (enums)
+        constructorDefines =
+            ast.unions
+                |> List.concatMap
+                    (\(Src.At _ union) ->
+                        union.ctors
+                            |> List.indexedMap
+                                (\i ( Src.At _ ctorName, ctorArgs ) ->
+                                    if List.isEmpty ctorArgs then
+                                        -- Simple enum constructor
+                                        "#define elm_" ++ ctorName ++ " " ++ String.fromInt i
+
+                                    else
+                                        -- Constructor with data - not supported yet
+                                        "/* " ++ ctorName ++ " has data - not supported */"
+                                )
+                    )
+                |> String.join "\n"
+
+        constructorDefinesCode =
+            if String.isEmpty constructorDefines then
+                ""
+
+            else
+                "/* Custom type constructors */\n" ++ constructorDefines ++ "\n\n"
+
         -- Collect and generate lifted local functions from all values
         liftedFunctions =
             ast.values
@@ -275,7 +301,7 @@ generateRtemsCode ast =
                 , "/* Include framebuffer support */"
                 , "#include \"framebuffer.h\""
                 , ""
-                , liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */"
+                , constructorDefinesCode ++ liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */"
                 , codeGen.elmMainFunc
                 , ""
                 , "/* RTEMS Init task */"
@@ -1152,7 +1178,7 @@ generateStandaloneCase scrutinee branches =
                                 ++ ";\n        })"
 
                         Src.PCtor _ ctorName _ ->
-                            -- Constructor pattern (True/False for bools)
+                            -- Constructor pattern
                             case ctorName of
                                 "True" ->
                                     "(elm_case_scrutinee ? "
@@ -1169,7 +1195,14 @@ generateStandaloneCase scrutinee branches =
                                         ++ ")"
 
                                 _ ->
-                                    "/* unsupported ctor " ++ ctorName ++ " */ " ++ generateBranches rest
+                                    -- Custom constructor - compare against defined constant
+                                    "(elm_case_scrutinee == elm_"
+                                        ++ ctorName
+                                        ++ " ? "
+                                        ++ generateStandaloneExpr resultExpr
+                                        ++ " : "
+                                        ++ generateBranches rest
+                                        ++ ")"
 
                         _ ->
                             "/* unsupported pattern */ " ++ generateBranches rest
@@ -1254,7 +1287,16 @@ generateStandaloneCase scrutinee branches =
                                             ++ ")"
 
                                     _ ->
-                                        "/* unsupported ctor " ++ ctorName ++ " */ " ++ generateSimpleBranches rest
+                                        -- Custom constructor - compare against defined constant
+                                        "("
+                                            ++ inlineScrutinee
+                                            ++ " == elm_"
+                                            ++ ctorName
+                                            ++ " ? "
+                                            ++ generateStandaloneExpr resultExpr
+                                            ++ " : "
+                                            ++ generateSimpleBranches rest
+                                            ++ ")"
 
                             Src.PTuple first second restPats ->
                                 -- Tuple pattern - destructure and bind variables
