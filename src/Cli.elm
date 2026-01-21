@@ -1418,6 +1418,56 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Char.fromCode wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Char" "isDigit") ->
+            -- Char.isDigit c = True if c is 0-9
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "(" ++ cStr ++ " >= '0' && " ++ cStr ++ " <= '9')"
+
+                _ ->
+                    "/* Char.isDigit wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "isAlpha") ->
+            -- Char.isAlpha c = True if c is a-z or A-Z
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= 'a' && " ++ cStr ++ " <= 'z') || (" ++ cStr ++ " >= 'A' && " ++ cStr ++ " <= 'Z'))"
+
+                _ ->
+                    "/* Char.isAlpha wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "isUpper") ->
+            -- Char.isUpper c = True if c is A-Z
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "(" ++ cStr ++ " >= 'A' && " ++ cStr ++ " <= 'Z')"
+
+                _ ->
+                    "/* Char.isUpper wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "isLower") ->
+            -- Char.isLower c = True if c is a-z
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "(" ++ cStr ++ " >= 'a' && " ++ cStr ++ " <= 'z')"
+
+                _ ->
+                    "/* Char.isLower wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "isAlphaNum") ->
+            -- Char.isAlphaNum c = True if c is alphanumeric
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= 'a' && " ++ cStr ++ " <= 'z') || (" ++ cStr ++ " >= 'A' && " ++ cStr ++ " <= 'Z') || (" ++ cStr ++ " >= '0' && " ++ cStr ++ " <= '9'))"
+
+                _ ->
+                    "/* Char.isAlphaNum wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "String" "length") ->
             -- String.length s = number of characters in s
             case args of
