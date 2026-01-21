@@ -352,6 +352,14 @@ generateRtemsCode ast =
                 , "    }"
                 , "}"
                 , ""
+                , "/* Integer log base 2 (floor) */"
+                , "static int elm_ilog2(int x) {"
+                , "    if (x <= 0) return 0;"
+                , "    int r = 0;"
+                , "    while (x > 1) { x >>= 1; r++; }"
+                , "    return r;"
+                , "}"
+                , ""
                 , "/* Generic tagged union type for custom types */"
                 , "typedef struct { int tag; int data; } elm_union_t;"
                 , ""
@@ -1741,6 +1749,26 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Char.toLower wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Char" "toLocaleUpper") ->
+            -- Char.toLocaleUpper c = uppercase (same as toUpper for ASCII)
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= 'a' && " ++ cStr ++ " <= 'z') ? " ++ cStr ++ " - 32 : " ++ cStr ++ ")"
+
+                _ ->
+                    "/* Char.toLocaleUpper wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "toLocaleLower") ->
+            -- Char.toLocaleLower c = lowercase (same as toLower for ASCII)
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= 'A' && " ++ cStr ++ " <= 'Z') ? " ++ cStr ++ " + 32 : " ++ cStr ++ ")"
+
+                _ ->
+                    "/* Char.toLocaleLower wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "String" "fromChar") ->
             -- String.fromChar c = single-character string
             case args of
@@ -2257,6 +2285,19 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* sqrt wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "logBase") ->
+            -- logBase base x = log of x to given base (integer approximation)
+            case args of
+                [ base, x ] ->
+                    let
+                        baseStr = generateStandaloneExpr base
+                        xStr = generateStandaloneExpr x
+                    in
+                    "({ int __b = " ++ baseStr ++ ", __x = " ++ xStr ++ ", __r = 0; if (__b > 1 && __x > 0) { while (__x >= __b) { __x /= __b; __r++; } } __r; })"
+
+                _ ->
+                    "/* logBase wrong arity */ 0"
 
         Src.At _ (Src.Var _ "toFloat") ->
             -- toFloat n = convert int to float

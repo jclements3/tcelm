@@ -158,6 +158,13 @@ static int elm_isqrt(int x) {
         guess = next;
     }
 }
+/* Integer log base 2 (floor) */
+static int elm_ilog2(int x) {
+    if (x <= 0) return 0;
+    int r = 0;
+    while (x > 1) { x >>= 1; r++; }
+    return r;
+}
 /* String.fromInt - convert int to string */
 static char __elm_fromint_buf[32];
 static const char *elm_from_int(int n) {
