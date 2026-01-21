@@ -219,6 +219,13 @@ generateRtemsCode ast =
                 , "    return (unsigned char)*a - (unsigned char)*b;"
                 , "}"
                 , ""
+                , "/* Memory operations (needed for struct initialization) */"
+                , "static void *memset(void *s, int c, unsigned int n) {"
+                , "    unsigned char *p = s;"
+                , "    while (n--) *p++ = (unsigned char)c;"
+                , "    return s;"
+                , "}"
+                , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
                 , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
@@ -657,6 +664,25 @@ generateStandaloneExpr (Src.At _ expr) =
         Src.Case scrutinee branches ->
             generateStandaloneCase scrutinee branches
 
+        Src.Tuple first second rest ->
+            -- Generate tuple as compound struct literal
+            let
+                elements =
+                    first :: second :: rest
+
+                numElements =
+                    List.length elements
+
+                structFields =
+                    List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements
+                        |> String.join "; "
+
+                values =
+                    List.map generateStandaloneExpr elements
+                        |> String.join ", "
+            in
+            "((struct { " ++ structFields ++ "; }){" ++ values ++ "})"
+
         _ ->
             "/* unsupported expr */ 0"
 
@@ -982,6 +1008,38 @@ generateStandaloneCase scrutinee branches =
                                 ++ generateBranches rest
                                 ++ ")"
 
+                        Src.PTuple first second restPats ->
+                            -- Tuple pattern - destructure and bind variables
+                            let
+                                allPats =
+                                    first :: second :: restPats
+
+                                bindings =
+                                    allPats
+                                        |> List.indexedMap
+                                            (\i (Src.At _ pat) ->
+                                                case pat of
+                                                    Src.PVar varName ->
+                                                        "int elm_" ++ varName ++ " = elm_case_scrutinee._" ++ String.fromInt i ++ ";"
+
+                                                    Src.PAnything ->
+                                                        ""
+
+                                                    _ ->
+                                                        "/* unsupported tuple element pattern */"
+                                            )
+                                        |> List.filter (not << String.isEmpty)
+                                        |> String.join "\n            "
+
+                                bodyStr =
+                                    generateStandaloneExpr resultExpr
+                            in
+                            "({\n            "
+                                ++ bindings
+                                ++ "\n            "
+                                ++ bodyStr
+                                ++ ";\n        })"
+
                         Src.PCtor _ ctorName _ ->
                             -- Constructor pattern (True/False for bools)
                             case ctorName of
@@ -1086,6 +1144,38 @@ generateStandaloneCase scrutinee branches =
 
                                     _ ->
                                         "/* unsupported ctor " ++ ctorName ++ " */ " ++ generateSimpleBranches rest
+
+                            Src.PTuple first second restPats ->
+                                -- Tuple pattern - destructure and bind variables
+                                let
+                                    allPats =
+                                        first :: second :: restPats
+
+                                    bindings =
+                                        allPats
+                                            |> List.indexedMap
+                                                (\i (Src.At _ pat) ->
+                                                    case pat of
+                                                        Src.PVar varName ->
+                                                            "int elm_" ++ varName ++ " = " ++ inlineScrutinee ++ "._" ++ String.fromInt i ++ ";"
+
+                                                        Src.PAnything ->
+                                                            ""
+
+                                                        _ ->
+                                                            "/* unsupported tuple element pattern */"
+                                                )
+                                            |> List.filter (not << String.isEmpty)
+                                            |> String.join "\n            "
+
+                                    bodyStr =
+                                        generateStandaloneExpr resultExpr
+                                in
+                                "({\n            "
+                                    ++ bindings
+                                    ++ "\n            "
+                                    ++ bodyStr
+                                    ++ ";\n        })"
 
                             _ ->
                                 "/* unsupported pattern */ " ++ generateSimpleBranches rest
