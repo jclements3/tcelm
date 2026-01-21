@@ -1553,6 +1553,32 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* String.slice wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "String" "dropLeft") ->
+            -- String.dropLeft n s = drop first n characters
+            case args of
+                [ n, s ] ->
+                    let
+                        sStr = generateStandaloneExpr s
+                        nStr = generateStandaloneExpr n
+                    in
+                    "elm_str_slice(" ++ nStr ++ ", elm_strlen(" ++ sStr ++ "), " ++ sStr ++ ")"
+
+                _ ->
+                    "/* String.dropLeft wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "dropRight") ->
+            -- String.dropRight n s = drop last n characters
+            case args of
+                [ n, s ] ->
+                    let
+                        sStr = generateStandaloneExpr s
+                        nStr = generateStandaloneExpr n
+                    in
+                    "elm_str_slice(0, elm_strlen(" ++ sStr ++ ") - " ++ nStr ++ ", " ++ sStr ++ ")"
+
+                _ ->
+                    "/* String.dropRight wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
             case args of
