@@ -341,6 +341,17 @@ generateRtemsCode ast =
                 , "    return dest;"
                 , "}"
                 , ""
+                , "/* Integer square root using Newton-Raphson */"
+                , "static int elm_isqrt(int x) {"
+                , "    if (x <= 0) return 0;"
+                , "    int guess = x;"
+                , "    while (1) {"
+                , "        int next = (guess + x / guess) / 2;"
+                , "        if (next >= guess) return guess;"
+                , "        guess = next;"
+                , "    }"
+                , "}"
+                , ""
                 , "/* Generic tagged union type for custom types */"
                 , "typedef struct { int tag; int data; } elm_union_t;"
                 , ""
@@ -359,6 +370,16 @@ generateRtemsCode ast =
                 , "    __elm_fromchar_buf[0] = c;"
                 , "    __elm_fromchar_buf[1] = 0;"
                 , "    return __elm_fromchar_buf;"
+                , "}"
+                , ""
+                , "/* String.cons - prepend char to string */"
+                , "static char __elm_cons_buf[256];"
+                , "static const char *elm_str_cons(char c, const char *s) {"
+                , "    __elm_cons_buf[0] = c;"
+                , "    int i = 0;"
+                , "    while (s[i] && i < 254) { __elm_cons_buf[i+1] = s[i]; i++; }"
+                , "    __elm_cons_buf[i+1] = 0;"
+                , "    return __elm_cons_buf;"
                 , "}"
                 , ""
                 , "/* String.left - take first n characters */"
@@ -380,6 +401,16 @@ generateRtemsCode ast =
                 , "    for (int i = start; i < len; i++) __elm_right_buf[j++] = s[i];"
                 , "    __elm_right_buf[j] = 0;"
                 , "    return __elm_right_buf;"
+                , "}"
+                , ""
+                , "/* String.append - concatenate two strings */"
+                , "static char __elm_append_buf[512];"
+                , "static const char *elm_str_append(const char *a, const char *b) {"
+                , "    int i = 0, j = 0;"
+                , "    while (a[i] && i < 255) { __elm_append_buf[i] = a[i]; i++; }"
+                , "    while (b[j] && i + j < 511) { __elm_append_buf[i + j] = b[j]; j++; }"
+                , "    __elm_append_buf[i + j] = 0;"
+                , "    return __elm_append_buf;"
                 , "}"
                 , ""
                 , "/* String.repeat - repeat string n times */"
@@ -439,6 +470,30 @@ generateRtemsCode ast =
                 , "    }"
                 , "    __elm_tolower_buf[i] = 0;"
                 , "    return __elm_tolower_buf;"
+                , "}"
+                , ""
+                , "/* String.padLeft - pad string on the left with char */"
+                , "static char __elm_padleft_buf[256];"
+                , "static const char *elm_str_pad_left(int n, char c, const char *s) {"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    int pad = n - len; if (pad < 0) pad = 0;"
+                , "    if (pad + len > 255) pad = 255 - len;"
+                , "    for (int i = 0; i < pad; i++) __elm_padleft_buf[i] = c;"
+                , "    for (int i = 0; i < len; i++) __elm_padleft_buf[pad + i] = s[i];"
+                , "    __elm_padleft_buf[pad + len] = 0;"
+                , "    return __elm_padleft_buf;"
+                , "}"
+                , ""
+                , "/* String.padRight - pad string on the right with char */"
+                , "static char __elm_padright_buf[256];"
+                , "static const char *elm_str_pad_right(int n, char c, const char *s) {"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    int pad = n - len; if (pad < 0) pad = 0;"
+                , "    if (len + pad > 255) pad = 255 - len;"
+                , "    for (int i = 0; i < len; i++) __elm_padright_buf[i] = s[i];"
+                , "    for (int i = 0; i < pad; i++) __elm_padright_buf[len + i] = c;"
+                , "    __elm_padright_buf[len + pad] = 0;"
+                , "    return __elm_padright_buf;"
                 , "}"
                 , ""
                 , "/* String.startsWith - check if string starts with prefix */"
@@ -1476,6 +1531,26 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Char.isAlphaNum wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Char" "isHexDigit") ->
+            -- Char.isHexDigit c = True if c is 0-9, a-f, or A-F
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= '0' && " ++ cStr ++ " <= '9') || (" ++ cStr ++ " >= 'a' && " ++ cStr ++ " <= 'f') || (" ++ cStr ++ " >= 'A' && " ++ cStr ++ " <= 'F'))"
+
+                _ ->
+                    "/* Char.isHexDigit wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "isOctDigit") ->
+            -- Char.isOctDigit c = True if c is 0-7
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "(" ++ cStr ++ " >= '0' && " ++ cStr ++ " <= '7')"
+
+                _ ->
+                    "/* Char.isOctDigit wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "Char" "toUpper") ->
             -- Char.toUpper c = uppercase version of c
             case args of
@@ -1504,6 +1579,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.fromChar wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "cons") ->
+            -- String.cons c s = prepend char c to string s
+            case args of
+                [ c, s ] ->
+                    "elm_str_cons(" ++ generateStandaloneExpr c ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.cons wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "length") ->
             -- String.length s = number of characters in s
@@ -1567,6 +1651,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.right wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "append") ->
+            -- String.append a b = concatenate a and b
+            case args of
+                [ a, b ] ->
+                    "elm_str_append(" ++ generateStandaloneExpr a ++ ", " ++ generateStandaloneExpr b ++ ")"
+
+                _ ->
+                    "/* String.append wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "contains") ->
             -- String.contains needle haystack = True if needle in haystack
@@ -1665,6 +1758,24 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.dropRight wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "padLeft") ->
+            -- String.padLeft n char s = pad s on the left with char to length n
+            case args of
+                [ n, c, s ] ->
+                    "elm_str_pad_left(" ++ generateStandaloneExpr n ++ ", " ++ generateStandaloneExpr c ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.padLeft wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "padRight") ->
+            -- String.padRight n char s = pad s on the right with char to length n
+            case args of
+                [ n, c, s ] ->
+                    "elm_str_pad_right(" ++ generateStandaloneExpr n ++ ", " ++ generateStandaloneExpr c ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.padRight wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
@@ -1770,6 +1881,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* truncate wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "sqrt") ->
+            -- sqrt x = square root of x (integer approximation)
+            case args of
+                [ x ] ->
+                    "elm_isqrt((int)" ++ generateStandaloneExpr x ++ ")"
+
+                _ ->
+                    "/* sqrt wrong arity */ 0"
 
         Src.At _ (Src.Var _ "toFloat") ->
             -- toFloat n = convert int to float

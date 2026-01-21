@@ -117,6 +117,15 @@ static const char *elm_str_from_char(char c) {
     __elm_fromchar_buf[1] = 0;
     return __elm_fromchar_buf;
 }
+/* String.cons - prepend char to string */
+static char __elm_cons_buf[256];
+static const char *elm_str_cons(char c, const char *s) {
+    __elm_cons_buf[0] = c;
+    int i = 0;
+    while (s[i] && i < 254) { __elm_cons_buf[i+1] = s[i]; i++; }
+    __elm_cons_buf[i+1] = 0;
+    return __elm_cons_buf;
+}
 /* String length function */
 static int elm_strlen(const char *s) {
     int len = 0;
@@ -132,6 +141,16 @@ static int elm_pow(int base, int exp) {
         base *= base;
     }
     return result;
+}
+/* Integer square root using Newton-Raphson */
+static int elm_isqrt(int x) {
+    if (x <= 0) return 0;
+    int guess = x;
+    while (1) {
+        int next = (guess + x / guess) / 2;
+        if (next >= guess) return guess;
+        guess = next;
+    }
 }
 /* String.fromInt - convert int to string */
 static char __elm_fromint_buf[32];
@@ -174,6 +193,15 @@ static const char *elm_str_right(int n, const char *s) {
     for (int i = start; i < len; i++) __elm_right_buf[j++] = s[i];
     __elm_right_buf[j] = 0;
     return __elm_right_buf;
+}
+/* String.append - concatenate two strings */
+static char __elm_append_buf[512];
+static const char *elm_str_append(const char *a, const char *b) {
+    int i = 0, j = 0;
+    while (a[i] && i < 255) { __elm_append_buf[i] = a[i]; i++; }
+    while (b[j] && i + j < 511) { __elm_append_buf[i + j] = b[j]; j++; }
+    __elm_append_buf[i + j] = 0;
+    return __elm_append_buf;
 }
 /* String.repeat - repeat string n times */
 static char __elm_repeat_buf[256];
@@ -228,6 +256,28 @@ static const char *elm_str_to_lower(const char *s) {
     }
     __elm_tolower_buf[i] = 0;
     return __elm_tolower_buf;
+}
+/* String.padLeft - pad string on the left with char */
+static char __elm_padleft_buf[256];
+static const char *elm_str_pad_left(int n, char c, const char *s) {
+    int len = 0; while (s[len]) len++;
+    int pad = n - len; if (pad < 0) pad = 0;
+    if (pad + len > 255) pad = 255 - len;
+    for (int i = 0; i < pad; i++) __elm_padleft_buf[i] = c;
+    for (int i = 0; i < len; i++) __elm_padleft_buf[pad + i] = s[i];
+    __elm_padleft_buf[pad + len] = 0;
+    return __elm_padleft_buf;
+}
+/* String.padRight - pad string on the right with char */
+static char __elm_padright_buf[256];
+static const char *elm_str_pad_right(int n, char c, const char *s) {
+    int len = 0; while (s[len]) len++;
+    int pad = n - len; if (pad < 0) pad = 0;
+    if (len + pad > 255) pad = 255 - len;
+    for (int i = 0; i < len; i++) __elm_padright_buf[i] = s[i];
+    for (int i = 0; i < pad; i++) __elm_padright_buf[len + i] = c;
+    __elm_padright_buf[len + pad] = 0;
+    return __elm_padright_buf;
 }
 /* String.startsWith - check if string starts with prefix */
 static int elm_str_starts_with(const char *prefix, const char *s) {
