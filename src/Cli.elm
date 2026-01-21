@@ -1078,6 +1078,47 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* max wrong arity */ 0"
 
+        Src.At _ (Src.Var _ "identity") ->
+            -- identity x = x
+            case args of
+                [ value ] ->
+                    generateStandaloneExpr value
+
+                _ ->
+                    "/* identity wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "always") ->
+            -- always x y = x (returns first arg, ignores second)
+            case args of
+                [ value, _ ] ->
+                    generateStandaloneExpr value
+
+                _ ->
+                    "/* always wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "not") ->
+            -- not x = boolean negation
+            case args of
+                [ value ] ->
+                    "(!" ++ generateStandaloneExpr value ++ ")"
+
+                _ ->
+                    "/* not wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "clamp") ->
+            -- clamp low high value = value clamped to [low, high]
+            case args of
+                [ low, high, value ] ->
+                    let
+                        lowStr = generateStandaloneExpr low
+                        highStr = generateStandaloneExpr high
+                        valStr = generateStandaloneExpr value
+                    in
+                    "((" ++ valStr ++ " < " ++ lowStr ++ ") ? " ++ lowStr ++ " : ((" ++ valStr ++ " > " ++ highStr ++ ") ? " ++ highStr ++ " : " ++ valStr ++ "))"
+
+                _ ->
+                    "/* clamp wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
