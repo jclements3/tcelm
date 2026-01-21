@@ -1018,19 +1018,81 @@ generateStandaloneExpr (Src.At _ expr) =
 -}
 generateStandaloneCall : Src.Expr -> List Src.Expr -> String
 generateStandaloneCall fn args =
-    let
-        fnName =
-            case fn of
-                Src.At _ (Src.Var _ name) ->
-                    "elm_" ++ name
+    -- Handle built-in functions
+    case fn of
+        Src.At _ (Src.Var _ "modBy") ->
+            -- modBy divisor dividend = dividend % divisor (positive result)
+            case args of
+                [ divisor, dividend ] ->
+                    "((" ++ generateStandaloneExpr dividend ++ " % " ++ generateStandaloneExpr divisor ++ " + " ++ generateStandaloneExpr divisor ++ ") % " ++ generateStandaloneExpr divisor ++ ")"
+
+                [ divisor ] ->
+                    -- Partial application - generate a comment placeholder
+                    "/* partial modBy */ 0"
 
                 _ ->
-                    "/* complex fn */" ++ generateStandaloneExpr fn
+                    "/* modBy wrong arity */ 0"
 
-        argStrs =
-            List.map generateStandaloneExpr args
-    in
-    fnName ++ "(" ++ String.join ", " argStrs ++ ")"
+        Src.At _ (Src.Var _ "remainderBy") ->
+            -- remainderBy divisor dividend = dividend % divisor (can be negative)
+            case args of
+                [ divisor, dividend ] ->
+                    "(" ++ generateStandaloneExpr dividend ++ " % " ++ generateStandaloneExpr divisor ++ ")"
+
+                _ ->
+                    "/* remainderBy wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "abs") ->
+            -- abs value = absolute value
+            case args of
+                [ value ] ->
+                    "((" ++ generateStandaloneExpr value ++ " < 0) ? -(" ++ generateStandaloneExpr value ++ ") : (" ++ generateStandaloneExpr value ++ "))"
+
+                _ ->
+                    "/* abs wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "negate") ->
+            -- negate value = -value
+            case args of
+                [ value ] ->
+                    "(-" ++ generateStandaloneExpr value ++ ")"
+
+                _ ->
+                    "/* negate wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "min") ->
+            -- min a b = smaller of a and b
+            case args of
+                [ a, b ] ->
+                    "((" ++ generateStandaloneExpr a ++ " < " ++ generateStandaloneExpr b ++ ") ? (" ++ generateStandaloneExpr a ++ ") : (" ++ generateStandaloneExpr b ++ "))"
+
+                _ ->
+                    "/* min wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "max") ->
+            -- max a b = larger of a and b
+            case args of
+                [ a, b ] ->
+                    "((" ++ generateStandaloneExpr a ++ " > " ++ generateStandaloneExpr b ++ ") ? (" ++ generateStandaloneExpr a ++ ") : (" ++ generateStandaloneExpr b ++ "))"
+
+                _ ->
+                    "/* max wrong arity */ 0"
+
+        _ ->
+            -- Regular function call
+            let
+                fnName =
+                    case fn of
+                        Src.At _ (Src.Var _ name) ->
+                            "elm_" ++ name
+
+                        _ ->
+                            "/* complex fn */" ++ generateStandaloneExpr fn
+
+                argStrs =
+                    List.map generateStandaloneExpr args
+            in
+            fnName ++ "(" ++ String.join ", " argStrs ++ ")"
 
 
 {-| Generate inlined lambda - substitute args for parameters and evaluate body
