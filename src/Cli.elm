@@ -1321,6 +1321,33 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* truncate wrong arity */ 0"
 
+        Src.At _ (Src.Var _ "toFloat") ->
+            -- toFloat n = convert int to float
+            case args of
+                [ n ] ->
+                    "((double)" ++ generateStandaloneExpr n ++ ")"
+
+                _ ->
+                    "/* toFloat wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "isEven") ->
+            -- isEven n = True if n is even
+            case args of
+                [ n ] ->
+                    "((" ++ generateStandaloneExpr n ++ " % 2) == 0)"
+
+                _ ->
+                    "/* isEven wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "isOdd") ->
+            -- isOdd n = True if n is odd
+            case args of
+                [ n ] ->
+                    "((" ++ generateStandaloneExpr n ++ " % 2) != 0)"
+
+                _ ->
+                    "/* isOdd wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
