@@ -2800,6 +2800,70 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.range wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "take") ->
+            -- List.take n list = first n elements
+            case args of
+                [ nExpr, listExpr ] ->
+                    let
+                        nStr = generateStandaloneExpr nExpr
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __n < __lst.length ? __n : __lst.length; if (__result.length < 0) __result.length = 0; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__i]; __result; })"
+
+                _ ->
+                    "/* List.take wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "drop") ->
+            -- List.drop n list = drop first n elements
+            case args of
+                [ nExpr, listExpr ] ->
+                    let
+                        nStr = generateStandaloneExpr nExpr
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; int __start = __n < __lst.length ? __n : __lst.length; if (__start < 0) __start = 0; __result.length = __lst.length - __start; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__start + __i]; __result; })"
+
+                _ ->
+                    "/* List.drop wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "append") ->
+            -- List.append listA listB = concatenate two lists
+            case args of
+                [ listAExpr, listBExpr ] ->
+                    let
+                        listAStr = generateStandaloneExpr listAExpr
+                        listBStr = generateStandaloneExpr listBExpr
+                    in
+                    "({ elm_list_t __a = " ++ listAStr ++ ", __b = " ++ listBStr ++ "; elm_list_t __result; __result.length = __a.length + __b.length; if (__result.length > ELM_LIST_MAX) __result.length = ELM_LIST_MAX; int __i; for (__i = 0; __i < __a.length && __i < __result.length; __i++) __result.data[__i] = __a.data[__i]; for (int __j = 0; __i < __result.length; __i++, __j++) __result.data[__i] = __b.data[__j]; __result; })"
+
+                _ ->
+                    "/* List.append wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "singleton") ->
+            -- List.singleton x = single-element list
+            case args of
+                [ elemExpr ] ->
+                    let
+                        elemStr = generateStandaloneExpr elemExpr
+                    in
+                    "((elm_list_t){ .length = 1, .data = { " ++ elemStr ++ " } })"
+
+                _ ->
+                    "/* List.singleton wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "repeat") ->
+            -- List.repeat n elem = list with n copies of elem
+            case args of
+                [ nExpr, elemExpr ] ->
+                    let
+                        nStr = generateStandaloneExpr nExpr
+                        elemStr = generateStandaloneExpr elemExpr
+                    in
+                    "({ int __n = " ++ nStr ++ ", __elem = " ++ elemStr ++ "; elm_list_t __lst; __lst.length = __n > 0 ? (__n > ELM_LIST_MAX ? ELM_LIST_MAX : __n) : 0; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i] = __elem; __lst; })"
+
+                _ ->
+                    "/* List.repeat wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
