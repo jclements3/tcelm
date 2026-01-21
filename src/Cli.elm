@@ -821,6 +821,62 @@ generateStandaloneExpr (Src.At _ expr) =
                     -- Inline immediately-called lambda
                     generateInlinedLambda patterns args lambdaBody
 
+                Src.At _ (Src.Binops pairs finalExpr) ->
+                    -- Check if this is function composition applied to an argument
+                    -- (f >> g) x becomes g(f(x))
+                    -- (f << g) x becomes f(g(x))
+                    let
+                        isForwardCompose =
+                            List.all (\( _, Src.At _ op ) -> op == ">>") pairs
+
+                        isBackwardCompose =
+                            List.all (\( _, Src.At _ op ) -> op == "<<") pairs
+                    in
+                    if isForwardCompose && List.length args == 1 then
+                        -- Forward composition: (f >> g >> h) x = h(g(f(x)))
+                        let
+                            argStr =
+                                generateStandaloneExpr (List.head args |> Maybe.withDefault finalExpr)
+
+                            functions =
+                                (pairs |> List.map (\( e, _ ) -> generateStandaloneExpr e))
+                                    ++ [ generateStandaloneExpr finalExpr ]
+
+                            buildCompose innerArg fns =
+                                case fns of
+                                    [] ->
+                                        innerArg
+
+                                    f :: rest ->
+                                        buildCompose (f ++ "(" ++ innerArg ++ ")") rest
+                        in
+                        buildCompose argStr functions
+
+                    else if isBackwardCompose && List.length args == 1 then
+                        -- Backward composition: (f << g << h) x = f(g(h(x)))
+                        let
+                            argStr =
+                                generateStandaloneExpr (List.head args |> Maybe.withDefault finalExpr)
+
+                            functions =
+                                (pairs |> List.map (\( e, _ ) -> generateStandaloneExpr e))
+                                    ++ [ generateStandaloneExpr finalExpr ]
+                                    |> List.reverse
+
+                            buildCompose innerArg fns =
+                                case fns of
+                                    [] ->
+                                        innerArg
+
+                                    f :: rest ->
+                                        buildCompose (f ++ "(" ++ innerArg ++ ")") rest
+                        in
+                        buildCompose argStr functions
+
+                    else
+                        -- Not a composition or multiple args - fall back
+                        generateStandaloneCall fn args
+
                 _ ->
                     generateStandaloneCall fn args
 
