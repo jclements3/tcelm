@@ -2567,6 +2567,25 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Result.fromMaybe wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Debug" "log") ->
+            -- Debug.log tag value = prints tag:value and returns value
+            -- On embedded target, just return the value
+            case args of
+                [ _, value ] ->
+                    generateStandaloneExpr value
+
+                _ ->
+                    "/* Debug.log wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Debug" "todo") ->
+            -- Debug.todo msg = halt execution (for unimplemented code)
+            case args of
+                [ _ ] ->
+                    "({ while(1); 0; })"
+
+                _ ->
+                    "/* Debug.todo wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
