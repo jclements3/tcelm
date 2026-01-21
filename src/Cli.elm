@@ -535,8 +535,19 @@ exprToMainValue (Src.At region expr) =
             -- Generate C code for binary operations
             let
                 cCode = generateStandaloneBinops pairs finalExpr
+
+                -- Check if this is string concatenation
+                isStringConcat =
+                    List.all (\( _, Src.At _ op ) -> op == "++") pairs
+
+                cType =
+                    if isStringConcat then
+                        "const char *"
+
+                    else
+                        "int"
             in
-            MainExpr "int" cCode
+            MainExpr cType cCode
 
         Src.If branches elseExpr ->
             -- Infer type from first branch's then-expression
@@ -580,35 +591,63 @@ exprToMainValue (Src.At region expr) =
 generateStandaloneBinops : List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
 generateStandaloneBinops pairs finalExpr =
     let
-        -- Build list of all terms and operators
-        buildTerms ps =
-            case ps of
-                [] ->
-                    []
+        -- Check if this is string concatenation (all ops are ++)
+        isStringConcat =
+            List.all (\( _, Src.At _ op ) -> op == "++") pairs
 
-                ( expr, Src.At _ op ) :: rest ->
-                    ( generateStandaloneExpr expr, op ) :: buildTerms rest
+        -- Try to extract string literal
+        extractStringLiteral (Src.At _ e) =
+            case e of
+                Src.Str s ->
+                    Just s
 
-        terms = buildTerms pairs
-        finalTerm = generateStandaloneExpr finalExpr
+                _ ->
+                    Nothing
 
-        -- Convert Elm operator to C operator
-        elmOpToC op =
-            case op of
-                "//" -> "/"
-                "/=" -> "!="
-                _ -> op
+        -- For string concatenation, try compile-time concat
+        allExprs =
+            List.map Tuple.first pairs ++ [ finalExpr ]
 
-        -- Build the expression string
-        buildExpr ts =
-            case ts of
-                [] ->
-                    finalTerm
-
-                ( term, op ) :: rest ->
-                    term ++ " " ++ elmOpToC op ++ " " ++ buildExpr rest
+        allStrings =
+            List.filterMap extractStringLiteral allExprs
     in
-    "(" ++ buildExpr terms ++ ")"
+    if isStringConcat && List.length allStrings == List.length allExprs then
+        -- All operands are string literals - concatenate at compile time
+        "\"" ++ escapeC (String.concat allStrings) ++ "\""
+
+    else
+        -- Normal binary operation
+        let
+            -- Build list of all terms and operators
+            buildTerms ps =
+                case ps of
+                    [] ->
+                        []
+
+                    ( expr, Src.At _ op ) :: rest ->
+                        ( generateStandaloneExpr expr, op ) :: buildTerms rest
+
+            terms = buildTerms pairs
+            finalTerm = generateStandaloneExpr finalExpr
+
+            -- Convert Elm operator to C operator
+            elmOpToC op =
+                case op of
+                    "//" -> "/"
+                    "/=" -> "!="
+                    "++" -> "/* string concat not supported at runtime */ +"
+                    _ -> op
+
+            -- Build the expression string
+            buildExpr ts =
+                case ts of
+                    [] ->
+                        finalTerm
+
+                    ( term, op ) :: rest ->
+                        term ++ " " ++ elmOpToC op ++ " " ++ buildExpr rest
+        in
+        "(" ++ buildExpr terms ++ ")"
 
 
 {-| Generate standalone C code for a single expression (no runtime)
