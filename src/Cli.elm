@@ -994,6 +994,22 @@ generateStandaloneExpr (Src.At _ expr) =
             -- but if it does, generate a placeholder
             "/* accessor ." ++ fieldName ++ " */"
 
+        Src.Update (Src.At _ recordName) updates ->
+            -- Record update: { record | field = value, ... }
+            -- In C, we need to copy the original and update specific fields
+            -- Generate: ({ struct { ... } __tmp = record; __tmp.field = value; __tmp; })
+            let
+                -- Generate the update assignments
+                updateAssignments =
+                    updates
+                        |> List.map
+                            (\( Src.At _ fieldName, valueExpr ) ->
+                                "__update_tmp." ++ fieldName ++ " = " ++ generateStandaloneExpr valueExpr ++ ";"
+                            )
+                        |> String.join " "
+            in
+            "({ typeof(elm_" ++ recordName ++ ") __update_tmp = elm_" ++ recordName ++ "; " ++ updateAssignments ++ " __update_tmp; })"
+
         _ ->
             "/* unsupported expr */ 0"
 
@@ -1243,6 +1259,21 @@ inferCTypeAndInit (Src.At _ expr) =
                         |> String.join ", "
             in
             ( "struct { " ++ structFields ++ "; }", "{" ++ values ++ "}" )
+
+        Src.Update (Src.At _ recordName) updates ->
+            -- Record update: type is same as original, use typeof
+            let
+                updateAssignments =
+                    updates
+                        |> List.map
+                            (\( Src.At _ fieldName, valueExpr ) ->
+                                "__update_tmp." ++ fieldName ++ " = " ++ generateStandaloneExpr valueExpr ++ ";"
+                            )
+                        |> String.join " "
+            in
+            ( "typeof(elm_" ++ recordName ++ ")"
+            , "({ typeof(elm_" ++ recordName ++ ") __update_tmp = elm_" ++ recordName ++ "; " ++ updateAssignments ++ " __update_tmp; })"
+            )
 
         _ ->
             ( "int", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
