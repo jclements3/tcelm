@@ -2745,7 +2745,7 @@ generateStandaloneCall fn args =
                     let
                         listStr = generateStandaloneExpr listExpr
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; if (__lst.length == 0) ((elm_union_t){TAG_Nothing, 0}); else { int __max = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] > __max) __max = __lst.data[__i]; ((elm_union_t){TAG_Just, __max}); } })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { int __max = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] > __max) __max = __lst.data[__i]; __result = (elm_union_t){TAG_Just, __max}; } __result; })"
 
                 _ ->
                     "/* List.maximum wrong arity */ 0"
@@ -2757,7 +2757,7 @@ generateStandaloneCall fn args =
                     let
                         listStr = generateStandaloneExpr listExpr
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; if (__lst.length == 0) ((elm_union_t){TAG_Nothing, 0}); else { int __min = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] < __min) __min = __lst.data[__i]; ((elm_union_t){TAG_Just, __min}); } })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { int __min = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] < __min) __min = __lst.data[__i]; __result = (elm_union_t){TAG_Just, __min}; } __result; })"
 
                 _ ->
                     "/* List.minimum wrong arity */ 0"
