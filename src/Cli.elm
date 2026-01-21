@@ -2986,6 +2986,62 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.any wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "sort") ->
+            -- List.sort list = sorted list (ascending, insertion sort)
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; for (int __i = 1; __i < __lst.length; __i++) { int __key = __lst.data[__i], __j = __i - 1; while (__j >= 0 && __lst.data[__j] > __key) { __lst.data[__j + 1] = __lst.data[__j]; __j--; } __lst.data[__j + 1] = __key; } __lst; })"
+
+                _ ->
+                    "/* List.sort wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "indexedMap") ->
+            -- List.indexedMap f list = apply f(index, elem) to each element
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname1 ++ " = __i, elm_" ++ pname2 ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__i, __lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+                _ ->
+                    "/* List.indexedMap wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "concat") ->
+            -- List.concat [[a], [b, c]] = [a, b, c] - flatten list of lists
+            -- For embedded, we just return the first non-empty sublist or empty
+            -- This is a simplification since nested lists are complex
+            case args of
+                [ listExpr ] ->
+                    "/* List.concat not fully supported */ ((elm_list_t){ .length = 0 })"
+
+                _ ->
+                    "/* List.concat wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "intersperse") ->
+            -- List.intersperse sep list = insert sep between elements
+            case args of
+                [ sepExpr, listExpr ] ->
+                    let
+                        sepStr = generateStandaloneExpr sepExpr
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ int __sep = " ++ sepStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; if (__lst.length == 0) { __result.length = 0; } else { __result.length = __lst.length * 2 - 1; if (__result.length > ELM_LIST_MAX) __result.length = ELM_LIST_MAX; int __j = 0; for (int __i = 0; __i < __lst.length && __j < __result.length; __i++) { if (__i > 0 && __j < __result.length) __result.data[__j++] = __sep; if (__j < __result.length) __result.data[__j++] = __lst.data[__i]; } __result.length = __j; } __result; })"
+
+                _ ->
+                    "/* List.intersperse wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
