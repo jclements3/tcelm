@@ -113,6 +113,9 @@ typedef struct { int _0; int _1; int _2; } elm_tuple3_t;
 /* Built-in Maybe type tags */
 #define TAG_Nothing 0
 #define TAG_Just 1
+/* Built-in Result type tags */
+#define TAG_Err 0
+#define TAG_Ok 1
 /* String.fromChar - convert char to single-char string */
 static char __elm_fromchar_buf[2];
 static const char *elm_str_from_char(char c) {
@@ -240,6 +243,23 @@ static const char *elm_str_trim(const char *s) {
     __elm_trim_buf[len] = 0;
     return __elm_trim_buf;
 }
+/* String.trimLeft - remove leading whitespace */
+static char __elm_triml_buf[256];
+static const char *elm_str_trim_left(const char *s) {
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r') s++;
+    int i = 0; for (; s[i] && i < 255; i++) __elm_triml_buf[i] = s[i];
+    __elm_triml_buf[i] = 0;
+    return __elm_triml_buf;
+}
+/* String.trimRight - remove trailing whitespace */
+static char __elm_trimr_buf[256];
+static const char *elm_str_trim_right(const char *s) {
+    int len = 0; while (s[len]) len++;
+    while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\t' || s[len-1] == '\n' || s[len-1] == '\r')) len--;
+    for (int i = 0; i < len && i < 255; i++) __elm_trimr_buf[i] = s[i];
+    __elm_trimr_buf[len < 255 ? len : 255] = 0;
+    return __elm_trimr_buf;
+}
 /* String.toUpper - convert to uppercase */
 static char __elm_toupper_buf[256];
 static const char *elm_str_to_upper(const char *s) {
@@ -317,6 +337,30 @@ static elm_union_t elm_str_to_int(const char *s) {
         result = result * 10 + (s[i] - '0');
     }
     return (elm_union_t){TAG_Just, neg ? -result : result};
+}
+/* String.replace - replace all occurrences of target with replacement */
+static char __elm_replace_buf[512];
+static const char *elm_str_replace(const char *target, const char *replacement, const char *src) {
+    int tlen = 0, rlen = 0, slen = 0;
+    while (target[tlen]) tlen++;
+    while (replacement[rlen]) rlen++;
+    while (src[slen]) slen++;
+    if (tlen == 0) { for (int i = 0; i <= slen && i < 511; i++) __elm_replace_buf[i] = src[i]; return __elm_replace_buf; }
+    int j = 0;
+    for (int i = 0; src[i] && j < 510; ) {
+        int match = 1;
+        for (int k = 0; k < tlen && match; k++) {
+            if (src[i + k] != target[k]) match = 0;
+        }
+        if (match) {
+            for (int k = 0; k < rlen && j < 510; k++) __elm_replace_buf[j++] = replacement[k];
+            i += tlen;
+        } else {
+            __elm_replace_buf[j++] = src[i++];
+        }
+    }
+    __elm_replace_buf[j] = 0;
+    return __elm_replace_buf;
 }
 $ctor_defines
 $user_funcs

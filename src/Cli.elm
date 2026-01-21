@@ -368,6 +368,10 @@ generateRtemsCode ast =
                 , "#define TAG_Nothing 0"
                 , "#define TAG_Just 1"
                 , ""
+                , "/* Built-in Result type tags */"
+                , "#define TAG_Err 0"
+                , "#define TAG_Ok 1"
+                , ""
                 , "/* String.fromChar - convert char to single-char string */"
                 , "static char __elm_fromchar_buf[2];"
                 , "static const char *elm_str_from_char(char c) {"
@@ -454,6 +458,25 @@ generateRtemsCode ast =
                 , "    return __elm_trim_buf;"
                 , "}"
                 , ""
+                , "/* String.trimLeft - remove leading whitespace */"
+                , "static char __elm_triml_buf[256];"
+                , "static const char *elm_str_trim_left(const char *s) {"
+                , "    while (*s == ' ' || *s == '\\t' || *s == '\\n' || *s == '\\r') s++;"
+                , "    int i = 0; for (; s[i] && i < 255; i++) __elm_triml_buf[i] = s[i];"
+                , "    __elm_triml_buf[i] = 0;"
+                , "    return __elm_triml_buf;"
+                , "}"
+                , ""
+                , "/* String.trimRight - remove trailing whitespace */"
+                , "static char __elm_trimr_buf[256];"
+                , "static const char *elm_str_trim_right(const char *s) {"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\\t' || s[len-1] == '\\n' || s[len-1] == '\\r')) len--;"
+                , "    for (int i = 0; i < len && i < 255; i++) __elm_trimr_buf[i] = s[i];"
+                , "    __elm_trimr_buf[len < 255 ? len : 255] = 0;"
+                , "    return __elm_trimr_buf;"
+                , "}"
+                , ""
                 , "/* String.toUpper - convert to uppercase */"
                 , "static char __elm_toupper_buf[256];"
                 , "static const char *elm_str_to_upper(const char *s) {"
@@ -524,6 +547,31 @@ generateRtemsCode ast =
                 , "        if (!*n) return 1;"
                 , "    }"
                 , "    return 0;"
+                , "}"
+                , ""
+                , "/* String.replace - replace all occurrences of target with replacement */"
+                , "static char __elm_replace_buf[512];"
+                , "static const char *elm_str_replace(const char *target, const char *replacement, const char *src) {"
+                , "    int tlen = 0, rlen = 0, slen = 0;"
+                , "    while (target[tlen]) tlen++;"
+                , "    while (replacement[rlen]) rlen++;"
+                , "    while (src[slen]) slen++;"
+                , "    if (tlen == 0) { for (int i = 0; i <= slen && i < 511; i++) __elm_replace_buf[i] = src[i]; return __elm_replace_buf; }"
+                , "    int j = 0;"
+                , "    for (int i = 0; src[i] && j < 510; ) {"
+                , "        int match = 1;"
+                , "        for (int k = 0; k < tlen && match; k++) {"
+                , "            if (src[i + k] != target[k]) match = 0;"
+                , "        }"
+                , "        if (match) {"
+                , "            for (int k = 0; k < rlen && j < 510; k++) __elm_replace_buf[j++] = replacement[k];"
+                , "            i += tlen;"
+                , "        } else {"
+                , "            __elm_replace_buf[j++] = src[i++];"
+                , "        }"
+                , "    }"
+                , "    __elm_replace_buf[j] = 0;"
+                , "    return __elm_replace_buf;"
                 , "}"
                 , ""
                 , "/* String.toInt - parse string to Maybe Int */"
@@ -1640,6 +1688,16 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Char.isOctDigit wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Char" "isSpace") ->
+            -- Char.isSpace c = True if c is whitespace (space, tab, newline, etc.)
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "(" ++ cStr ++ " == ' ' || " ++ cStr ++ " == '\\t' || " ++ cStr ++ " == '\\n' || " ++ cStr ++ " == '\\r')"
+
+                _ ->
+                    "/* Char.isSpace wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "Char" "toUpper") ->
             -- Char.toUpper c = uppercase version of c
             case args of
@@ -1696,15 +1754,6 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* String.isEmpty wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "String" "fromInt") ->
-            -- String.fromInt n = string representation of n
-            case args of
-                [ n ] ->
-                    "elm_from_int(" ++ generateStandaloneExpr n ++ ")"
-
-                _ ->
-                    "/* String.fromInt wrong arity */ 0"
-
         Src.At _ (Src.VarQual _ "String" "reverse") ->
             -- String.reverse s = reversed string
             case args of
@@ -1722,6 +1771,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.toInt wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "fromInt") ->
+            -- String.fromInt n = string representation
+            case args of
+                [ n ] ->
+                    "elm_from_int(" ++ generateStandaloneExpr n ++ ")"
+
+                _ ->
+                    "/* String.fromInt wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "left") ->
             -- String.left n s = first n characters
@@ -1803,6 +1861,24 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.trim wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "trimLeft") ->
+            -- String.trimLeft s = remove leading whitespace
+            case args of
+                [ s ] ->
+                    "elm_str_trim_left(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.trimLeft wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "trimRight") ->
+            -- String.trimRight s = remove trailing whitespace
+            case args of
+                [ s ] ->
+                    "elm_str_trim_right(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.trimRight wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "repeat") ->
             -- String.repeat n s = repeat s n times
@@ -2026,6 +2102,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.map wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "replace") ->
+            -- String.replace target replacement str
+            case args of
+                [ target, replacement, str ] ->
+                    "elm_str_replace(" ++ generateStandaloneExpr target ++ ", " ++ generateStandaloneExpr replacement ++ ", " ++ generateStandaloneExpr str ++ ")"
+
+                _ ->
+                    "/* String.replace wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
@@ -2371,6 +2456,116 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* Maybe.map5 wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "Ok") ->
+            -- Ok constructor
+            case args of
+                [ value ] ->
+                    "((elm_union_t){TAG_Ok, " ++ generateStandaloneExpr value ++ "})"
+
+                _ ->
+                    "/* Ok wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "Err") ->
+            -- Err constructor
+            case args of
+                [ value ] ->
+                    "((elm_union_t){TAG_Err, " ++ generateStandaloneExpr value ++ "})"
+
+                _ ->
+                    "/* Err wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Result" "withDefault") ->
+            -- Result.withDefault def result
+            case args of
+                [ def, result ] ->
+                    let
+                        defStr = generateStandaloneExpr def
+                        resultStr = generateStandaloneExpr result
+                    in
+                    "((" ++ resultStr ++ ").tag == TAG_Ok ? (" ++ resultStr ++ ").data : " ++ defStr ++ ")"
+
+                _ ->
+                    "/* Result.withDefault wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Result" "map") ->
+            -- Result.map fn result
+            case args of
+                [ fnExpr, resultExpr ] ->
+                    let
+                        resultStr = generateStandaloneExpr resultExpr
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__result_val.data)"
+                    in
+                    "({ elm_union_t __result_val = " ++ resultStr ++ "; __result_val.tag == TAG_Ok ? ((elm_union_t){TAG_Ok, " ++ fnAppStr ++ "}) : __result_val; })"
+
+                _ ->
+                    "/* Result.map wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Result" "mapError") ->
+            -- Result.mapError fn result
+            case args of
+                [ fnExpr, resultExpr ] ->
+                    let
+                        resultStr = generateStandaloneExpr resultExpr
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__result_val.data)"
+                    in
+                    "({ elm_union_t __result_val = " ++ resultStr ++ "; __result_val.tag == TAG_Err ? ((elm_union_t){TAG_Err, " ++ fnAppStr ++ "}) : __result_val; })"
+
+                _ ->
+                    "/* Result.mapError wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Result" "toMaybe") ->
+            -- Result.toMaybe result
+            case args of
+                [ resultExpr ] ->
+                    let
+                        resultStr = generateStandaloneExpr resultExpr
+                    in
+                    "((" ++ resultStr ++ ").tag == TAG_Ok ? ((elm_union_t){TAG_Just, (" ++ resultStr ++ ").data}) : ((elm_union_t){TAG_Nothing, 0}))"
+
+                _ ->
+                    "/* Result.toMaybe wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Result" "andThen") ->
+            -- Result.andThen fn result
+            case args of
+                [ fnExpr, resultExpr ] ->
+                    let
+                        resultStr = generateStandaloneExpr resultExpr
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__result_val.data)"
+                    in
+                    "({ elm_union_t __result_val = " ++ resultStr ++ "; __result_val.tag == TAG_Ok ? " ++ fnAppStr ++ " : __result_val; })"
+
+                _ ->
+                    "/* Result.andThen wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Result" "fromMaybe") ->
+            -- Result.fromMaybe err maybe
+            case args of
+                [ errExpr, maybeExpr ] ->
+                    let
+                        errStr = generateStandaloneExpr errExpr
+                        maybeStr = generateStandaloneExpr maybeExpr
+                    in
+                    "((" ++ maybeStr ++ ").tag == TAG_Just ? ((elm_union_t){TAG_Ok, (" ++ maybeStr ++ ").data}) : ((elm_union_t){TAG_Err, " ++ errStr ++ "}))"
+
+                _ ->
+                    "/* Result.fromMaybe wrong arity */ 0"
 
         _ ->
             -- Regular function call
