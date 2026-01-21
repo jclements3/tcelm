@@ -374,6 +374,32 @@ generateRtemsCode ast =
                 , "    return __elm_right_buf;"
                 , "}"
                 , ""
+                , "/* String.repeat - repeat string n times */"
+                , "static char __elm_repeat_buf[256];"
+                , "static const char *elm_str_repeat(int n, const char *s) {"
+                , "    int slen = 0; while (s[slen]) slen++;"
+                , "    int pos = 0;"
+                , "    for (int i = 0; i < n && pos + slen < 255; i++) {"
+                , "        for (int j = 0; j < slen; j++) __elm_repeat_buf[pos++] = s[j];"
+                , "    }"
+                , "    __elm_repeat_buf[pos] = 0;"
+                , "    return __elm_repeat_buf;"
+                , "}"
+                , ""
+                , "/* String.slice - extract substring from start to end index */"
+                , "static char __elm_slice_buf[256];"
+                , "static const char *elm_str_slice(int start, int end, const char *s) {"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    if (start < 0) start = len + start; if (start < 0) start = 0;"
+                , "    if (end < 0) end = len + end; if (end < 0) end = 0;"
+                , "    if (start > len) start = len; if (end > len) end = len;"
+                , "    if (start >= end) { __elm_slice_buf[0] = 0; return __elm_slice_buf; }"
+                , "    int j = 0;"
+                , "    for (int i = start; i < end; i++) __elm_slice_buf[j++] = s[i];"
+                , "    __elm_slice_buf[j] = 0;"
+                , "    return __elm_slice_buf;"
+                , "}"
+                , ""
                 , "/* String.trim - remove leading and trailing whitespace */"
                 , "static char __elm_trim_buf[256];"
                 , "static const char *elm_str_trim(const char *s) {"
@@ -1508,6 +1534,24 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.trim wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "repeat") ->
+            -- String.repeat n s = repeat s n times
+            case args of
+                [ n, s ] ->
+                    "elm_str_repeat(" ++ generateStandaloneExpr n ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.repeat wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "slice") ->
+            -- String.slice start end s = substring from start to end
+            case args of
+                [ start, end, s ] ->
+                    "elm_str_slice(" ++ generateStandaloneExpr start ++ ", " ++ generateStandaloneExpr end ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.slice wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
