@@ -137,31 +137,69 @@ generateRtemsCode ast =
                     )
                 |> String.join "\n\n"
 
-        -- Generate constructor defines for custom types (enums)
-        constructorDefines =
-            ast.unions
-                |> List.concatMap
-                    (\(Src.At _ union) ->
-                        union.ctors
-                            |> List.indexedMap
-                                (\i ( Src.At _ ctorName, ctorArgs ) ->
-                                    if List.isEmpty ctorArgs then
-                                        -- Simple enum constructor
-                                        "#define elm_" ++ ctorName ++ " " ++ String.fromInt i
+        -- Check if a union has any constructors with data
+        unionHasData union =
+            union.ctors
+                |> List.any (\( _, args ) -> not (List.isEmpty args))
 
-                                    else
-                                        -- Constructor with data - not supported yet
-                                        "/* " ++ ctorName ++ " has data - not supported */"
-                                )
+        -- Generate custom type definitions (structs, tags, and constructors)
+        customTypeCode =
+            ast.unions
+                |> List.map
+                    (\(Src.At _ union) ->
+                        let
+                            (Src.At _ typeName) =
+                                union.name
+
+                            hasData =
+                                unionHasData union
+
+                            -- Tag defines for all constructors
+                            tagDefines =
+                                union.ctors
+                                    |> List.indexedMap
+                                        (\i ( Src.At _ ctorName, _ ) ->
+                                            "#define TAG_" ++ ctorName ++ " " ++ String.fromInt i
+                                        )
+                                    |> String.join "\n"
+
+                            -- Type alias for all custom types (use common elm_union_t)
+                            structDef =
+                                "typedef elm_union_t elm_" ++ typeName ++ ";\n"
+
+                            -- Constructor functions using elm_union_t
+                            ctorFuncs =
+                                union.ctors
+                                    |> List.indexedMap
+                                        (\i ( Src.At _ ctorName, ctorArgs ) ->
+                                            if List.isEmpty ctorArgs then
+                                                -- No-data constructor
+                                                "static elm_union_t elm_"
+                                                    ++ ctorName
+                                                    ++ "(void) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ ctorName
+                                                    ++ ", .data = 0 };\n    return result;\n}"
+
+                                            else
+                                                -- Constructor with data
+                                                "static elm_union_t elm_"
+                                                    ++ ctorName
+                                                    ++ "(int value) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ ctorName
+                                                    ++ ", .data = value };\n    return result;\n}"
+                                        )
+                                    |> String.join "\n\n"
+                        in
+                        tagDefines ++ "\n" ++ structDef ++ ctorFuncs
                     )
-                |> String.join "\n"
+                |> String.join "\n\n"
 
         constructorDefinesCode =
-            if String.isEmpty constructorDefines then
+            if String.isEmpty customTypeCode then
                 ""
 
             else
-                "/* Custom type constructors */\n" ++ constructorDefines ++ "\n\n"
+                "/* Custom type definitions */\n" ++ customTypeCode ++ "\n\n"
 
         -- Collect and generate lifted local functions from all values
         liftedFunctions =
@@ -251,6 +289,17 @@ generateRtemsCode ast =
                 , "    while (n--) *p++ = (unsigned char)c;"
                 , "    return s;"
                 , "}"
+                , ""
+                , "static void *memmove(void *dest, const void *src, unsigned int n) {"
+                , "    unsigned char *d = dest;"
+                , "    const unsigned char *s = src;"
+                , "    if (d < s) { while (n--) *d++ = *s++; }"
+                , "    else { d += n; s += n; while (n--) *--d = *--s; }"
+                , "    return dest;"
+                , "}"
+                , ""
+                , "/* Generic tagged union type for custom types */"
+                , "typedef struct { int tag; int data; } elm_union_t;"
                 , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
@@ -723,6 +772,10 @@ generateStandaloneExpr (Src.At _ expr) =
                 ( Src.CapVar, "False" ) ->
                     "0"
 
+                ( Src.CapVar, _ ) ->
+                    -- Constructor - call as function (nullary constructor)
+                    "elm_" ++ name ++ "()"
+
                 _ ->
                     "elm_" ++ name
 
@@ -830,23 +883,36 @@ generateInlinedLambda patterns args body =
 generateUserFunction : String -> List Src.Pattern -> Src.Expr -> String
 generateUserFunction name args body =
     let
-        -- Generate parameter list
+        -- Generate function body first so we can check parameter usage
+        bodyExpr =
+            generateStandaloneExpr body
+
+        -- Generate parameter list with type inference based on usage
         params =
             args
                 |> List.map
                     (\(Src.At _ pat) ->
                         case pat of
                             Src.PVar varName ->
-                                "int elm_" ++ varName
+                                -- Check if this parameter is used as union type:
+                                -- 1. Direct .tag access
+                                -- 2. Assigned to elm_union_t variable
+                                -- 3. Used with constructor call pattern
+                                let
+                                    isUnionType =
+                                        String.contains ("elm_" ++ varName ++ ".tag") bodyExpr
+                                            || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+                                in
+                                if isUnionType then
+                                    "elm_union_t elm_" ++ varName
+
+                                else
+                                    "int elm_" ++ varName
 
                             _ ->
                                 "int /* unsupported pattern */"
                     )
                 |> String.join ", "
-
-        -- Generate function body
-        bodyExpr =
-            generateStandaloneExpr body
     in
     "static int elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
@@ -1095,6 +1161,32 @@ generateStandaloneCase scrutinee branches =
                 )
                 branches
 
+        -- Check if any branch has a constructor pattern with data (needs struct type)
+        hasCtorWithData =
+            List.any
+                (\( Src.At _ pat, _ ) ->
+                    case pat of
+                        Src.PCtor _ _ ctorPatterns ->
+                            not (List.isEmpty ctorPatterns)
+
+                        _ ->
+                            False
+                )
+                branches
+
+        -- Check if this is a custom type case (has constructor patterns, not just True/False)
+        isCustomTypeCase =
+            List.any
+                (\( Src.At _ pat, _ ) ->
+                    case pat of
+                        Src.PCtor _ name _ ->
+                            name /= "True" && name /= "False"
+
+                        _ ->
+                            False
+                )
+                branches
+
         generateBranches : List ( Src.Pattern, Src.Expr ) -> String
         generateBranches bs =
             case bs of
@@ -1177,7 +1269,7 @@ generateStandaloneCase scrutinee branches =
                                 ++ bodyStr
                                 ++ ";\n        })"
 
-                        Src.PCtor _ ctorName _ ->
+                        Src.PCtor _ ctorName ctorPatterns ->
                             -- Constructor pattern
                             case ctorName of
                                 "True" ->
@@ -1195,21 +1287,59 @@ generateStandaloneCase scrutinee branches =
                                         ++ ")"
 
                                 _ ->
-                                    -- Custom constructor - compare against defined constant
-                                    "(elm_case_scrutinee == elm_"
-                                        ++ ctorName
-                                        ++ " ? "
-                                        ++ generateStandaloneExpr resultExpr
-                                        ++ " : "
-                                        ++ generateBranches rest
-                                        ++ ")"
+                                    if List.isEmpty ctorPatterns then
+                                        -- Simple enum constructor - compare tag
+                                        "(elm_case_scrutinee.tag == TAG_"
+                                            ++ ctorName
+                                            ++ " ? "
+                                            ++ generateStandaloneExpr resultExpr
+                                            ++ " : "
+                                            ++ generateBranches rest
+                                            ++ ")"
+
+                                    else
+                                        -- Constructor with data - bind variable and compare tag
+                                        let
+                                            bindings =
+                                                ctorPatterns
+                                                    |> List.indexedMap
+                                                        (\_ (Src.At _ pat) ->
+                                                            case pat of
+                                                                Src.PVar varName ->
+                                                                    "int elm_" ++ varName ++ " = elm_case_scrutinee.data;"
+
+                                                                _ ->
+                                                                    ""
+                                                        )
+                                                    |> List.filter (not << String.isEmpty)
+                                                    |> String.join " "
+                                        in
+                                        "(elm_case_scrutinee.tag == TAG_"
+                                            ++ ctorName
+                                            ++ " ? ({ "
+                                            ++ bindings
+                                            ++ " "
+                                            ++ generateStandaloneExpr resultExpr
+                                            ++ "; }) : "
+                                            ++ generateBranches rest
+                                            ++ ")"
 
                         _ ->
                             "/* unsupported pattern */ " ++ generateBranches rest
     in
-    if hasVarBinding then
+    if hasVarBinding || hasCtorWithData then
         -- Use compound statement to bind scrutinee to a variable
-        "({\n        int elm_case_scrutinee = "
+        let
+            scrutineeType =
+                if isCustomTypeCase then
+                    "elm_union_t"
+
+                else
+                    "int"
+        in
+        "({\n        "
+            ++ scrutineeType
+            ++ " elm_case_scrutinee = "
             ++ scrutineeStr
             ++ ";\n        "
             ++ generateBranches branches
@@ -1266,7 +1396,7 @@ generateStandaloneCase scrutinee branches =
                                     ++ generateSimpleBranches rest
                                     ++ ")"
 
-                            Src.PCtor _ ctorName _ ->
+                            Src.PCtor _ ctorName ctorPatterns ->
                                 case ctorName of
                                     "True" ->
                                         "("
@@ -1287,16 +1417,46 @@ generateStandaloneCase scrutinee branches =
                                             ++ ")"
 
                                     _ ->
-                                        -- Custom constructor - compare against defined constant
-                                        "("
-                                            ++ inlineScrutinee
-                                            ++ " == elm_"
-                                            ++ ctorName
-                                            ++ " ? "
-                                            ++ generateStandaloneExpr resultExpr
-                                            ++ " : "
-                                            ++ generateSimpleBranches rest
-                                            ++ ")"
+                                        if List.isEmpty ctorPatterns then
+                                            -- Simple enum constructor - compare tag
+                                            "("
+                                                ++ inlineScrutinee
+                                                ++ ".tag == TAG_"
+                                                ++ ctorName
+                                                ++ " ? "
+                                                ++ generateStandaloneExpr resultExpr
+                                                ++ " : "
+                                                ++ generateSimpleBranches rest
+                                                ++ ")"
+
+                                        else
+                                            -- Constructor with data - bind variable and compare tag
+                                            let
+                                                bindings =
+                                                    ctorPatterns
+                                                        |> List.indexedMap
+                                                            (\_ (Src.At _ pat) ->
+                                                                case pat of
+                                                                    Src.PVar varName ->
+                                                                        "int elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data;"
+
+                                                                    _ ->
+                                                                        ""
+                                                            )
+                                                        |> List.filter (not << String.isEmpty)
+                                                        |> String.join " "
+                                            in
+                                            "("
+                                                ++ inlineScrutinee
+                                                ++ ".tag == TAG_"
+                                                ++ ctorName
+                                                ++ " ? ({ "
+                                                ++ bindings
+                                                ++ " "
+                                                ++ generateStandaloneExpr resultExpr
+                                                ++ "; }) : "
+                                                ++ generateSimpleBranches rest
+                                                ++ ")"
 
                             Src.PTuple first second restPats ->
                                 -- Tuple pattern - destructure and bind variables

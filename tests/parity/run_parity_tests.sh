@@ -81,9 +81,9 @@ extract_c_result() {
     local user_funcs=""
     local elm_main_func=""
 
-    # Extract custom type constructor defines if present
-    if grep -q '/\* Custom type constructors \*/' "$c_file" 2>/dev/null; then
-        ctor_defines=$(sed -n '/^\/\* Custom type constructors \*\//,/^$/p' "$c_file" 2>/dev/null)
+    # Extract custom type definitions if present (includes structs and constructor functions)
+    if grep -q '/\* Custom type definitions \*/' "$c_file" 2>/dev/null; then
+        ctor_defines=$(sed -n '/^\/\* Custom type definitions \*\//,/^\/\* \(User-defined\|Lifted\|Elm main\)/p' "$c_file" 2>/dev/null | head -n -1)
     fi
 
     # Extract user-defined functions if present
@@ -102,6 +102,7 @@ extract_c_result() {
     # Create test program
     cat > "$test_prog" << EOF
 #include <stdio.h>
+typedef struct { int tag; int data; } elm_union_t;
 $ctor_defines
 $user_funcs
 $elm_main_func

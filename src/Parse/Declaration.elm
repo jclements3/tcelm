@@ -284,8 +284,9 @@ chompValueBody start name tipe =
                                 |> P.andThen
                                     (\( body, end ) ->
                                         let
+                                            -- Note: revArgs is already in correct order from chompArgs
                                             value =
-                                                Src.Value name (List.reverse revArgs) body tipe
+                                                Src.Value name revArgs body tipe
                                         in
                                         P.succeed
                                             ( Value (Src.at start end value)
