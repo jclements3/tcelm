@@ -103,6 +103,10 @@ extract_c_result() {
     cat > "$test_prog" << EOF
 #include <stdio.h>
 typedef struct { int tag; int data; } elm_union_t;
+/* Built-in Order type tags */
+#define TAG_LT 0
+#define TAG_EQ 1
+#define TAG_GT 2
 $ctor_defines
 $user_funcs
 $elm_main_func

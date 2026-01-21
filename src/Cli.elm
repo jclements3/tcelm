@@ -301,6 +301,11 @@ generateRtemsCode ast =
                 , "/* Generic tagged union type for custom types */"
                 , "typedef struct { int tag; int data; } elm_union_t;"
                 , ""
+                , "/* Built-in Order type tags (for compare function) */"
+                , "#define TAG_LT 0"
+                , "#define TAG_EQ 1"
+                , "#define TAG_GT 2"
+                , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
                 , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
@@ -1118,6 +1123,55 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* clamp wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "xor") ->
+            -- xor a b = logical XOR (true if exactly one is true)
+            case args of
+                [ a, b ] ->
+                    "((" ++ generateStandaloneExpr a ++ ") != (" ++ generateStandaloneExpr b ++ "))"
+
+                _ ->
+                    "/* xor wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Tuple" "first") ->
+            -- Tuple.first (a, b) = a
+            case args of
+                [ tuple ] ->
+                    "(" ++ generateStandaloneExpr tuple ++ "._0)"
+
+                _ ->
+                    "/* Tuple.first wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Tuple" "second") ->
+            -- Tuple.second (a, b) = b
+            case args of
+                [ tuple ] ->
+                    "(" ++ generateStandaloneExpr tuple ++ "._1)"
+
+                _ ->
+                    "/* Tuple.second wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Tuple" "pair") ->
+            -- Tuple.pair a b = (a, b)
+            case args of
+                [ a, b ] ->
+                    "((struct { int _0; int _1; }){" ++ generateStandaloneExpr a ++ ", " ++ generateStandaloneExpr b ++ "})"
+
+                _ ->
+                    "/* Tuple.pair wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "compare") ->
+            -- compare a b = Order (LT, EQ, or GT)
+            case args of
+                [ a, b ] ->
+                    let
+                        aStr = generateStandaloneExpr a
+                        bStr = generateStandaloneExpr b
+                    in
+                    "((" ++ aStr ++ " < " ++ bStr ++ ") ? ((elm_union_t){TAG_LT, 0}) : ((" ++ aStr ++ " > " ++ bStr ++ ") ? ((elm_union_t){TAG_GT, 0}) : ((elm_union_t){TAG_EQ, 0})))"
+
+                _ ->
+                    "/* compare wrong arity */ 0"
 
         _ ->
             -- Regular function call
