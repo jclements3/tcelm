@@ -113,6 +113,16 @@ static int elm_strlen(const char *s) {
     while (*s++) len++;
     return len;
 }
+/* Integer power function */
+static int elm_pow(int base, int exp) {
+    int result = 1;
+    while (exp > 0) {
+        if (exp & 1) result *= base;
+        exp >>= 1;
+        base *= base;
+    }
+    return result;
+}
 $ctor_defines
 $user_funcs
 $elm_main_func

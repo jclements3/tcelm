@@ -290,6 +290,17 @@ generateRtemsCode ast =
                 , "    return len;"
                 , "}"
                 , ""
+                , "/* Integer power function */"
+                , "static int elm_pow(int base, int exp) {"
+                , "    int result = 1;"
+                , "    while (exp > 0) {"
+                , "        if (exp & 1) result *= base;"
+                , "        exp >>= 1;"
+                , "        base *= base;"
+                , "    }"
+                , "    return result;"
+                , "}"
+                , ""
                 , "/* Memory operations (needed for struct initialization) */"
                 , "static void *memset(void *s, int c, unsigned int n) {"
                 , "    unsigned char *p = s;"
@@ -803,6 +814,10 @@ generateStandaloneBinops pairs finalExpr =
     else
         -- Normal binary operation
         let
+            -- Check for power operator (needs special handling)
+            isPowerOp =
+                List.all (\( _, Src.At _ op ) -> op == "^") pairs
+
             -- Build list of all terms and operators
             buildTerms ps =
                 case ps of
@@ -823,7 +838,7 @@ generateStandaloneBinops pairs finalExpr =
                     "++" -> "/* string concat not supported at runtime */ +"
                     _ -> op
 
-            -- Build the expression string
+            -- Build the expression string for regular operators
             buildExpr ts =
                 case ts of
                     [] ->
@@ -831,8 +846,24 @@ generateStandaloneBinops pairs finalExpr =
 
                     ( term, op ) :: rest ->
                         term ++ " " ++ elmOpToC op ++ " " ++ buildExpr rest
+
+            -- Build power expression (right-associative: a ^ b ^ c = a ^ (b ^ c))
+            buildPowerExpr exprList =
+                case exprList of
+                    [] ->
+                        finalTerm
+
+                    [ ( term, _ ) ] ->
+                        "elm_pow(" ++ term ++ ", " ++ finalTerm ++ ")"
+
+                    ( term, _ ) :: rest ->
+                        "elm_pow(" ++ term ++ ", " ++ buildPowerExpr rest ++ ")"
         in
-        "(" ++ buildExpr terms ++ ")"
+        if isPowerOp then
+            buildPowerExpr terms
+
+        else
+            "(" ++ buildExpr terms ++ ")"
 
 
 {-| Generate standalone C code for a single expression (no runtime)
