@@ -722,6 +722,31 @@ generateStandaloneExpr (Src.At _ expr) =
             in
             "((struct { " ++ structFields ++ "; }){" ++ values ++ "})"
 
+        Src.Record fields ->
+            -- Generate record as compound struct literal with named fields
+            let
+                fieldDefs =
+                    fields
+                        |> List.map
+                            (\( Src.At _ fieldName, _ ) ->
+                                "int " ++ fieldName
+                            )
+                        |> String.join "; "
+
+                fieldValues =
+                    fields
+                        |> List.map
+                            (\( Src.At _ fieldName, fieldValue ) ->
+                                "." ++ fieldName ++ " = " ++ generateStandaloneExpr fieldValue
+                            )
+                        |> String.join ", "
+            in
+            "((struct { " ++ fieldDefs ++ "; }){" ++ fieldValues ++ "})"
+
+        Src.Access recordExpr (Src.At _ fieldName) ->
+            -- Generate field access
+            generateStandaloneExpr recordExpr ++ "." ++ fieldName
+
         _ ->
             "/* unsupported expr */ 0"
 
@@ -921,6 +946,48 @@ generateLiftedFunction prefix funcName args body =
     "static int elm_" ++ liftedName ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
 
+{-| Infer C type and initializer for an expression
+    Returns (type, initializer) pair
+-}
+inferCTypeAndInit : Src.Expr -> ( String, String )
+inferCTypeAndInit (Src.At _ expr) =
+    case expr of
+        Src.Record fields ->
+            let
+                fieldDefs =
+                    fields
+                        |> List.map (\( Src.At _ fieldName, _ ) -> "int " ++ fieldName)
+                        |> String.join "; "
+
+                fieldValues =
+                    fields
+                        |> List.map
+                            (\( Src.At _ fieldName, fieldValue ) ->
+                                "." ++ fieldName ++ " = " ++ generateStandaloneExpr fieldValue
+                            )
+                        |> String.join ", "
+            in
+            ( "struct { " ++ fieldDefs ++ "; }", "{" ++ fieldValues ++ "}" )
+
+        Src.Tuple first second rest ->
+            let
+                elements =
+                    first :: second :: rest
+
+                structFields =
+                    List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements
+                        |> String.join "; "
+
+                values =
+                    List.map generateStandaloneExpr elements
+                        |> String.join ", "
+            in
+            ( "struct { " ++ structFields ++ "; }", "{" ++ values ++ "}" )
+
+        _ ->
+            ( "int", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+
+
 {-| Generate standalone C code for let bindings using GCC compound statements
 -}
 generateStandaloneLet : List (Src.Located Src.Def) -> Src.Expr -> String
@@ -931,7 +998,12 @@ generateStandaloneLet defs body =
                 Src.Define (Src.At _ name) args defBody _ ->
                     if List.isEmpty args then
                         -- Simple binding: let x = expr
-                        "int elm_" ++ name ++ " = " ++ generateStandaloneExpr defBody ++ ";"
+                        -- Detect type from expression for records/tuples
+                        let
+                            ( varType, varInit ) =
+                                inferCTypeAndInit defBody
+                        in
+                        varType ++ " elm_" ++ name ++ " = " ++ varInit ++ ";"
 
                     else
                         -- Local function - create alias to lifted function
