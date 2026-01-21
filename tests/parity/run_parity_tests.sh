@@ -149,6 +149,35 @@ static const char *elm_str_reverse(const char *s) {
     __elm_reverse_buf[len] = 0;
     return __elm_reverse_buf;
 }
+/* String.left - take first n characters */
+static char __elm_left_buf[256];
+static const char *elm_str_left(int n, const char *s) {
+    int len = 0; while (s[len]) len++;
+    int take = n < len ? n : len;
+    for (int i = 0; i < take; i++) __elm_left_buf[i] = s[i];
+    __elm_left_buf[take] = 0;
+    return __elm_left_buf;
+}
+/* String.right - take last n characters */
+static char __elm_right_buf[256];
+static const char *elm_str_right(int n, const char *s) {
+    int len = 0; while (s[len]) len++;
+    int start = n < len ? len - n : 0;
+    int j = 0;
+    for (int i = start; i < len; i++) __elm_right_buf[j++] = s[i];
+    __elm_right_buf[j] = 0;
+    return __elm_right_buf;
+}
+/* String.contains - check if substring exists */
+static int elm_str_contains(const char *needle, const char *haystack) {
+    if (!*needle) return 1;
+    for (; *haystack; haystack++) {
+        const char *h = haystack, *n = needle;
+        while (*h && *n && *h == *n) { h++; n++; }
+        if (!*n) return 1;
+    }
+    return 0;
+}
 /* String.toInt - parse string to Maybe Int */
 static elm_union_t elm_str_to_int(const char *s) {
     int result = 0, neg = 0, i = 0;

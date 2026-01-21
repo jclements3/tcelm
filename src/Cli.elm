@@ -353,6 +353,38 @@ generateRtemsCode ast =
                 , "#define TAG_Nothing 0"
                 , "#define TAG_Just 1"
                 , ""
+                , "/* String.left - take first n characters */"
+                , "static char __elm_left_buf[256];"
+                , "static const char *elm_str_left(int n, const char *s) {"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    int take = n < len ? n : len;"
+                , "    for (int i = 0; i < take; i++) __elm_left_buf[i] = s[i];"
+                , "    __elm_left_buf[take] = 0;"
+                , "    return __elm_left_buf;"
+                , "}"
+                , ""
+                , "/* String.right - take last n characters */"
+                , "static char __elm_right_buf[256];"
+                , "static const char *elm_str_right(int n, const char *s) {"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    int start = n < len ? len - n : 0;"
+                , "    int j = 0;"
+                , "    for (int i = start; i < len; i++) __elm_right_buf[j++] = s[i];"
+                , "    __elm_right_buf[j] = 0;"
+                , "    return __elm_right_buf;"
+                , "}"
+                , ""
+                , "/* String.contains - check if substring exists */"
+                , "static int elm_str_contains(const char *needle, const char *haystack) {"
+                , "    if (!*needle) return 1;"
+                , "    for (; *haystack; haystack++) {"
+                , "        const char *h = haystack, *n = needle;"
+                , "        while (*h && *n && *h == *n) { h++; n++; }"
+                , "        if (!*n) return 1;"
+                , "    }"
+                , "    return 0;"
+                , "}"
+                , ""
                 , "/* String.toInt - parse string to Maybe Int */"
                 , "static elm_union_t elm_str_to_int(const char *s) {"
                 , "    int result = 0, neg = 0, i = 0;"
@@ -1357,6 +1389,33 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* String.toInt wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "String" "left") ->
+            -- String.left n s = first n characters
+            case args of
+                [ n, s ] ->
+                    "elm_str_left(" ++ generateStandaloneExpr n ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.left wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "right") ->
+            -- String.right n s = last n characters
+            case args of
+                [ n, s ] ->
+                    "elm_str_right(" ++ generateStandaloneExpr n ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.right wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "contains") ->
+            -- String.contains needle haystack = True if needle in haystack
+            case args of
+                [ needle, haystack ] ->
+                    "elm_str_contains(" ++ generateStandaloneExpr needle ++ ", " ++ generateStandaloneExpr haystack ++ ")"
+
+                _ ->
+                    "/* String.contains wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
             case args of
@@ -1510,6 +1569,33 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* Maybe.withDefault wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Maybe" "map") ->
+            -- Maybe.map f maybe = apply f to value if Just, else Nothing
+            case args of
+                [ fnExpr, maybeVal ] ->
+                    let
+                        maybeStr = generateStandaloneExpr maybeVal
+                        -- Generate the function application to __maybe_val.data
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At pos (Src.Lambda patterns body) ->
+                                    -- Inline lambda: bind __maybe_val.data to pattern and evaluate body
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar varName) ] ->
+                                            "({ int elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.map */ 0"
+
+                                _ ->
+                                    -- Regular function call
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_val.data)"
+                    in
+                    "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; __maybe_val.tag == TAG_Just ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.map wrong arity */ 0"
 
         _ ->
             -- Regular function call
