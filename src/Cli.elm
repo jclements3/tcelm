@@ -1279,6 +1279,48 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Bitwise.shiftRightZfBy wrong arity */ 0"
 
+        Src.At _ (Src.Var _ "floor") ->
+            -- floor x = largest int <= x
+            case args of
+                [ x ] ->
+                    "((int)" ++ generateStandaloneExpr x ++ ")"
+
+                _ ->
+                    "/* floor wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "ceiling") ->
+            -- ceiling x = smallest int >= x
+            case args of
+                [ x ] ->
+                    let
+                        xStr = generateStandaloneExpr x
+                    in
+                    "((int)" ++ xStr ++ " + (" ++ xStr ++ " > (int)" ++ xStr ++ " ? 1 : 0))"
+
+                _ ->
+                    "/* ceiling wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "round") ->
+            -- round x = nearest int (round half away from zero)
+            case args of
+                [ x ] ->
+                    let
+                        xStr = generateStandaloneExpr x
+                    in
+                    "(" ++ xStr ++ " >= 0 ? (int)(" ++ xStr ++ " + 0.5) : (int)(" ++ xStr ++ " - 0.5))"
+
+                _ ->
+                    "/* round wrong arity */ 0"
+
+        Src.At _ (Src.Var _ "truncate") ->
+            -- truncate x = int towards zero
+            case args of
+                [ x ] ->
+                    "((int)" ++ generateStandaloneExpr x ++ ")"
+
+                _ ->
+                    "/* truncate wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
