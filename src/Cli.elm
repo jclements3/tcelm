@@ -1498,6 +1498,19 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Just wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Maybe" "withDefault") ->
+            -- Maybe.withDefault default maybe = value or default
+            case args of
+                [ defaultVal, maybeVal ] ->
+                    let
+                        defStr = generateStandaloneExpr defaultVal
+                        maybeStr = generateStandaloneExpr maybeVal
+                    in
+                    "((" ++ maybeStr ++ ").tag == TAG_Just ? (" ++ maybeStr ++ ").data : " ++ defStr ++ ")"
+
+                _ ->
+                    "/* Maybe.withDefault wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
