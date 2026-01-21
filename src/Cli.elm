@@ -349,6 +349,10 @@ generateRtemsCode ast =
                 , "#define TAG_EQ 1"
                 , "#define TAG_GT 2"
                 , ""
+                , "/* Built-in Maybe type tags */"
+                , "#define TAG_Nothing 0"
+                , "#define TAG_Just 1"
+                , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
                 , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
@@ -1039,6 +1043,10 @@ generateStandaloneExpr (Src.At _ expr) =
                 ( Src.CapVar, "False" ) ->
                     "0"
 
+                ( Src.CapVar, "Nothing" ) ->
+                    -- Built-in Maybe Nothing constructor
+                    "((elm_union_t){TAG_Nothing, 0})"
+
                 ( Src.CapVar, _ ) ->
                     -- Constructor - call as function (nullary constructor)
                     "elm_" ++ name ++ "()"
@@ -1457,6 +1465,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* isOdd wrong arity */ 0"
+
+        Src.At _ (Src.Var Src.CapVar "Just") ->
+            -- Built-in Maybe Just constructor
+            case args of
+                [ value ] ->
+                    "((elm_union_t){TAG_Just, " ++ generateStandaloneExpr value ++ "})"
+
+                _ ->
+                    "/* Just wrong arity */ 0"
 
         _ ->
             -- Regular function call

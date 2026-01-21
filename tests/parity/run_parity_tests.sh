@@ -107,6 +107,9 @@ typedef struct { int tag; int data; } elm_union_t;
 #define TAG_LT 0
 #define TAG_EQ 1
 #define TAG_GT 2
+/* Built-in Maybe type tags */
+#define TAG_Nothing 0
+#define TAG_Just 1
 /* String length function */
 static int elm_strlen(const char *s) {
     int len = 0;
