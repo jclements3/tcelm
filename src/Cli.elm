@@ -2762,6 +2762,44 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.minimum wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "reverse") ->
+            -- List.reverse list = reversed list
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __rev; __rev.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __rev.data[__i] = __lst.data[__lst.length - 1 - __i]; __rev; })"
+
+                _ ->
+                    "/* List.reverse wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "member") ->
+            -- List.member elem list = True if elem is in list
+            case args of
+                [ elemExpr, listExpr ] ->
+                    let
+                        elemStr = generateStandaloneExpr elemExpr
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __elem = " ++ elemStr ++ "; int __found = 0; for (int __i = 0; __i < __lst.length && !__found; __i++) if (__lst.data[__i] == __elem) __found = 1; __found; })"
+
+                _ ->
+                    "/* List.member wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "range") ->
+            -- List.range lo hi = list from lo to hi inclusive
+            case args of
+                [ loExpr, hiExpr ] ->
+                    let
+                        loStr = generateStandaloneExpr loExpr
+                        hiStr = generateStandaloneExpr hiExpr
+                    in
+                    "({ int __lo = " ++ loStr ++ ", __hi = " ++ hiStr ++ "; elm_list_t __lst; __lst.length = __hi >= __lo ? __hi - __lo + 1 : 0; if (__lst.length > ELM_LIST_MAX) __lst.length = ELM_LIST_MAX; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i] = __lo + __i; __lst; })"
+
+                _ ->
+                    "/* List.range wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
