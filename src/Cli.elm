@@ -353,6 +353,20 @@ generateRtemsCode ast =
                 , "#define TAG_Nothing 0"
                 , "#define TAG_Just 1"
                 , ""
+                , "/* String.toInt - parse string to Maybe Int */"
+                , "static elm_union_t elm_str_to_int(const char *s) {"
+                , "    int result = 0, neg = 0, i = 0;"
+                , "    if (!s || !*s) return (elm_union_t){TAG_Nothing, 0};"
+                , "    if (s[0] == '-') { neg = 1; i = 1; }"
+                , "    else if (s[0] == '+') { i = 1; }"
+                , "    if (!s[i]) return (elm_union_t){TAG_Nothing, 0};"
+                , "    for (; s[i]; i++) {"
+                , "        if (s[i] < '0' || s[i] > '9') return (elm_union_t){TAG_Nothing, 0};"
+                , "        result = result * 10 + (s[i] - '0');"
+                , "    }"
+                , "    return (elm_union_t){TAG_Just, neg ? -result : result};"
+                , "}"
+                , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
                 , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
@@ -1333,6 +1347,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.reverse wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "toInt") ->
+            -- String.toInt s = Maybe Int
+            case args of
+                [ s ] ->
+                    "elm_str_to_int(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.toInt wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b

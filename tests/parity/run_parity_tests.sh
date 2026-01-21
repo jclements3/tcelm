@@ -149,6 +149,19 @@ static const char *elm_str_reverse(const char *s) {
     __elm_reverse_buf[len] = 0;
     return __elm_reverse_buf;
 }
+/* String.toInt - parse string to Maybe Int */
+static elm_union_t elm_str_to_int(const char *s) {
+    int result = 0, neg = 0, i = 0;
+    if (!s || !*s) return (elm_union_t){TAG_Nothing, 0};
+    if (s[0] == '-') { neg = 1; i = 1; }
+    else if (s[0] == '+') { i = 1; }
+    if (!s[i]) return (elm_union_t){TAG_Nothing, 0};
+    for (; s[i]; i++) {
+        if (s[i] < '0' || s[i] > '9') return (elm_union_t){TAG_Nothing, 0};
+        result = result * 10 + (s[i] - '0');
+    }
+    return (elm_union_t){TAG_Just, neg ? -result : result};
+}
 $ctor_defines
 $user_funcs
 $elm_main_func
