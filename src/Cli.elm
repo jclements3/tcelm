@@ -666,9 +666,13 @@ exprToMainValue (Src.At region expr) =
 generateStandaloneBinops : List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
 generateStandaloneBinops pairs finalExpr =
     let
-        -- Check if this is a pipe chain (all ops are |>)
-        isPipeChain =
+        -- Check if this is a forward pipe chain (all ops are |>)
+        isForwardPipe =
             List.all (\( _, Src.At _ op ) -> op == "|>") pairs
+
+        -- Check if this is a backward pipe chain (all ops are <|)
+        isBackwardPipe =
+            List.all (\( _, Src.At _ op ) -> op == "<|") pairs
 
         -- Check if this is string concatenation (all ops are ++)
         isStringConcat =
@@ -690,7 +694,7 @@ generateStandaloneBinops pairs finalExpr =
         allStrings =
             List.filterMap extractStringLiteral allExprs
     in
-    if isPipeChain then
+    if isForwardPipe then
         -- Pipe operator: a |> f |> g becomes g(f(a))
         -- pairs is [(a, |>), (f, |>)], finalExpr is g
         -- Result: finalExpr(pairs[n-1](pairs[n-2](...pairs[0])))
@@ -717,6 +721,30 @@ generateStandaloneBinops pairs finalExpr =
                         buildPipe (fn ++ "(" ++ arg ++ ")") rest
         in
         buildPipe firstArg functions
+
+    else if isBackwardPipe then
+        -- Backward pipe operator: f <| g <| a becomes f(g(a))
+        -- pairs is [(f, <|), (g, <|)], finalExpr is a
+        -- Result: pairs[0](pairs[1](...finalExpr))
+        let
+            arg =
+                generateStandaloneExpr finalExpr
+
+            functions =
+                pairs
+                    |> List.map (\( expr, _ ) -> generateStandaloneExpr expr)
+                    |> List.reverse
+
+            -- Build nested function calls from inside out
+            buildBackPipe innerArg fns =
+                case fns of
+                    [] ->
+                        innerArg
+
+                    fn :: rest ->
+                        buildBackPipe (fn ++ "(" ++ innerArg ++ ")") rest
+        in
+        buildBackPipe arg functions
 
     else if isStringConcat && List.length allStrings == List.length allExprs then
         -- All operands are string literals - concatenate at compile time
