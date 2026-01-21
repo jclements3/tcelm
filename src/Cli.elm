@@ -165,6 +165,12 @@ generateRtemsCode ast =
                 , "#define RTEMS_SELF 0"
                 , "extern void rtems_task_delete(rtems_id id);"
                 , ""
+                , "/* String comparison */"
+                , "static int strcmp(const char *a, const char *b) {"
+                , "    while (*a && *a == *b) { a++; b++; }"
+                , "    return (unsigned char)*a - (unsigned char)*b;"
+                , "}"
+                , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
                 , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
@@ -579,8 +585,19 @@ generateStandaloneExpr (Src.At _ expr) =
         Src.Call fn args ->
             generateStandaloneCall fn args
 
-        Src.Var _ name ->
-            "elm_" ++ name
+        Src.Var varType name ->
+            case ( varType, name ) of
+                ( Src.CapVar, "True" ) ->
+                    "1"
+
+                ( Src.CapVar, "False" ) ->
+                    "0"
+
+                _ ->
+                    "elm_" ++ name
+
+        Src.Case scrutinee branches ->
+            generateStandaloneCase scrutinee branches
 
         _ ->
             "/* unsupported expr */ 0"
@@ -648,6 +665,167 @@ generateStandaloneIf branches elseExpr =
                 ++ " : "
                 ++ generateStandaloneIf rest elseExpr
                 ++ ")"
+
+
+{-| Generate standalone C code for case expressions
+-}
+generateStandaloneCase : Src.Expr -> List ( Src.Pattern, Src.Expr ) -> String
+generateStandaloneCase scrutinee branches =
+    let
+        scrutineeStr =
+            generateStandaloneExpr scrutinee
+
+        -- Check if any branch uses a variable binding pattern
+        hasVarBinding =
+            List.any
+                (\( Src.At _ pat, _ ) ->
+                    case pat of
+                        Src.PVar _ ->
+                            True
+
+                        _ ->
+                            False
+                )
+                branches
+
+        generateBranches : List ( Src.Pattern, Src.Expr ) -> String
+        generateBranches bs =
+            case bs of
+                [] ->
+                    "0 /* no match */"
+
+                ( Src.At _ pattern, resultExpr ) :: rest ->
+                    case pattern of
+                        Src.PAnything ->
+                            -- Wildcard always matches
+                            generateStandaloneExpr resultExpr
+
+                        Src.PVar varName ->
+                            -- Variable binding - bind scrutinee to variable name
+                            "({\n            int elm_"
+                                ++ varName
+                                ++ " = elm_case_scrutinee;\n            "
+                                ++ generateStandaloneExpr resultExpr
+                                ++ ";\n        })"
+
+                        Src.PInt n ->
+                            -- Integer pattern
+                            "(elm_case_scrutinee == "
+                                ++ String.fromInt n
+                                ++ " ? "
+                                ++ generateStandaloneExpr resultExpr
+                                ++ " : "
+                                ++ generateBranches rest
+                                ++ ")"
+
+                        Src.PStr s ->
+                            -- String pattern
+                            "(strcmp(elm_case_scrutinee, \""
+                                ++ escapeC s
+                                ++ "\") == 0 ? "
+                                ++ generateStandaloneExpr resultExpr
+                                ++ " : "
+                                ++ generateBranches rest
+                                ++ ")"
+
+                        Src.PCtor _ ctorName _ ->
+                            -- Constructor pattern (True/False for bools)
+                            case ctorName of
+                                "True" ->
+                                    "(elm_case_scrutinee ? "
+                                        ++ generateStandaloneExpr resultExpr
+                                        ++ " : "
+                                        ++ generateBranches rest
+                                        ++ ")"
+
+                                "False" ->
+                                    "(!elm_case_scrutinee ? "
+                                        ++ generateStandaloneExpr resultExpr
+                                        ++ " : "
+                                        ++ generateBranches rest
+                                        ++ ")"
+
+                                _ ->
+                                    "/* unsupported ctor " ++ ctorName ++ " */ " ++ generateBranches rest
+
+                        _ ->
+                            "/* unsupported pattern */ " ++ generateBranches rest
+    in
+    if hasVarBinding then
+        -- Use compound statement to bind scrutinee to a variable
+        "({\n        int elm_case_scrutinee = "
+            ++ scrutineeStr
+            ++ ";\n        "
+            ++ generateBranches branches
+            ++ ";\n    })"
+
+    else
+        -- Simple case - use direct comparison
+        let
+            -- For simple cases, we can inline the scrutinee
+            inlineScrutinee =
+                scrutineeStr
+
+            generateSimpleBranches : List ( Src.Pattern, Src.Expr ) -> String
+            generateSimpleBranches bs =
+                case bs of
+                    [] ->
+                        "0 /* no match */"
+
+                    ( Src.At _ pattern, resultExpr ) :: rest ->
+                        case pattern of
+                            Src.PAnything ->
+                                generateStandaloneExpr resultExpr
+
+                            Src.PInt n ->
+                                "("
+                                    ++ inlineScrutinee
+                                    ++ " == "
+                                    ++ String.fromInt n
+                                    ++ " ? "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ " : "
+                                    ++ generateSimpleBranches rest
+                                    ++ ")"
+
+                            Src.PStr s ->
+                                "(strcmp("
+                                    ++ inlineScrutinee
+                                    ++ ", \""
+                                    ++ escapeC s
+                                    ++ "\") == 0 ? "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ " : "
+                                    ++ generateSimpleBranches rest
+                                    ++ ")"
+
+                            Src.PCtor _ ctorName _ ->
+                                case ctorName of
+                                    "True" ->
+                                        "("
+                                            ++ inlineScrutinee
+                                            ++ " ? "
+                                            ++ generateStandaloneExpr resultExpr
+                                            ++ " : "
+                                            ++ generateSimpleBranches rest
+                                            ++ ")"
+
+                                    "False" ->
+                                        "(!"
+                                            ++ inlineScrutinee
+                                            ++ " ? "
+                                            ++ generateStandaloneExpr resultExpr
+                                            ++ " : "
+                                            ++ generateSimpleBranches rest
+                                            ++ ")"
+
+                                    _ ->
+                                        "/* unsupported ctor " ++ ctorName ++ " */ " ++ generateSimpleBranches rest
+
+                            _ ->
+                                "/* unsupported pattern */ " ++ generateSimpleBranches rest
+        in
+        generateSimpleBranches branches
 
 
 {-| Extract the main string literal from a value (legacy, for compatibility)
