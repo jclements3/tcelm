@@ -631,7 +631,13 @@ generateStandaloneExpr (Src.At _ expr) =
             generateStandaloneLet defs body
 
         Src.Call fn args ->
-            generateStandaloneCall fn args
+            case fn of
+                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                    -- Inline immediately-called lambda
+                    generateInlinedLambda patterns args lambdaBody
+
+                _ ->
+                    generateStandaloneCall fn args
 
         Src.Var varType name ->
             case ( varType, name ) of
@@ -668,6 +674,35 @@ generateStandaloneCall fn args =
             List.map generateStandaloneExpr args
     in
     fnName ++ "(" ++ String.join ", " argStrs ++ ")"
+
+
+{-| Generate inlined lambda - substitute args for parameters and evaluate body
+-}
+generateInlinedLambda : List Src.Pattern -> List Src.Expr -> Src.Expr -> String
+generateInlinedLambda patterns args body =
+    let
+        -- Create bindings for each pattern/arg pair
+        bindings =
+            List.map2
+                (\(Src.At _ pat) arg ->
+                    case pat of
+                        Src.PVar varName ->
+                            "int elm_" ++ varName ++ " = " ++ generateStandaloneExpr arg ++ ";"
+
+                        _ ->
+                            "/* unsupported pattern in lambda */"
+                )
+                patterns
+                args
+
+        bodyExpr =
+            generateStandaloneExpr body
+    in
+    if List.isEmpty bindings then
+        bodyExpr
+
+    else
+        "({\n        " ++ String.join "\n        " bindings ++ "\n        " ++ bodyExpr ++ ";\n    })"
 
 
 {-| Generate a user-defined function in C
