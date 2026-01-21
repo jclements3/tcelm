@@ -374,6 +374,54 @@ generateRtemsCode ast =
                 , "    return __elm_right_buf;"
                 , "}"
                 , ""
+                , "/* String.trim - remove leading and trailing whitespace */"
+                , "static char __elm_trim_buf[256];"
+                , "static const char *elm_str_trim(const char *s) {"
+                , "    while (*s == ' ' || *s == '\\t' || *s == '\\n' || *s == '\\r') s++;"
+                , "    int len = 0; while (s[len]) len++;"
+                , "    while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\\t' || s[len-1] == '\\n' || s[len-1] == '\\r')) len--;"
+                , "    for (int i = 0; i < len; i++) __elm_trim_buf[i] = s[i];"
+                , "    __elm_trim_buf[len] = 0;"
+                , "    return __elm_trim_buf;"
+                , "}"
+                , ""
+                , "/* String.toUpper - convert to uppercase */"
+                , "static char __elm_toupper_buf[256];"
+                , "static const char *elm_str_to_upper(const char *s) {"
+                , "    int i = 0;"
+                , "    for (; s[i]; i++) {"
+                , "        __elm_toupper_buf[i] = (s[i] >= 'a' && s[i] <= 'z') ? s[i] - 32 : s[i];"
+                , "    }"
+                , "    __elm_toupper_buf[i] = 0;"
+                , "    return __elm_toupper_buf;"
+                , "}"
+                , ""
+                , "/* String.toLower - convert to lowercase */"
+                , "static char __elm_tolower_buf[256];"
+                , "static const char *elm_str_to_lower(const char *s) {"
+                , "    int i = 0;"
+                , "    for (; s[i]; i++) {"
+                , "        __elm_tolower_buf[i] = (s[i] >= 'A' && s[i] <= 'Z') ? s[i] + 32 : s[i];"
+                , "    }"
+                , "    __elm_tolower_buf[i] = 0;"
+                , "    return __elm_tolower_buf;"
+                , "}"
+                , ""
+                , "/* String.startsWith - check if string starts with prefix */"
+                , "static int elm_str_starts_with(const char *prefix, const char *s) {"
+                , "    while (*prefix && *s && *prefix == *s) { prefix++; s++; }"
+                , "    return !*prefix;"
+                , "}"
+                , ""
+                , "/* String.endsWith - check if string ends with suffix */"
+                , "static int elm_str_ends_with(const char *suffix, const char *s) {"
+                , "    int slen = 0, sufflen = 0;"
+                , "    while (s[slen]) slen++;"
+                , "    while (suffix[sufflen]) sufflen++;"
+                , "    if (sufflen > slen) return 0;"
+                , "    return !strcmp(s + slen - sufflen, suffix);"
+                , "}"
+                , ""
                 , "/* String.contains - check if substring exists */"
                 , "static int elm_str_contains(const char *needle, const char *haystack) {"
                 , "    if (!*needle) return 1;"
@@ -1415,6 +1463,51 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.contains wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "startsWith") ->
+            -- String.startsWith prefix s = True if s starts with prefix
+            case args of
+                [ prefix, s ] ->
+                    "elm_str_starts_with(" ++ generateStandaloneExpr prefix ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.startsWith wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "endsWith") ->
+            -- String.endsWith suffix s = True if s ends with suffix
+            case args of
+                [ suffix, s ] ->
+                    "elm_str_ends_with(" ++ generateStandaloneExpr suffix ++ ", " ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.endsWith wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "toUpper") ->
+            -- String.toUpper s = uppercase version
+            case args of
+                [ s ] ->
+                    "elm_str_to_upper(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.toUpper wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "toLower") ->
+            -- String.toLower s = lowercase version
+            case args of
+                [ s ] ->
+                    "elm_str_to_lower(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.toLower wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "trim") ->
+            -- String.trim s = remove leading/trailing whitespace
+            case args of
+                [ s ] ->
+                    "elm_str_trim(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.trim wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
