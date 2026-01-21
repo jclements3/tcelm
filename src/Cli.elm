@@ -2908,6 +2908,49 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.map wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "map2") ->
+            -- List.map2 f listA listB = apply f to pairs of elements
+            case args of
+                [ fnExpr, listAExpr, listBExpr ] ->
+                    let
+                        listAStr = generateStandaloneExpr listAExpr
+                        listBStr = generateStandaloneExpr listBExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i])"
+                    in
+                    "({ elm_list_t __lstA = " ++ listAStr ++ ", __lstB = " ++ listBStr ++ "; elm_list_t __result; __result.length = __lstA.length < __lstB.length ? __lstA.length : __lstB.length; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+                _ ->
+                    "/* List.map2 wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "map3") ->
+            -- List.map3 f listA listB listC = apply f to triples of elements
+            case args of
+                [ fnExpr, listAExpr, listBExpr, listCExpr ] ->
+                    let
+                        listAStr = generateStandaloneExpr listAExpr
+                        listBStr = generateStandaloneExpr listBExpr
+                        listCStr = generateStandaloneExpr listCExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2), Src.At _ (Src.PVar pname3) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i], elm_" ++ pname3 ++ " = __lstC.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i], __lstC.data[__i])"
+                    in
+                    "({ elm_list_t __lstA = " ++ listAStr ++ ", __lstB = " ++ listBStr ++ ", __lstC = " ++ listCStr ++ "; elm_list_t __result; int __minLen = __lstA.length; if (__lstB.length < __minLen) __minLen = __lstB.length; if (__lstC.length < __minLen) __minLen = __lstC.length; __result.length = __minLen; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+                _ ->
+                    "/* List.map3 wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "List" "filter") ->
             -- List.filter pred list = keep elements where pred returns true
             case args of
