@@ -2721,7 +2721,7 @@ generateStandaloneCall fn args =
                     let
                         listStr = generateStandaloneExpr listExpr
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; if (__lst.length == 0) ((elm_union_t){TAG_Nothing, 0}); else { elm_list_t __tail; __tail.length = __lst.length - 1; for (int __i = 0; __i < __tail.length; __i++) __tail.data[__i] = __lst.data[__i + 1]; ((elm_union_t){TAG_Just, (int)(long)&__tail}); } })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { __result = (elm_union_t){TAG_Just, __lst.length - 1}; } __result; })"
 
                 _ ->
                     "/* List.tail wrong arity */ 0"
