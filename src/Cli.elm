@@ -137,6 +137,30 @@ generateRtemsCode ast =
                     )
                 |> String.join "\n\n"
 
+        -- Collect and generate lifted local functions from all values
+        liftedFunctions =
+            ast.values
+                |> List.concatMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) =
+                                value.name
+                        in
+                        collectLocalFunctions name value.body
+                    )
+                |> List.map
+                    (\lf ->
+                        generateLiftedFunction lf.prefix lf.name lf.args lf.body
+                    )
+                |> String.join "\n\n"
+
+        liftedFunctionsCode =
+            if String.isEmpty liftedFunctions then
+                ""
+
+            else
+                "/* Lifted local functions */\n" ++ liftedFunctions ++ "\n\n"
+
         userFunctionsCode =
             if String.isEmpty userFunctions then
                 ""
@@ -244,7 +268,7 @@ generateRtemsCode ast =
                 , "/* Include framebuffer support */"
                 , "#include \"framebuffer.h\""
                 , ""
-                , userFunctionsCode ++ "/* Elm main value */"
+                , liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */"
                 , codeGen.elmMainFunc
                 , ""
                 , "/* RTEMS Init task */"
@@ -672,6 +696,127 @@ generateUserFunction name args body =
     "static int elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
 
+{-| A local function to be lifted to module level
+-}
+type alias LiftedFunc =
+    { prefix : String
+    , name : String
+    , args : List Src.Pattern
+    , body : Src.Expr
+    }
+
+
+{-| Collect local function definitions from an expression for lifting to module level
+-}
+collectLocalFunctions : String -> Src.Expr -> List LiftedFunc
+collectLocalFunctions prefix (Src.At _ expr) =
+    case expr of
+        Src.Let defs body ->
+            let
+                -- Collect functions defined in this let
+                localFuncs =
+                    defs
+                        |> List.filterMap
+                            (\(Src.At _ def) ->
+                                case def of
+                                    Src.Define (Src.At _ name) args defBody _ ->
+                                        if not (List.isEmpty args) then
+                                            Just { prefix = prefix, name = name, args = args, body = defBody }
+
+                                        else
+                                            Nothing
+
+                                    Src.Destruct _ _ ->
+                                        Nothing
+                            )
+
+                -- Recursively collect from def bodies and let body
+                nestedFuncs =
+                    defs
+                        |> List.concatMap
+                            (\(Src.At _ def) ->
+                                case def of
+                                    Src.Define (Src.At _ name) _ defBody _ ->
+                                        collectLocalFunctions (prefix ++ "_" ++ name) defBody
+
+                                    Src.Destruct _ _ ->
+                                        []
+                            )
+
+                bodyFuncs =
+                    collectLocalFunctions prefix body
+            in
+            localFuncs ++ nestedFuncs ++ bodyFuncs
+
+        Src.If branches elseExpr ->
+            let
+                branchFuncs =
+                    branches
+                        |> List.concatMap
+                            (\( cond, thenExpr ) ->
+                                collectLocalFunctions prefix cond
+                                    ++ collectLocalFunctions prefix thenExpr
+                            )
+            in
+            branchFuncs ++ collectLocalFunctions prefix elseExpr
+
+        Src.Case scrutinee branches ->
+            let
+                scrutineeFuncs =
+                    collectLocalFunctions prefix scrutinee
+
+                branchFuncs =
+                    branches
+                        |> List.concatMap (\( _, branchExpr ) -> collectLocalFunctions prefix branchExpr)
+            in
+            scrutineeFuncs ++ branchFuncs
+
+        Src.Call fn args ->
+            collectLocalFunctions prefix fn
+                ++ List.concatMap (collectLocalFunctions prefix) args
+
+        Src.Binops pairs final ->
+            let
+                pairFuncs =
+                    pairs
+                        |> List.concatMap (\( e, _ ) -> collectLocalFunctions prefix e)
+            in
+            pairFuncs ++ collectLocalFunctions prefix final
+
+        Src.Negate inner ->
+            collectLocalFunctions prefix inner
+
+        _ ->
+            []
+
+
+{-| Generate a lifted local function as a module-level function
+-}
+generateLiftedFunction : String -> String -> List Src.Pattern -> Src.Expr -> String
+generateLiftedFunction prefix funcName args body =
+    let
+        liftedName =
+            prefix ++ "_" ++ funcName
+
+        params =
+            args
+                |> List.map
+                    (\(Src.At _ pat) ->
+                        case pat of
+                            Src.PVar varName ->
+                                "int elm_" ++ varName
+
+                            _ ->
+                                "int /* unsupported pattern */"
+                    )
+                |> String.join ", "
+
+        bodyExpr =
+            generateStandaloneExpr body
+    in
+    "static int elm_" ++ liftedName ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+
+
 {-| Generate standalone C code for let bindings using GCC compound statements
 -}
 generateStandaloneLet : List (Src.Located Src.Def) -> Src.Expr -> String
@@ -685,25 +830,17 @@ generateStandaloneLet defs body =
                         "int elm_" ++ name ++ " = " ++ generateStandaloneExpr defBody ++ ";"
 
                     else
-                        -- Local function definition using GCC nested functions
+                        -- Local function - create alias to lifted function
+                        -- The actual function is lifted to module level as elm_main_<name>
+                        -- We create a function pointer alias so local calls work
                         let
-                            params =
-                                args
-                                    |> List.map
-                                        (\(Src.At _ pat) ->
-                                            case pat of
-                                                Src.PVar varName ->
-                                                    "int elm_" ++ varName
+                            numArgs =
+                                List.length args
 
-                                                _ ->
-                                                    "int /* unsupported pattern */"
-                                        )
-                                    |> String.join ", "
-
-                            bodyExpr =
-                                generateStandaloneExpr defBody
+                            argTypes =
+                                List.repeat numArgs "int" |> String.join ", "
                         in
-                        "int elm_" ++ name ++ "(" ++ params ++ ") { return " ++ bodyExpr ++ "; }"
+                        "int (*elm_" ++ name ++ ")(" ++ argTypes ++ ") = elm_main_" ++ name ++ ";"
 
                 Src.Destruct _ _ ->
                     "/* pattern destructuring not supported */"
