@@ -120,6 +120,30 @@ generateRtemsCode ast =
         mainValue =
             extractMain ast
 
+        -- Generate user-defined functions (non-main values with arguments)
+        userFunctions =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) =
+                                value.name
+                        in
+                        if name /= "main" && not (List.isEmpty value.args) then
+                            Just (generateUserFunction name value.args value.body)
+
+                        else
+                            Nothing
+                    )
+                |> String.join "\n\n"
+
+        userFunctionsCode =
+            if String.isEmpty userFunctions then
+                ""
+
+            else
+                "/* User-defined functions */\n" ++ userFunctions ++ "\n\n"
+
         -- Generate elm_main function and result handling based on type
         codeGen =
             case mainValue of
@@ -220,7 +244,7 @@ generateRtemsCode ast =
                 , "/* Include framebuffer support */"
                 , "#include \"framebuffer.h\""
                 , ""
-                , "/* Elm main value */"
+                , userFunctionsCode ++ "/* Elm main value */"
                 , codeGen.elmMainFunc
                 , ""
                 , "/* RTEMS Init task */"
@@ -620,6 +644,32 @@ generateStandaloneCall fn args =
             List.map generateStandaloneExpr args
     in
     fnName ++ "(" ++ String.join ", " argStrs ++ ")"
+
+
+{-| Generate a user-defined function in C
+-}
+generateUserFunction : String -> List Src.Pattern -> Src.Expr -> String
+generateUserFunction name args body =
+    let
+        -- Generate parameter list
+        params =
+            args
+                |> List.map
+                    (\(Src.At _ pat) ->
+                        case pat of
+                            Src.PVar varName ->
+                                "int elm_" ++ varName
+
+                            _ ->
+                                "int /* unsupported pattern */"
+                    )
+                |> String.join ", "
+
+        -- Generate function body
+        bodyExpr =
+            generateStandaloneExpr body
+    in
+    "static int elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
 
 {-| Generate standalone C code for let bindings using GCC compound statements

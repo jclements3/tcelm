@@ -76,8 +76,16 @@ extract_c_result() {
     fi
 
     # Int result - compile and run to evaluate
-    # Extract the elm_main function
-    local elm_main_func
+    # Extract user-defined functions and elm_main
+    local user_funcs=""
+    local elm_main_func=""
+
+    # Extract user-defined functions if present
+    if grep -q '/\* User-defined functions \*/' "$c_file" 2>/dev/null; then
+        user_funcs=$(sed -n '/^\/\* User-defined functions \*\//,/^\/\* Elm main value \*\//p' "$c_file" 2>/dev/null | head -n -1)
+    fi
+
+    # Extract elm_main function
     elm_main_func=$(sed -n '/^static int elm_main/,/^}/p' "$c_file" 2>/dev/null)
 
     if [ -z "$elm_main_func" ]; then
@@ -88,6 +96,7 @@ extract_c_result() {
     # Create test program
     cat > "$test_prog" << EOF
 #include <stdio.h>
+$user_funcs
 $elm_main_func
 int main(void) {
     printf("%d", elm_main());
