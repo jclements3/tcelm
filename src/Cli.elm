@@ -2864,6 +2864,128 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.repeat wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "map") ->
+            -- List.map f list = apply f to each element
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+                _ ->
+                    "/* List.map wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "filter") ->
+            -- List.filter pred list = keep elements where pred returns true
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; __result; })"
+
+                _ ->
+                    "/* List.filter wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "foldl") ->
+            -- List.foldl f init list = fold from left
+            case args of
+                [ fnExpr, initExpr, listExpr ] ->
+                    let
+                        initStr = generateStandaloneExpr initExpr
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i], __acc)"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __acc = " ++ initStr ++ "; for (int __i = 0; __i < __lst.length; __i++) __acc = " ++ fnAppStr ++ "; __acc; })"
+
+                _ ->
+                    "/* List.foldl wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "foldr") ->
+            -- List.foldr f init list = fold from right
+            case args of
+                [ fnExpr, initExpr, listExpr ] ->
+                    let
+                        initStr = generateStandaloneExpr initExpr
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i], __acc)"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __acc = " ++ initStr ++ "; for (int __i = __lst.length - 1; __i >= 0; __i--) __acc = " ++ fnAppStr ++ "; __acc; })"
+
+                _ ->
+                    "/* List.foldr wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "all") ->
+            -- List.all pred list = True if all elements satisfy pred
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __result = 1; for (int __i = 0; __i < __lst.length && __result; __i++) if (!(" ++ fnAppStr ++ ")) __result = 0; __result; })"
+
+                _ ->
+                    "/* List.all wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "any") ->
+            -- List.any pred list = True if any element satisfies pred
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __result = 0; for (int __i = 0; __i < __lst.length && !__result; __i++) if (" ++ fnAppStr ++ ") __result = 1; __result; })"
+
+                _ ->
+                    "/* List.any wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
