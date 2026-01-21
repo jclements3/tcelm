@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.reverse "")
+    always 42 99

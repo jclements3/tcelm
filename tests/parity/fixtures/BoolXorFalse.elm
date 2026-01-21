@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.reverse "")
+    if xor True True then 1 else 0

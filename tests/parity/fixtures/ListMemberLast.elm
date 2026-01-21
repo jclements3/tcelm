@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.reverse "")
+    if List.member 3 [1, 2, 3] then 1 else 0

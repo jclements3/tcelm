@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.reverse "")
+    List.product [1, 2, 3, 4, 5]

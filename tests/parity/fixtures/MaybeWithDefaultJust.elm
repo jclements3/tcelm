@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.reverse "")
+    Maybe.withDefault 0 (Just 42)

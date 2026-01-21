@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.reverse "")
+    List.length (List.drop 4 [1, 2, 3, 4, 5])
