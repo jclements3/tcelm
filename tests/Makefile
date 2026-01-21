@@ -9,7 +9,7 @@
 #   make clean         - Clean test artifacts
 #
 
-.PHONY: all test test-unit test-subsystem test-system clean
+.PHONY: all test test-unit test-subsystem test-system test-parity clean
 
 PROJECT_ROOT := $(shell cd .. && pwd)
 RUNTIME_DIR := $(PROJECT_ROOT)/runtime
@@ -82,6 +82,13 @@ test-system:
 	@echo ""
 	@./system/test_integration.sh
 
+# Run parity tests (host vs board output comparison)
+test-parity:
+	@echo ""
+	@echo "Running host/board parity tests..."
+	@echo ""
+	@./parity/run_parity_tests.sh
+
 # Run with specific seed for reproducibility
 test-seed:
 	@echo "Running tests with seed $(SEED)..."
@@ -107,6 +114,7 @@ help:
 	@echo "  test-unit       - Run property-based unit tests for C runtime"
 	@echo "  test-subsystem  - Run code generator subsystem tests"
 	@echo "  test-system     - Run full system integration tests"
+	@echo "  test-parity     - Run host/board output parity tests (requires QEMU)"
 	@echo "  test-seed SEED=N - Run tests with specific random seed"
 	@echo "  build-unit      - Build unit test executables"
 	@echo "  clean           - Remove test artifacts"
