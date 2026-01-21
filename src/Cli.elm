@@ -2714,6 +2714,30 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.head wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "tail") ->
+            -- List.tail list = Maybe rest of list after first element
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; if (__lst.length == 0) ((elm_union_t){TAG_Nothing, 0}); else { elm_list_t __tail; __tail.length = __lst.length - 1; for (int __i = 0; __i < __tail.length; __i++) __tail.data[__i] = __lst.data[__i + 1]; ((elm_union_t){TAG_Just, (int)(long)&__tail}); } })"
+
+                _ ->
+                    "/* List.tail wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "last") ->
+            -- List.last list = Maybe last element
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, __lst.data[__lst.length - 1]}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* List.last wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "List" "sum") ->
             -- List.sum list = sum of all elements
             case args of
