@@ -316,6 +316,16 @@ generateRtemsCode ast =
                 , "    return __elm_fromint_buf;"
                 , "}"
                 , ""
+                , "/* String.reverse - reverse a string */"
+                , "static char __elm_reverse_buf[256];"
+                , "static const char *elm_str_reverse(const char *s) {"
+                , "    int len = 0;"
+                , "    while (s[len]) len++;"
+                , "    for (int i = 0; i < len; i++) __elm_reverse_buf[i] = s[len - 1 - i];"
+                , "    __elm_reverse_buf[len] = 0;"
+                , "    return __elm_reverse_buf;"
+                , "}"
+                , ""
                 , "/* Memory operations (needed for struct initialization) */"
                 , "static void *memset(void *s, int c, unsigned int n) {"
                 , "    unsigned char *p = s;"
@@ -833,6 +843,30 @@ generateStandaloneBinops pairs finalExpr =
             isPowerOp =
                 List.all (\( _, Src.At _ op ) -> op == "^") pairs
 
+            -- Check if expression looks like a string
+            isStringExpr (Src.At _ e) =
+                case e of
+                    Src.Str _ ->
+                        True
+
+                    Src.Call (Src.At _ (Src.VarQual _ "String" _)) _ ->
+                        True
+
+                    _ ->
+                        False
+
+            -- Check if this is a string equality comparison (a == b where both are strings)
+            isStringEquality =
+                case pairs of
+                    [ ( leftExpr, Src.At _ "==" ) ] ->
+                        isStringExpr leftExpr || isStringExpr finalExpr
+
+                    [ ( leftExpr, Src.At _ "/=" ) ] ->
+                        isStringExpr leftExpr || isStringExpr finalExpr
+
+                    _ ->
+                        False
+
             -- Build list of all terms and operators
             buildTerms ps =
                 case ps of
@@ -876,6 +910,18 @@ generateStandaloneBinops pairs finalExpr =
         in
         if isPowerOp then
             buildPowerExpr terms
+
+        else if isStringEquality then
+            -- String comparison using strcmp
+            case pairs of
+                [ ( leftExpr, Src.At _ "==" ) ] ->
+                    "(strcmp(" ++ generateStandaloneExpr leftExpr ++ ", " ++ finalTerm ++ ") == 0)"
+
+                [ ( leftExpr, Src.At _ "/=" ) ] ->
+                    "(strcmp(" ++ generateStandaloneExpr leftExpr ++ ", " ++ finalTerm ++ ") != 0)"
+
+                _ ->
+                    "(" ++ buildExpr terms ++ ")"
 
         else
             "(" ++ buildExpr terms ++ ")"
@@ -1270,6 +1316,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.fromInt wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "reverse") ->
+            -- String.reverse s = reversed string
+            case args of
+                [ s ] ->
+                    "elm_str_reverse(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.reverse wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b

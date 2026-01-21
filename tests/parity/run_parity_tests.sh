@@ -137,6 +137,15 @@ static const char *elm_from_int(int n) {
     __elm_fromint_buf[j] = 0;
     return __elm_fromint_buf;
 }
+/* String.reverse - reverse a string */
+static char __elm_reverse_buf[256];
+static const char *elm_str_reverse(const char *s) {
+    int len = 0;
+    while (s[len]) len++;
+    for (int i = 0; i < len; i++) __elm_reverse_buf[i] = s[len - 1 - i];
+    __elm_reverse_buf[len] = 0;
+    return __elm_reverse_buf;
+}
 $ctor_defines
 $user_funcs
 $elm_main_func
