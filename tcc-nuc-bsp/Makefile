@@ -9,6 +9,10 @@
 #   make clean    - Clean build artifacts
 #
 
+# Local TCC path (use project's bundled TCC)
+PROJECT_ROOT ?= $(shell cd .. && pwd)
+TCC_DIR = $(PROJECT_ROOT)/tcc
+
 # TCC installation
 TCC_PREFIX ?= /usr/local
 TCC_LIBDIR = $(TCC_PREFIX)/lib/tcc
@@ -21,8 +25,8 @@ RTEMS_BSP = pc686
 # Tools - use system assembler for CRT, TCC for C code
 AS = as
 AR = ar
-# Use TCC to compile the syscalls (self-hosting test)
-TCC = tcc
+# Use local TCC to compile the syscalls (self-hosting test)
+TCC = $(TCC_DIR)/tcc
 ASFLAGS = --32
 TCC_CFLAGS = -m32 -Wall -Iinclude -DSTANDALONE
 

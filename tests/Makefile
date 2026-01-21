@@ -13,10 +13,11 @@
 
 PROJECT_ROOT := $(shell cd .. && pwd)
 RUNTIME_DIR := $(PROJECT_ROOT)/runtime
+TCC_DIR := $(PROJECT_ROOT)/tcc
 
-# Compiler flags
-CC := gcc
-CFLAGS := -Wall -Wextra -g -I$(RUNTIME_DIR)
+# Compiler flags (use local TCC)
+CC := $(TCC_DIR)/tcc
+CFLAGS := -Wall -I$(RUNTIME_DIR)
 LDFLAGS := -lm
 
 # Test directories

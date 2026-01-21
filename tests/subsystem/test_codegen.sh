@@ -12,6 +12,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_DIR="$PROJECT_ROOT/runtime"
+TCC="$PROJECT_ROOT/tcc/tcc"
 TEST_DIR="$PROJECT_ROOT/tests/fixtures"
 TMP_DIR="/tmp/tcelm_codegen_tests"
 
@@ -45,7 +46,7 @@ log_skip() {
     SKIPPED=$((SKIPPED + 1))
 }
 
-# Test that a module compiles to C and the C compiles with gcc
+# Test that a module compiles to C and the C compiles with tcc
 test_module_compiles() {
     local name="$1"
     local elm_file="$2"
@@ -64,11 +65,11 @@ test_module_compiles() {
         return
     fi
 
-    # Compile with gcc
-    if gcc -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" -Wall -Wextra 2>"$TMP_DIR/${name}_gcc.log"; then
+    # Compile with tcc
+    if "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" -Wall 2>"$TMP_DIR/${name}_tcc.log"; then
         log_pass "$name compiles"
     else
-        log_fail "$name" "gcc compilation failed: $(cat "$TMP_DIR/${name}_gcc.log" | head -5)"
+        log_fail "$name" "tcc compilation failed: $(cat "$TMP_DIR/${name}_tcc.log" | head -5)"
     fi
 }
 

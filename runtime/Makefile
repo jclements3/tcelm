@@ -22,13 +22,16 @@ TEST_RUNTIME_SRC = test_runtime.c
 TEST_RTEMS_SRC = test_rtems.c
 TEST_SHELL_OPS_SRC = test_shell_ops.c
 
-# Host compiler
-HOST_CC = gcc
-HOST_CFLAGS = -Wall -Wextra -O2 -g
+# Local TCC path (use project's bundled TCC)
+TCC_DIR ?= $(shell cd .. && pwd)/tcc
+
+# Host compiler (use local TCC)
+HOST_CC = $(TCC_DIR)/tcc
+HOST_CFLAGS = -Wall
 HOST_LDFLAGS = -lm
 
 # TCC (Tiny C Compiler) - for fast iteration
-TCC = tcc
+TCC = $(TCC_DIR)/tcc
 TCC_FLAGS = -Wall
 
 # RTEMS cross-compiler

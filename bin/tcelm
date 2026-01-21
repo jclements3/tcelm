@@ -124,11 +124,11 @@ case "$TARGET" in
             -I"$RUNTIME_DIR"
         ;;
     native)
-        gcc -c "$C_FILE" -o "$O_FILE"
+        "$TCC_DIR/tcc" -c "$C_FILE" -o "$O_FILE"
         ;;
     host)
-        gcc -c "$C_FILE" -o "$O_FILE" \
-            -I"$RUNTIME_DIR" -m32
+        "$TCC_DIR/tcc" -c "$C_FILE" -o "$O_FILE" \
+            -I"$RUNTIME_DIR"
         ;;
     *)
         echo "Unknown target: $TARGET" >&2
@@ -169,10 +169,10 @@ STUB
             -o "$OUTPUT"
         ;;
     native)
-        gcc -o "$OUTPUT" "$O_FILE"
+        "$TCC_DIR/tcc" -o "$OUTPUT" "$O_FILE"
         ;;
     host)
-        gcc -m32 -o "$OUTPUT" "$O_FILE" -L"$RUNTIME_DIR"
+        "$TCC_DIR/tcc" -o "$OUTPUT" "$O_FILE" -L"$RUNTIME_DIR"
         ;;
 esac
 

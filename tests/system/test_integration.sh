@@ -3,7 +3,7 @@
 # test_integration.sh - System-level integration tests for tcelm
 #
 # Tests the full compilation pipeline:
-# Elm source -> tcelm -> C code -> gcc -> executable -> run
+# Elm source -> tcelm -> C code -> tcc -> executable -> run
 #
 # Also includes property-based testing by generating random Elm programs.
 
@@ -12,6 +12,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_DIR="$PROJECT_ROOT/runtime"
+TCC="$PROJECT_ROOT/tcc/tcc"
 TMP_DIR="/tmp/tcelm_integration_tests"
 
 # Colors
@@ -59,8 +60,8 @@ compile_and_link() {
             return 1
         fi
 
-        if ! gcc -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>"$TMP_DIR/gcc_${mod_name}.log"; then
-            log_fail "$name" "gcc failed for $mod: $(head -3 "$TMP_DIR/gcc_${mod_name}.log")"
+        if ! "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>"$TMP_DIR/tcc_${mod_name}.log"; then
+            log_fail "$name" "tcc failed for $mod: $(head -3 "$TMP_DIR/tcc_${mod_name}.log")"
             return 1
         fi
 
@@ -257,10 +258,10 @@ test_arith_compiles() {
         local o_file="$TMP_DIR/${name}.o"
 
         if node "$PROJECT_ROOT/bin/tcelm-compile.js" "$elm_file" --target module > "$c_file" 2>/dev/null; then
-            if gcc -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
+            if "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
                 log_pass "Arithmetic test $i (expected: $expected)"
             else
-                log_fail "Arithmetic test $i" "gcc compilation failed"
+                log_fail "Arithmetic test $i" "tcc compilation failed"
             fi
         else
             log_fail "Arithmetic test $i" "tcelm compilation failed"
@@ -285,10 +286,10 @@ test_string_compiles() {
         local o_file="$TMP_DIR/${name}.o"
 
         if node "$PROJECT_ROOT/bin/tcelm-compile.js" "$elm_file" --target module > "$c_file" 2>/dev/null; then
-            if gcc -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
+            if "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
                 log_pass "String test $i"
             else
-                log_fail "String test $i" "gcc compilation failed"
+                log_fail "String test $i" "tcc compilation failed"
             fi
         else
             log_fail "String test $i" "tcelm compilation failed"
@@ -313,10 +314,10 @@ test_list_compiles() {
         local o_file="$TMP_DIR/${name}.o"
 
         if node "$PROJECT_ROOT/bin/tcelm-compile.js" "$elm_file" --target module > "$c_file" 2>/dev/null; then
-            if gcc -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
+            if "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
                 log_pass "List test $i"
             else
-                log_fail "List test $i" "gcc compilation failed"
+                log_fail "List test $i" "tcc compilation failed"
             fi
         else
             log_fail "List test $i" "tcelm compilation failed"
@@ -337,7 +338,7 @@ test_self_hosting() {
         if node "$PROJECT_ROOT/bin/tcelm-compile.js" "$PROJECT_ROOT/src/Generate/C.elm" --target module > "$c_file" 2>/dev/null; then
             local line_count=$(wc -l < "$c_file")
             if [ "$line_count" -gt 1000 ]; then
-                if gcc -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
+                if "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" 2>/dev/null; then
                     log_pass "Self-hosting: Generate/C.elm ($line_count lines of C)"
                 else
                     log_fail "Self-hosting" "Generated C doesn't compile"

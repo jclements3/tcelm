@@ -31,7 +31,17 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y gcc make
+        sudo apt-get install -y make
+
+    - name: Build local TCC
+      run: |
+        git clone https://repo.or.cz/tinycc.git tcc-src
+        cd tcc-src
+        ./configure --prefix=$GITHUB_WORKSPACE/tcc
+        make
+        make install
+        cd ..
+        rm -rf tcc-src
 
     - name: Build Elm compiler (tcelm-compiler.js)
       run: |
@@ -72,6 +82,16 @@ jobs:
     - name: Install Elm
       run: npm install -g elm
 
+    - name: Build local TCC
+      run: |
+        git clone https://repo.or.cz/tinycc.git tcc-src
+        cd tcc-src
+        ./configure --prefix=$GITHUB_WORKSPACE/tcc
+        make
+        make install
+        cd ..
+        rm -rf tcc-src
+
     - name: Build tcelm
       run: |
         elm make src/Cli.elm --output=bin/tcelm-compiler.js
@@ -80,19 +100,19 @@ jobs:
     - name: Test self-hosting (compile Generate/C.elm)
       run: |
         node bin/tcelm-compile.js src/Generate/C.elm --target module > /tmp/generate_c.c
-        gcc -c /tmp/generate_c.c -I runtime -o /tmp/generate_c.o
+        ./tcc/bin/tcc -c /tmp/generate_c.c -I runtime -o /tmp/generate_c.o
         echo "Self-hosting test passed: Generate/C.elm compiles successfully"
 
     - name: Test self-hosting (compile Parse/Primitives.elm)
       run: |
         node bin/tcelm-compile.js src/Parse/Primitives.elm --target module > /tmp/primitives.c
-        gcc -c /tmp/primitives.c -I runtime -o /tmp/primitives.o
+        ./tcc/bin/tcc -c /tmp/primitives.c -I runtime -o /tmp/primitives.o
         echo "Self-hosting test passed: Parse/Primitives.elm compiles successfully"
 
     - name: Test self-hosting (compile AST/Source.elm)
       run: |
         node bin/tcelm-compile.js src/AST/Source.elm --target module > /tmp/ast_source.c
-        gcc -c /tmp/ast_source.c -I runtime -o /tmp/ast_source.o
+        ./tcc/bin/tcc -c /tmp/ast_source.c -I runtime -o /tmp/ast_source.o
         echo "Self-hosting test passed: AST/Source.elm compiles successfully"
 
     - name: Test module linking
@@ -120,6 +140,16 @@ jobs:
 
     - name: Install Elm
       run: npm install -g elm
+
+    - name: Build local TCC
+      run: |
+        git clone https://repo.or.cz/tinycc.git tcc-src
+        cd tcc-src
+        ./configure --prefix=$GITHUB_WORKSPACE/tcc
+        make
+        make install
+        cd ..
+        rm -rf tcc-src
 
     - name: Build
       run: |
@@ -151,6 +181,16 @@ jobs:
     - name: Install Elm
       run: npm install -g elm
 
+    - name: Build local TCC
+      run: |
+        git clone https://repo.or.cz/tinycc.git tcc-src
+        cd tcc-src
+        ./configure --prefix=$GITHUB_WORKSPACE/tcc
+        make
+        make install
+        cd ..
+        rm -rf tcc-src
+
     - name: Build
       run: |
         elm make src/Cli.elm --output=bin/tcelm-compiler.js
@@ -176,6 +216,16 @@ jobs:
     - name: Install Elm
       run: npm install -g elm elm-format
 
+    - name: Build local TCC
+      run: |
+        git clone https://repo.or.cz/tinycc.git tcc-src
+        cd tcc-src
+        ./configure --prefix=$GITHUB_WORKSPACE/tcc
+        make
+        make install
+        cd ..
+        rm -rf tcc-src
+
     - name: Check Elm formatting
       run: |
         elm-format --validate src/ || echo "Warning: Elm formatting issues found"
@@ -187,9 +237,11 @@ jobs:
 
     - name: Check C code with compiler warnings
       run: |
-        make -C runtime CFLAGS="-Wall -Wextra -Werror -pedantic" clean all || true
+        make -C runtime CFLAGS="-Wall" clean all || true
 
   # Generate test coverage report
+  # Note: TCC does not support coverage instrumentation like GCC
+  # This job runs tests but does not generate coverage data
   coverage:
     runs-on: ubuntu-latest
     needs: build-linux
@@ -206,23 +258,25 @@ jobs:
     - name: Install dependencies
       run: |
         npm install -g elm
-        sudo apt-get update
-        sudo apt-get install -y gcov lcov
 
-    - name: Build with coverage
+    - name: Build local TCC
+      run: |
+        git clone https://repo.or.cz/tinycc.git tcc-src
+        cd tcc-src
+        ./configure --prefix=$GITHUB_WORKSPACE/tcc
+        make
+        make install
+        cd ..
+        rm -rf tcc-src
+
+    - name: Build
       run: |
         elm make src/Cli.elm --output=bin/tcelm-compiler.js
-        make -C runtime CFLAGS="-Wall -g -fprofile-arcs -ftest-coverage -I."
+        make -C runtime
 
-    - name: Run tests and collect coverage
+    - name: Run tests
       run: |
         cd tests
-        make CFLAGS="-Wall -g -fprofile-arcs -ftest-coverage -I../runtime" build-unit
+        make build-unit
         # Run tests
         for test in unit/runtime/test_*; do ./$test || true; done
-
-    - name: Generate coverage report
-      run: |
-        cd runtime
-        gcov *.c || true
-        echo "Coverage data generated"
