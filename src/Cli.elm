@@ -1847,6 +1847,33 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Maybe.map wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Maybe" "andThen") ->
+            -- Maybe.andThen f maybe = apply f (returns Maybe) if Just, else Nothing
+            case args of
+                [ fnExpr, maybeVal ] ->
+                    let
+                        maybeStr = generateStandaloneExpr maybeVal
+                        -- Generate the function application to __maybe_val.data (returns Maybe)
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At pos (Src.Lambda patterns body) ->
+                                    -- Inline lambda: bind __maybe_val.data to pattern and evaluate body
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar varName) ] ->
+                                            "({ int elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.andThen */ ((elm_union_t){TAG_Nothing, 0})"
+
+                                _ ->
+                                    -- Regular function call
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_val.data)"
+                    in
+                    "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; __maybe_val.tag == TAG_Just ? " ++ fnAppStr ++ " : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.andThen wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
