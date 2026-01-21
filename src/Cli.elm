@@ -588,6 +588,20 @@ generateRtemsCode ast =
                 , "    return (elm_union_t){TAG_Just, neg ? -result : result};"
                 , "}"
                 , ""
+                , "/* String.toFloat - parse float string (returns integer part) */"
+                , "static elm_union_t elm_str_to_float(const char *s) {"
+                , "    int result = 0, neg = 0, i = 0;"
+                , "    if (!s || !*s) return (elm_union_t){TAG_Nothing, 0};"
+                , "    if (s[0] == '-') { neg = 1; i = 1; }"
+                , "    else if (s[0] == '+') { i = 1; }"
+                , "    if (!s[i]) return (elm_union_t){TAG_Nothing, 0};"
+                , "    for (; s[i] && s[i] != '.'; i++) {"
+                , "        if (s[i] < '0' || s[i] > '9') return (elm_union_t){TAG_Nothing, 0};"
+                , "        result = result * 10 + (s[i] - '0');"
+                , "    }"
+                , "    return (elm_union_t){TAG_Just, neg ? -result : result};"
+                , "}"
+                , ""
                 , "/* Serial port output (COM1) */"
                 , "static inline void outb(unsigned short port, unsigned char val) {"
                 , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
@@ -1448,6 +1462,15 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* always wrong arity */ 0"
 
+        Src.At _ (Src.Var _ "never") ->
+            -- never x = unreachable code (halts)
+            case args of
+                [ _ ] ->
+                    "({ while(1); 0; })"
+
+                _ ->
+                    "/* never wrong arity */ 0"
+
         Src.At _ (Src.Var _ "not") ->
             -- not x = boolean negation
             case args of
@@ -1780,6 +1803,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.fromInt wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "toFloat") ->
+            -- String.toFloat s = Maybe Float (returns integer part)
+            case args of
+                [ s ] ->
+                    "elm_str_to_float(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.toFloat wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "left") ->
             -- String.left n s = first n characters
