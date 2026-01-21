@@ -110,6 +110,13 @@ typedef struct { int tag; int data; } elm_union_t;
 /* Built-in Maybe type tags */
 #define TAG_Nothing 0
 #define TAG_Just 1
+/* String.fromChar - convert char to single-char string */
+static char __elm_fromchar_buf[2];
+static const char *elm_str_from_char(char c) {
+    __elm_fromchar_buf[0] = c;
+    __elm_fromchar_buf[1] = 0;
+    return __elm_fromchar_buf;
+}
 /* String length function */
 static int elm_strlen(const char *s) {
     int len = 0;

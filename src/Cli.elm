@@ -353,6 +353,14 @@ generateRtemsCode ast =
                 , "#define TAG_Nothing 0"
                 , "#define TAG_Just 1"
                 , ""
+                , "/* String.fromChar - convert char to single-char string */"
+                , "static char __elm_fromchar_buf[2];"
+                , "static const char *elm_str_from_char(char c) {"
+                , "    __elm_fromchar_buf[0] = c;"
+                , "    __elm_fromchar_buf[1] = 0;"
+                , "    return __elm_fromchar_buf;"
+                , "}"
+                , ""
                 , "/* String.left - take first n characters */"
                 , "static char __elm_left_buf[256];"
                 , "static const char *elm_str_left(int n, const char *s) {"
@@ -1467,6 +1475,35 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* Char.isAlphaNum wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "toUpper") ->
+            -- Char.toUpper c = uppercase version of c
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= 'a' && " ++ cStr ++ " <= 'z') ? " ++ cStr ++ " - 32 : " ++ cStr ++ ")"
+
+                _ ->
+                    "/* Char.toUpper wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "toLower") ->
+            -- Char.toLower c = lowercase version of c
+            case args of
+                [ c ] ->
+                    let cStr = generateStandaloneExpr c
+                    in "((" ++ cStr ++ " >= 'A' && " ++ cStr ++ " <= 'Z') ? " ++ cStr ++ " + 32 : " ++ cStr ++ ")"
+
+                _ ->
+                    "/* Char.toLower wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "fromChar") ->
+            -- String.fromChar c = single-character string
+            case args of
+                [ c ] ->
+                    "elm_str_from_char(" ++ generateStandaloneExpr c ++ ")"
+
+                _ ->
+                    "/* String.fromChar wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "length") ->
             -- String.length s = number of characters in s
