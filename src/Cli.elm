@@ -380,6 +380,10 @@ generateRtemsCode ast =
                 , "#define TAG_Err 0"
                 , "#define TAG_Ok 1"
                 , ""
+                , "/* Built-in List type - fixed-size array (max 16 elements) */"
+                , "#define ELM_LIST_MAX 16"
+                , "typedef struct { int length; int data[ELM_LIST_MAX]; } elm_list_t;"
+                , ""
                 , "/* String.fromChar - convert char to single-char string */"
                 , "static char __elm_fromchar_buf[2];"
                 , "static const char *elm_str_from_char(char c) {"
@@ -1383,6 +1387,21 @@ generateStandaloneExpr (Src.At _ expr) =
                         |> String.join " "
             in
             "({ typeof(elm_" ++ recordName ++ ") __update_tmp = elm_" ++ recordName ++ "; " ++ updateAssignments ++ " __update_tmp; })"
+
+        Src.List elements ->
+            -- Generate list literal as elm_list_t
+            let
+                numElements =
+                    List.length elements
+
+                values =
+                    List.map generateStandaloneExpr elements
+                        |> String.join ", "
+            in
+            if numElements == 0 then
+                "((elm_list_t){ .length = 0 })"
+            else
+                "((elm_list_t){ .length = " ++ String.fromInt numElements ++ ", .data = { " ++ values ++ " } })"
 
         _ ->
             "/* unsupported expr */ 0"
@@ -2658,6 +2677,90 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* Debug.todo wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "length") ->
+            -- List.length list = number of elements
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "(" ++ listStr ++ ").length"
+
+                _ ->
+                    "/* List.length wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "isEmpty") ->
+            -- List.isEmpty list = True if list is empty
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "((" ++ listStr ++ ").length == 0)"
+
+                _ ->
+                    "/* List.isEmpty wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "head") ->
+            -- List.head list = Maybe first element
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, __lst.data[0]}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* List.head wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "sum") ->
+            -- List.sum list = sum of all elements
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i]; __sum; })"
+
+                _ ->
+                    "/* List.sum wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "product") ->
+            -- List.product list = product of all elements
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; int __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i]; __prod; })"
+
+                _ ->
+                    "/* List.product wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "maximum") ->
+            -- List.maximum list = Maybe maximum element
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; if (__lst.length == 0) ((elm_union_t){TAG_Nothing, 0}); else { int __max = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] > __max) __max = __lst.data[__i]; ((elm_union_t){TAG_Just, __max}); } })"
+
+                _ ->
+                    "/* List.maximum wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "minimum") ->
+            -- List.minimum list = Maybe minimum element
+            case args of
+                [ listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; if (__lst.length == 0) ((elm_union_t){TAG_Nothing, 0}); else { int __min = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] < __min) __min = __lst.data[__i]; ((elm_union_t){TAG_Just, __min}); } })"
+
+                _ ->
+                    "/* List.minimum wrong arity */ 0"
 
         _ ->
             -- Regular function call

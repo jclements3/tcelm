@@ -116,6 +116,9 @@ typedef struct { int _0; int _1; int _2; } elm_tuple3_t;
 /* Built-in Result type tags */
 #define TAG_Err 0
 #define TAG_Ok 1
+/* Built-in List type - fixed-size array (max 16 elements) */
+#define ELM_LIST_MAX 16
+typedef struct { int length; int data[ELM_LIST_MAX]; } elm_list_t;
 /* String.fromChar - convert char to single-char string */
 static char __elm_fromchar_buf[2];
 static const char *elm_str_from_char(char c) {
