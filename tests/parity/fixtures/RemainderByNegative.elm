@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    remainderBy 3 (-1)
+    remainderBy 3 (-7)

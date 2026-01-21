@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    Bitwise.and (Bitwise.complement 0) 255
+    negate 42

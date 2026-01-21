@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    Bitwise.and (Bitwise.complement 0) 255
+    Bitwise.shiftRightBy 2 16

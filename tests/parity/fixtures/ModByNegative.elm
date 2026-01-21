@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    modBy 3 (-1)
+    modBy 3 (-7)
