@@ -1505,6 +1505,40 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Tuple.mapSecond wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Tuple" "mapBoth") ->
+            -- Tuple.mapBoth f g (a, b) = (f a, g b)
+            case args of
+                [ fnFirst, fnSecond, tupleExpr ] ->
+                    let
+                        tupleStr = generateStandaloneExpr tupleExpr
+
+                        fnFirstAppStr =
+                            case fnFirst of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnFirst ++ "(__tuple_in._0)"
+
+                        fnSecondAppStr =
+                            case fnSecond of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnSecond ++ "(__tuple_in._1)"
+                    in
+                    "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = " ++ fnFirstAppStr ++ "; __tuple_out._1 = " ++ fnSecondAppStr ++ "; __tuple_out; })"
+
+                _ ->
+                    "/* Tuple.mapBoth wrong arity */ 0"
+
         Src.At _ (Src.Var _ "compare") ->
             -- compare a b = Order (LT, EQ, or GT)
             case args of
@@ -1831,6 +1865,112 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.padRight wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "any") ->
+            -- String.any pred s = True if any char satisfies pred
+            case args of
+                [ predExpr, strExpr ] ->
+                    let
+                        strStr = generateStandaloneExpr strExpr
+
+                        -- Generate predicate application for a char
+                        predAppStr =
+                            case predExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+
+                                Src.At _ (Src.VarQual _ "Char" fnName) ->
+                                    -- Handle Char.isDigit, Char.isAlpha, etc.
+                                    generateCharPredCall fnName "__str[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr predExpr ++ "(__str[__i])"
+                    in
+                    "({ const char *__str = " ++ strStr ++ "; int __result = 0; for (int __i = 0; __str[__i]; __i++) { if (" ++ predAppStr ++ ") { __result = 1; break; } } __result; })"
+
+                _ ->
+                    "/* String.any wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "all") ->
+            -- String.all pred s = True if all chars satisfy pred
+            case args of
+                [ predExpr, strExpr ] ->
+                    let
+                        strStr = generateStandaloneExpr strExpr
+
+                        -- Generate predicate application for a char
+                        predAppStr =
+                            case predExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+
+                                Src.At _ (Src.VarQual _ "Char" fnName) ->
+                                    -- Handle Char.isDigit, Char.isAlpha, etc.
+                                    generateCharPredCall fnName "__str[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr predExpr ++ "(__str[__i])"
+                    in
+                    "({ const char *__str = " ++ strStr ++ "; int __result = 1; for (int __i = 0; __str[__i]; __i++) { if (!(" ++ predAppStr ++ ")) { __result = 0; break; } } __result; })"
+
+                _ ->
+                    "/* String.all wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "foldl") ->
+            -- String.foldl f init str = fold from left
+            case args of
+                [ fnExpr, initExpr, strExpr ] ->
+                    let
+                        strStr = generateStandaloneExpr strExpr
+                        initStr = generateStandaloneExpr initExpr
+
+                        -- Generate function application: f char acc
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar charName), Src.At _ (Src.PVar accName) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ charName ++ " = __str[__i]; int elm_" ++ accName ++ " = __acc; " ++ bodyStr ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__str[__i], __acc)"
+                    in
+                    "({ const char *__str = " ++ strStr ++ "; int __acc = " ++ initStr ++ "; for (int __i = 0; __str[__i]; __i++) { __acc = " ++ fnAppStr ++ "; } __acc; })"
+
+                _ ->
+                    "/* String.foldl wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "foldr") ->
+            -- String.foldr f init str = fold from right
+            case args of
+                [ fnExpr, initExpr, strExpr ] ->
+                    let
+                        strStr = generateStandaloneExpr strExpr
+                        initStr = generateStandaloneExpr initExpr
+
+                        -- Generate function application: f char acc
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar charName), Src.At _ (Src.PVar accName) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ charName ++ " = __str[__i]; int elm_" ++ accName ++ " = __acc; " ++ bodyStr ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__str[__i], __acc)"
+                    in
+                    "({ const char *__str = " ++ strStr ++ "; int __len = 0; while (__str[__len]) __len++; int __acc = " ++ initStr ++ "; for (int __i = __len - 1; __i >= 0; __i--) { __acc = " ++ fnAppStr ++ "; } __acc; })"
+
+                _ ->
+                    "/* String.foldr wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
@@ -2868,6 +3008,36 @@ escapeC s =
                 , "    __asm__ volatile (\"inb %1, %0\" : \"=a\"(ret) : \"Nd\"(port));"
                 , "    return ret;"
 -}
+
+
+{-| Generate inline code for Char predicates
+-}
+generateCharPredCall : String -> String -> String
+generateCharPredCall fnName charExpr =
+    case fnName of
+        "isDigit" ->
+            "(" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9')"
+
+        "isAlpha" ->
+            "((" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z'))"
+
+        "isUpper" ->
+            "(" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z')"
+
+        "isLower" ->
+            "(" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z')"
+
+        "isAlphaNum" ->
+            "((" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z') || (" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9'))"
+
+        "isHexDigit" ->
+            "((" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9') || (" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'f') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'F'))"
+
+        "isOctDigit" ->
+            "(" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '7')"
+
+        _ ->
+            "/* unknown Char predicate: " ++ fnName ++ " */ 0"
 
 
 formatErrors : List (Parse.Primitives.DeadEnd Reporting.Error.Syntax.Problem) -> String
