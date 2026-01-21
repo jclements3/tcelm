@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    Char.toCode (Char.toUpper 'a')
+    if Char.isUpper 'a' then 1 else 0

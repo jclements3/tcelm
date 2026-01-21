@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    Char.toCode (Char.toUpper 'a')
+    List.foldl (\x acc -> x * acc) 1 [2, 3, 4]

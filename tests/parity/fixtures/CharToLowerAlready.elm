@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    Char.toCode (Char.toUpper 'a')
+    Char.toCode (Char.toLower 'z')
