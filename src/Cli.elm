@@ -1972,6 +1972,61 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* String.foldr wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "String" "filter") ->
+            -- String.filter pred str = filter characters by predicate
+            case args of
+                [ predExpr, strExpr ] ->
+                    let
+                        strStr = generateStandaloneExpr strExpr
+
+                        predAppStr =
+                            case predExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+
+                                Src.At _ (Src.VarQual _ "Char" fnName) ->
+                                    generateCharPredCall fnName "__str[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr predExpr ++ "(__str[__i])"
+                    in
+                    "({ static char __filter_buf[256]; const char *__str = " ++ strStr ++ "; int __j = 0; for (int __i = 0; __str[__i] && __j < 255; __i++) { if (" ++ predAppStr ++ ") { __filter_buf[__j++] = __str[__i]; } } __filter_buf[__j] = 0; __filter_buf; })"
+
+                _ ->
+                    "/* String.filter wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "map") ->
+            -- String.map f str = apply f to each character
+            case args of
+                [ fnExpr, strExpr ] ->
+                    let
+                        strStr = generateStandaloneExpr strExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+
+                                Src.At _ (Src.VarQual _ "Char" "toUpper") ->
+                                    "((__str[__i] >= 'a' && __str[__i] <= 'z') ? __str[__i] - 32 : __str[__i])"
+
+                                Src.At _ (Src.VarQual _ "Char" "toLower") ->
+                                    "((__str[__i] >= 'A' && __str[__i] <= 'Z') ? __str[__i] + 32 : __str[__i])"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__str[__i])"
+                    in
+                    "({ static char __map_buf[256]; const char *__str = " ++ strStr ++ "; int __i = 0; for (; __str[__i] && __i < 255; __i++) { __map_buf[__i] = " ++ fnAppStr ++ "; } __map_buf[__i] = 0; __map_buf; })"
+
+                _ ->
+                    "/* String.map wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
             case args of
@@ -2253,6 +2308,69 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* Maybe.map3 wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Maybe" "map4") ->
+            -- Maybe.map4 f maybeA maybeB maybeC maybeD = apply f if all four are Just
+            case args of
+                [ fnExpr, maybeA, maybeB, maybeC, maybeD ] ->
+                    let
+                        maybeAStr = generateStandaloneExpr maybeA
+                        maybeBStr = generateStandaloneExpr maybeB
+                        maybeCStr = generateStandaloneExpr maybeC
+                        maybeDStr = generateStandaloneExpr maybeD
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2), Src.At _ (Src.PVar pname3), Src.At _ (Src.PVar pname4) ] ->
+                                            let
+                                                bodyStr = generateStandaloneExpr lambdaBody
+                                            in
+                                            "({ int elm_" ++ pname1 ++ " = __maybe_a.data; int elm_" ++ pname2 ++ " = __maybe_b.data; int elm_" ++ pname3 ++ " = __maybe_c.data; int elm_" ++ pname4 ++ " = __maybe_d.data; " ++ bodyStr ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.map4 */ 0"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data, __maybe_c.data, __maybe_d.data)"
+                    in
+                    "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; elm_union_t __maybe_c = " ++ maybeCStr ++ "; elm_union_t __maybe_d = " ++ maybeDStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just && __maybe_c.tag == TAG_Just && __maybe_d.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.map4 wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Maybe" "map5") ->
+            -- Maybe.map5 f a b c d e = apply f if all five are Just
+            case args of
+                [ fnExpr, maybeA, maybeB, maybeC, maybeD, maybeE ] ->
+                    let
+                        maybeAStr = generateStandaloneExpr maybeA
+                        maybeBStr = generateStandaloneExpr maybeB
+                        maybeCStr = generateStandaloneExpr maybeC
+                        maybeDStr = generateStandaloneExpr maybeD
+                        maybeEStr = generateStandaloneExpr maybeE
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar p1), Src.At _ (Src.PVar p2), Src.At _ (Src.PVar p3), Src.At _ (Src.PVar p4), Src.At _ (Src.PVar p5) ] ->
+                                            let
+                                                bodyStr = generateStandaloneExpr lambdaBody
+                                            in
+                                            "({ int elm_" ++ p1 ++ " = __maybe_a.data; int elm_" ++ p2 ++ " = __maybe_b.data; int elm_" ++ p3 ++ " = __maybe_c.data; int elm_" ++ p4 ++ " = __maybe_d.data; int elm_" ++ p5 ++ " = __maybe_e.data; " ++ bodyStr ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.map5 */ 0"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data, __maybe_c.data, __maybe_d.data, __maybe_e.data)"
+                    in
+                    "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; elm_union_t __maybe_c = " ++ maybeCStr ++ "; elm_union_t __maybe_d = " ++ maybeDStr ++ "; elm_union_t __maybe_e = " ++ maybeEStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just && __maybe_c.tag == TAG_Just && __maybe_d.tag == TAG_Just && __maybe_e.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.map5 wrong arity */ 0"
 
         _ ->
             -- Regular function call
