@@ -666,6 +666,10 @@ exprToMainValue (Src.At region expr) =
 generateStandaloneBinops : List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
 generateStandaloneBinops pairs finalExpr =
     let
+        -- Check if this is a pipe chain (all ops are |>)
+        isPipeChain =
+            List.all (\( _, Src.At _ op ) -> op == "|>") pairs
+
         -- Check if this is string concatenation (all ops are ++)
         isStringConcat =
             List.all (\( _, Src.At _ op ) -> op == "++") pairs
@@ -686,7 +690,35 @@ generateStandaloneBinops pairs finalExpr =
         allStrings =
             List.filterMap extractStringLiteral allExprs
     in
-    if isStringConcat && List.length allStrings == List.length allExprs then
+    if isPipeChain then
+        -- Pipe operator: a |> f |> g becomes g(f(a))
+        -- pairs is [(a, |>), (f, |>)], finalExpr is g
+        -- Result: finalExpr(pairs[n-1](pairs[n-2](...pairs[0])))
+        let
+            firstArg =
+                case pairs of
+                    ( expr, _ ) :: _ ->
+                        generateStandaloneExpr expr
+
+                    [] ->
+                        generateStandaloneExpr finalExpr
+
+            functions =
+                (List.drop 1 pairs |> List.map (\( expr, _ ) -> generateStandaloneExpr expr))
+                    ++ [ generateStandaloneExpr finalExpr ]
+
+            -- Build nested function calls
+            buildPipe arg fns =
+                case fns of
+                    [] ->
+                        arg
+
+                    fn :: rest ->
+                        buildPipe (fn ++ "(" ++ arg ++ ")") rest
+        in
+        buildPipe firstArg functions
+
+    else if isStringConcat && List.length allStrings == List.length allExprs then
         -- All operands are string literals - concatenate at compile time
         "\"" ++ escapeC (String.concat allStrings) ++ "\""
 
