@@ -618,6 +618,10 @@ generateStandaloneExpr (Src.At _ expr) =
         Src.Str s ->
             "\"" ++ escapeC s ++ "\""
 
+        Src.Chr c ->
+            -- Char as integer (ASCII value)
+            "'" ++ escapeC c ++ "'"
+
         Src.Negate inner ->
             "(-" ++ generateStandaloneExpr inner ++ ")"
 
@@ -968,6 +972,16 @@ generateStandaloneCase scrutinee branches =
                                 ++ generateBranches rest
                                 ++ ")"
 
+                        Src.PChr c ->
+                            -- Char pattern
+                            "(elm_case_scrutinee == '"
+                                ++ escapeC c
+                                ++ "' ? "
+                                ++ generateStandaloneExpr resultExpr
+                                ++ " : "
+                                ++ generateBranches rest
+                                ++ ")"
+
                         Src.PCtor _ ctorName _ ->
                             -- Constructor pattern (True/False for bools)
                             case ctorName of
@@ -1034,6 +1048,17 @@ generateStandaloneCase scrutinee branches =
                                     ++ ", \""
                                     ++ escapeC s
                                     ++ "\") == 0 ? "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ " : "
+                                    ++ generateSimpleBranches rest
+                                    ++ ")"
+
+                            Src.PChr c ->
+                                "("
+                                    ++ inlineScrutinee
+                                    ++ " == '"
+                                    ++ escapeC c
+                                    ++ "' ? "
                                     ++ generateStandaloneExpr resultExpr
                                     ++ " : "
                                     ++ generateSimpleBranches rest
