@@ -683,9 +683,27 @@ generateStandaloneLet defs body =
                     if List.isEmpty args then
                         -- Simple binding: let x = expr
                         "int elm_" ++ name ++ " = " ++ generateStandaloneExpr defBody ++ ";"
+
                     else
-                        -- Function definition not supported in standalone mode
-                        "/* local function " ++ name ++ " not supported */"
+                        -- Local function definition using GCC nested functions
+                        let
+                            params =
+                                args
+                                    |> List.map
+                                        (\(Src.At _ pat) ->
+                                            case pat of
+                                                Src.PVar varName ->
+                                                    "int elm_" ++ varName
+
+                                                _ ->
+                                                    "int /* unsupported pattern */"
+                                        )
+                                    |> String.join ", "
+
+                            bodyExpr =
+                                generateStandaloneExpr defBody
+                        in
+                        "int elm_" ++ name ++ "(" ++ params ++ ") { return " ++ bodyExpr ++ "; }"
 
                 Src.Destruct _ _ ->
                     "/* pattern destructuring not supported */"
