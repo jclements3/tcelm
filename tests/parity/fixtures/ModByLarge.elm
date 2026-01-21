@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.cons 'H' "ello")
+    modBy 1000 12345

@@ -2,4 +2,4 @@ module Main exposing (main)
 
 main : Int
 main =
-    String.length (String.cons 'H' "ello")
+    String.length (String.right 0 "hello")
