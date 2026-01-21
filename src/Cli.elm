@@ -3042,6 +3042,36 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.intersperse wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "filterMap") ->
+            -- List.filterMap f list = map and keep Just values
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { elm_union_t __maybe = " ++ fnAppStr ++ "; if (__maybe.tag == TAG_Just) __result.data[__result.length++] = __maybe.data; } __result; })"
+
+                _ ->
+                    "/* List.filterMap wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "unzip") ->
+            -- List.unzip cannot be fully supported as it returns tuple of lists
+            -- Simplified: return empty tuple indicator
+            case args of
+                [ _ ] ->
+                    "/* List.unzip not fully supported */ 0"
+
+                _ ->
+                    "/* List.unzip wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
