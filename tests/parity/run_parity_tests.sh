@@ -123,6 +123,20 @@ static int elm_pow(int base, int exp) {
     }
     return result;
 }
+/* String.fromInt - convert int to string */
+static char __elm_fromint_buf[32];
+static const char *elm_from_int(int n) {
+    char tmp[32];
+    int i = 0, j = 0;
+    int neg = 0;
+    if (n < 0) { neg = 1; n = -n; }
+    if (n == 0) { __elm_fromint_buf[0] = '0'; __elm_fromint_buf[1] = 0; return __elm_fromint_buf; }
+    while (n > 0) { tmp[i++] = '0' + (n % 10); n /= 10; }
+    if (neg) __elm_fromint_buf[j++] = '-';
+    while (i > 0) __elm_fromint_buf[j++] = tmp[--i];
+    __elm_fromint_buf[j] = 0;
+    return __elm_fromint_buf;
+}
 $ctor_defines
 $user_funcs
 $elm_main_func

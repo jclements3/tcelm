@@ -301,6 +301,21 @@ generateRtemsCode ast =
                 , "    return result;"
                 , "}"
                 , ""
+                , "/* String.fromInt - convert int to string */"
+                , "static char __elm_fromint_buf[32];"
+                , "static const char *elm_from_int(int n) {"
+                , "    char tmp[32];"
+                , "    int i = 0, j = 0;"
+                , "    int neg = 0;"
+                , "    if (n < 0) { neg = 1; n = -n; }"
+                , "    if (n == 0) { __elm_fromint_buf[0] = '0'; __elm_fromint_buf[1] = 0; return __elm_fromint_buf; }"
+                , "    while (n > 0) { tmp[i++] = '0' + (n % 10); n /= 10; }"
+                , "    if (neg) __elm_fromint_buf[j++] = '-';"
+                , "    while (i > 0) __elm_fromint_buf[j++] = tmp[--i];"
+                , "    __elm_fromint_buf[j] = 0;"
+                , "    return __elm_fromint_buf;"
+                , "}"
+                , ""
                 , "/* Memory operations (needed for struct initialization) */"
                 , "static void *memset(void *s, int c, unsigned int n) {"
                 , "    unsigned char *p = s;"
@@ -1246,6 +1261,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.isEmpty wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "fromInt") ->
+            -- String.fromInt n = string representation of n
+            case args of
+                [ n ] ->
+                    "elm_from_int(" ++ generateStandaloneExpr n ++ ")"
+
+                _ ->
+                    "/* String.fromInt wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
