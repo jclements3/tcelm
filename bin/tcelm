@@ -5,14 +5,14 @@
 # Usage: tcelm [options] <input.elm> [-o output]
 #
 # Options:
-#   -target <target>    Target platform (i386-rtems-nuc, host)
+#   -b                  Target NUC board with RTEMS (default)
 #   -c                  Compile only (don't link)
 #   -o <file>           Output file name
 #   -v                  Verbose output
 #   --help              Show this help
 #
 # Example:
-#   tcelm -target i386-rtems-nuc hello.elm -o hello.elf
+#   tcelm -b hello.elm -o hello.elf
 #
 
 set -e
@@ -33,9 +33,9 @@ INPUT=""
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -target)
-            TARGET="$2"
-            shift 2
+        -b)
+            TARGET="i386-rtems-nuc"
+            shift
             ;;
         -c)
             COMPILE_ONLY=true
