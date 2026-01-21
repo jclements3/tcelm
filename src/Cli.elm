@@ -283,6 +283,13 @@ generateRtemsCode ast =
                 , "    return (unsigned char)*a - (unsigned char)*b;"
                 , "}"
                 , ""
+                , "/* String length */"
+                , "static int elm_strlen(const char *s) {"
+                , "    int len = 0;"
+                , "    while (*s++) len++;"
+                , "    return len;"
+                , "}"
+                , ""
                 , "/* Memory operations (needed for struct initialization) */"
                 , "static void *memset(void *s, int c, unsigned int n) {"
                 , "    unsigned char *p = s;"
@@ -1172,6 +1179,42 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* compare wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "toCode") ->
+            -- Char.toCode c = ASCII code of char
+            case args of
+                [ c ] ->
+                    "((int)" ++ generateStandaloneExpr c ++ ")"
+
+                _ ->
+                    "/* Char.toCode wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Char" "fromCode") ->
+            -- Char.fromCode n = char with ASCII code n
+            case args of
+                [ n ] ->
+                    "((char)" ++ generateStandaloneExpr n ++ ")"
+
+                _ ->
+                    "/* Char.fromCode wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "length") ->
+            -- String.length s = number of characters in s
+            case args of
+                [ s ] ->
+                    "elm_strlen(" ++ generateStandaloneExpr s ++ ")"
+
+                _ ->
+                    "/* String.length wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "isEmpty") ->
+            -- String.isEmpty s = True if s is empty
+            case args of
+                [ s ] ->
+                    "(*(" ++ generateStandaloneExpr s ++ ") == '\\0')"
+
+                _ ->
+                    "/* String.isEmpty wrong arity */ 0"
 
         _ ->
             -- Regular function call

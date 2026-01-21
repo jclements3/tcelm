@@ -107,6 +107,12 @@ typedef struct { int tag; int data; } elm_union_t;
 #define TAG_LT 0
 #define TAG_EQ 1
 #define TAG_GT 2
+/* String length function */
+static int elm_strlen(const char *s) {
+    int len = 0;
+    while (*s++) len++;
+    return len;
+}
 $ctor_defines
 $user_funcs
 $elm_main_func
