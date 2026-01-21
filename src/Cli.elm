@@ -707,20 +707,52 @@ generateStandaloneBinops pairs finalExpr =
                     [] ->
                         generateStandaloneExpr finalExpr
 
-            functions =
-                (List.drop 1 pairs |> List.map (\( expr, _ ) -> generateStandaloneExpr expr))
-                    ++ [ generateStandaloneExpr finalExpr ]
+            -- Get expressions for the "functions" (can be functions or accessors)
+            functionExprs =
+                (List.drop 1 pairs |> List.map Tuple.first)
+                    ++ [ finalExpr ]
 
-            -- Build nested function calls
-            buildPipe arg fns =
-                case fns of
+            -- Build nested calls, handling accessors and lambdas specially
+            buildPipe : String -> List Src.Expr -> String
+            buildPipe arg exprs =
+                case exprs of
                     [] ->
                         arg
 
-                    fn :: rest ->
-                        buildPipe (fn ++ "(" ++ arg ++ ")") rest
+                    (Src.At _ (Src.Accessor fieldName)) :: rest ->
+                        -- Accessor: arg.field
+                        buildPipe (arg ++ "." ++ fieldName) rest
+
+                    (Src.At pos (Src.Lambda patterns lambdaBody)) :: rest ->
+                        -- Lambda: create a Call expression and generate it
+                        let
+                            -- Create a temporary expression representing the piped argument
+                            -- We need to wrap the current arg string in a way that generateInlinedLambda can use
+                            -- The simplest approach: bind to a variable and use that variable
+                            varName =
+                                "__pipe_" ++ String.fromInt (List.length exprs)
+
+                            binding =
+                                "int elm_" ++ varName ++ " = " ++ arg ++ ";"
+
+                            -- Create a Var expression for the bound variable
+                            argExpr =
+                                Src.At pos (Src.Var Src.LowVar varName)
+
+                            -- Generate the inlined lambda call
+                            inlined =
+                                generateInlinedLambda patterns [ argExpr ] lambdaBody
+
+                            result =
+                                "({ " ++ binding ++ " " ++ inlined ++ "; })"
+                        in
+                        buildPipe result rest
+
+                    fnExpr :: rest ->
+                        -- Regular function call
+                        buildPipe (generateStandaloneExpr fnExpr ++ "(" ++ arg ++ ")") rest
         in
-        buildPipe firstArg functions
+        buildPipe firstArg functionExprs
 
     else if isBackwardPipe then
         -- Backward pipe operator: f <| g <| a becomes f(g(a))
@@ -730,21 +762,27 @@ generateStandaloneBinops pairs finalExpr =
             arg =
                 generateStandaloneExpr finalExpr
 
-            functions =
+            functionExprs =
                 pairs
-                    |> List.map (\( expr, _ ) -> generateStandaloneExpr expr)
+                    |> List.map Tuple.first
                     |> List.reverse
 
-            -- Build nested function calls from inside out
-            buildBackPipe innerArg fns =
-                case fns of
+            -- Build nested calls, handling accessors specially
+            buildBackPipe : String -> List Src.Expr -> String
+            buildBackPipe innerArg exprs =
+                case exprs of
                     [] ->
                         innerArg
 
-                    fn :: rest ->
-                        buildBackPipe (fn ++ "(" ++ innerArg ++ ")") rest
+                    (Src.At _ (Src.Accessor fieldName)) :: rest ->
+                        -- Accessor: innerArg.field
+                        buildBackPipe (innerArg ++ "." ++ fieldName) rest
+
+                    fnExpr :: rest ->
+                        -- Regular function call
+                        buildBackPipe (generateStandaloneExpr fnExpr ++ "(" ++ innerArg ++ ")") rest
         in
-        buildBackPipe arg functions
+        buildBackPipe arg functionExprs
 
     else if isStringConcat && List.length allStrings == List.length allExprs then
         -- All operands are string literals - concatenate at compile time
@@ -820,6 +858,15 @@ generateStandaloneExpr (Src.At _ expr) =
                 Src.At _ (Src.Lambda patterns lambdaBody) ->
                     -- Inline immediately-called lambda
                     generateInlinedLambda patterns args lambdaBody
+
+                Src.At _ (Src.Accessor fieldName) ->
+                    -- Accessor function applied to record: .field record -> record.field
+                    case args of
+                        [ recordArg ] ->
+                            generateStandaloneExpr recordArg ++ "." ++ fieldName
+
+                        _ ->
+                            "/* accessor with wrong arity */ 0"
 
                 Src.At _ (Src.Binops pairs finalExpr) ->
                     -- Check if this is function composition applied to an argument
@@ -941,6 +988,11 @@ generateStandaloneExpr (Src.At _ expr) =
         Src.Access recordExpr (Src.At _ fieldName) ->
             -- Generate field access
             generateStandaloneExpr recordExpr ++ "." ++ fieldName
+
+        Src.Accessor fieldName ->
+            -- Accessor function .field - this shouldn't appear standalone
+            -- but if it does, generate a placeholder
+            "/* accessor ." ++ fieldName ++ " */"
 
         _ ->
             "/* unsupported expr */ 0"
