@@ -355,6 +355,10 @@ generateRtemsCode ast =
                 , "/* Generic tagged union type for custom types */"
                 , "typedef struct { int tag; int data; } elm_union_t;"
                 , ""
+                , "/* Built-in tuple type */"
+                , "typedef struct { int _0; int _1; } elm_tuple2_t;"
+                , "typedef struct { int _0; int _1; int _2; } elm_tuple3_t;"
+                , ""
                 , "/* Built-in Order type tags (for compare function) */"
                 , "#define TAG_LT 0"
                 , "#define TAG_EQ 1"
@@ -1249,15 +1253,20 @@ generateStandaloneExpr (Src.At _ expr) =
                 numElements =
                     List.length elements
 
-                structFields =
-                    List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements
-                        |> String.join "; "
+                tupleType =
+                    if numElements == 2 then
+                        "elm_tuple2_t"
+                    else if numElements == 3 then
+                        "elm_tuple3_t"
+                    else
+                        -- Fallback for larger tuples (rare)
+                        "struct { " ++ (List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements |> String.join "; ") ++ "; }"
 
                 values =
                     List.map generateStandaloneExpr elements
                         |> String.join ", "
             in
-            "((struct { " ++ structFields ++ "; }){" ++ values ++ "})"
+            "((" ++ tupleType ++ "){" ++ values ++ "})"
 
         Src.Record fields ->
             -- Generate record as compound struct literal with named fields
@@ -1445,10 +1454,56 @@ generateStandaloneCall fn args =
             -- Tuple.pair a b = (a, b)
             case args of
                 [ a, b ] ->
-                    "((struct { int _0; int _1; }){" ++ generateStandaloneExpr a ++ ", " ++ generateStandaloneExpr b ++ "})"
+                    "((elm_tuple2_t){" ++ generateStandaloneExpr a ++ ", " ++ generateStandaloneExpr b ++ "})"
 
                 _ ->
                     "/* Tuple.pair wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Tuple" "mapFirst") ->
+            -- Tuple.mapFirst f (a, b) = (f a, b)
+            case args of
+                [ fnExpr, tupleExpr ] ->
+                    let
+                        tupleStr = generateStandaloneExpr tupleExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__tuple_in._0)"
+                    in
+                    "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = " ++ fnAppStr ++ "; __tuple_out._1 = __tuple_in._1; __tuple_out; })"
+
+                _ ->
+                    "/* Tuple.mapFirst wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Tuple" "mapSecond") ->
+            -- Tuple.mapSecond f (a, b) = (a, f b)
+            case args of
+                [ fnExpr, tupleExpr ] ->
+                    let
+                        tupleStr = generateStandaloneExpr tupleExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    let
+                                        bodyStr = generateStandaloneExpr lambdaBody
+                                    in
+                                    "({ int elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__tuple_in._1)"
+                    in
+                    "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = __tuple_in._0; __tuple_out._1 = " ++ fnAppStr ++ "; __tuple_out; })"
+
+                _ ->
+                    "/* Tuple.mapSecond wrong arity */ 0"
 
         Src.At _ (Src.Var _ "compare") ->
             -- compare a b = Order (LT, EQ, or GT)
@@ -1994,6 +2049,71 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* Maybe.andThen wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "Maybe" "map2") ->
+            -- Maybe.map2 f maybeA maybeB = apply f if both are Just
+            case args of
+                [ fnExpr, maybeA, maybeB ] ->
+                    let
+                        maybeAStr = generateStandaloneExpr maybeA
+                        maybeBStr = generateStandaloneExpr maybeB
+
+                        -- Generate function application with two args
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] ->
+                                            -- Simple two-arg lambda: (\a b -> body)
+                                            let
+                                                bodyStr = generateStandaloneExpr lambdaBody
+                                            in
+                                            "({ int elm_" ++ pname1 ++ " = __maybe_a.data; int elm_" ++ pname2 ++ " = __maybe_b.data; " ++ bodyStr ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.map2 */ 0"
+
+                                _ ->
+                                    -- Regular function call
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data)"
+                    in
+                    "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.map2 wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "Maybe" "map3") ->
+            -- Maybe.map3 f maybeA maybeB maybeC = apply f if all three are Just
+            case args of
+                [ fnExpr, maybeA, maybeB, maybeC ] ->
+                    let
+                        maybeAStr = generateStandaloneExpr maybeA
+                        maybeBStr = generateStandaloneExpr maybeB
+                        maybeCStr = generateStandaloneExpr maybeC
+
+                        -- Generate function application with three args
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2), Src.At _ (Src.PVar pname3) ] ->
+                                            -- Simple three-arg lambda: (\a b c -> body)
+                                            let
+                                                bodyStr = generateStandaloneExpr lambdaBody
+                                            in
+                                            "({ int elm_" ++ pname1 ++ " = __maybe_a.data; int elm_" ++ pname2 ++ " = __maybe_b.data; int elm_" ++ pname3 ++ " = __maybe_c.data; " ++ bodyStr ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.map3 */ 0"
+
+                                _ ->
+                                    -- Regular function call
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data, __maybe_c.data)"
+                    in
+                    "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; elm_union_t __maybe_c = " ++ maybeCStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just && __maybe_c.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.map3 wrong arity */ 0"
+
         _ ->
             -- Regular function call
             let
@@ -2228,15 +2348,22 @@ inferCTypeAndInit (Src.At _ expr) =
                 elements =
                     first :: second :: rest
 
-                structFields =
-                    List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements
-                        |> String.join "; "
+                numElements =
+                    List.length elements
+
+                tupleType =
+                    if numElements == 2 then
+                        "elm_tuple2_t"
+                    else if numElements == 3 then
+                        "elm_tuple3_t"
+                    else
+                        "struct { " ++ (List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements |> String.join "; ") ++ "; }"
 
                 values =
                     List.map generateStandaloneExpr elements
                         |> String.join ", "
             in
-            ( "struct { " ++ structFields ++ "; }", "{" ++ values ++ "}" )
+            ( tupleType, "{" ++ values ++ "}" )
 
         Src.Update (Src.At _ recordName) updates ->
             -- Record update: type is same as original, use typeof

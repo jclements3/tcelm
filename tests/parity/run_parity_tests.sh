@@ -103,6 +103,9 @@ extract_c_result() {
     cat > "$test_prog" << EOF
 #include <stdio.h>
 typedef struct { int tag; int data; } elm_union_t;
+/* Built-in tuple types */
+typedef struct { int _0; int _1; } elm_tuple2_t;
+typedef struct { int _0; int _1; int _2; } elm_tuple3_t;
 /* Built-in Order type tags */
 #define TAG_LT 0
 #define TAG_EQ 1
