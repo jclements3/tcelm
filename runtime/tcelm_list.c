@@ -903,7 +903,3 @@ tcelm_value_t *tcelm_list_partition_impl(tcelm_arena_t *arena, tcelm_value_t **a
 tcelm_value_t *tcelm_list_concat_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
     return tcelm_list_concat_fn(arena, args[0]);
 }
-
-tcelm_value_t *tcelm_list_indexedMap_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
-    return tcelm_list_indexedMap(arena, args[0], args[1]);
-}

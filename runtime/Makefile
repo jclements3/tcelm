@@ -11,13 +11,15 @@
 COMMON_SRCS = tcelm_arena.c tcelm_types.c tcelm_basics.c
 # Standard library modules (for bootstrap)
 STDLIB_SRCS = tcelm_string.c tcelm_list.c tcelm_char.c tcelm_maybe.c
+# Math/Matrix library
+MATH_SRCS = tcelm_matrix.c
 # New RTEMS integration layer (Task, Channel, MVar, Semaphore, Barrier, Budget, Protected, Timer, IO, Worker, Platform)
 NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_semaphore.c tcelm_barrier.c tcelm_budget.c tcelm_protected.c tcelm_timer.c tcelm_io.c tcelm_worker.c tcelm_platform.c
 # Legacy RTEMS sources (kept separate to avoid conflicts)
 RTEMS_SRCS = tcelm_rtems.c tcelm_shell.c tcelm_shell_ops.c tcelm_hwil.c
 
 # All library sources (includes new integration layer)
-LIB_SRCS = $(COMMON_SRCS) $(STDLIB_SRCS) $(NEW_INTEGRATION_SRCS) $(RTEMS_SRCS)
+LIB_SRCS = $(COMMON_SRCS) $(STDLIB_SRCS) $(MATH_SRCS) $(NEW_INTEGRATION_SRCS) $(RTEMS_SRCS)
 LIB_OBJS = $(LIB_SRCS:.c=.o)
 
 # Test sources
@@ -71,7 +73,7 @@ objs: $(CORE_OBJS)
 
 # Host build
 .PHONY: host
-host: test_runtime test_rtems test_shell_ops test_pmap test_worker
+host: test_runtime test_rtems test_shell_ops test_pmap test_worker test_matrix
 
 test_runtime: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
@@ -86,6 +88,9 @@ test_shell_ops: $(TEST_SHELL_OPS_SRC) $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_shell_
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
 
 test_worker: test_worker.c $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_worker.c
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
+
+test_matrix: test_matrix.c $(COMMON_SRCS) $(STDLIB_SRCS) $(MATH_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
 
 # TCC build (faster compilation for development)
@@ -113,7 +118,7 @@ libtcelm_rtems.a: $(LIB_SRCS:.c=.rtems.o)
 
 # Run tests
 .PHONY: test
-test: test_runtime test_rtems test_shell_ops test_pmap test_worker
+test: test_runtime test_rtems test_shell_ops test_pmap test_worker test_matrix
 	@echo "=== Running runtime tests ==="
 	./test_runtime
 	@echo ""
@@ -128,6 +133,9 @@ test: test_runtime test_rtems test_shell_ops test_pmap test_worker
 	@echo ""
 	@echo "=== Running Platform.worker tests ==="
 	./test_worker
+	@echo ""
+	@echo "=== Running Matrix tests ==="
+	./test_matrix
 
 .PHONY: test-tcc
 test-tcc: test_runtime_tcc test_rtems_tcc test_worker_tcc
@@ -154,8 +162,8 @@ libtcelm_integration.a: $(COMMON_SRCS:.c=.o) $(STDLIB_SRCS:.c=.o) $(NEW_INTEGRAT
 # Clean
 .PHONY: clean
 clean:
-	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap test_worker
-	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc test_worker_tcc test_integration_tcc
+	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap test_worker test_matrix
+	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc test_worker_tcc test_integration_tcc test_matrix_tcc
 	rm -f *.o *.rtems.o
 	rm -f libtcelm_rtems.a libtcelm_integration.a
 
