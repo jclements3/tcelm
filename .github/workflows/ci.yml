@@ -102,19 +102,19 @@ jobs:
     - name: Test self-hosting (compile Generate/C.elm)
       run: |
         node bin/tcelm-compile.js src/Generate/C.elm --target module > /tmp/generate_c.c
-        ./tcc/bin/tcc -c /tmp/generate_c.c -I runtime -o /tmp/generate_c.o
+        gcc -c /tmp/generate_c.c -I runtime -o /tmp/generate_c.o
         echo "Self-hosting test passed: Generate/C.elm compiles successfully"
 
     - name: Test self-hosting (compile Parse/Primitives.elm)
       run: |
         node bin/tcelm-compile.js src/Parse/Primitives.elm --target module > /tmp/primitives.c
-        ./tcc/bin/tcc -c /tmp/primitives.c -I runtime -o /tmp/primitives.o
+        gcc -c /tmp/primitives.c -I runtime -o /tmp/primitives.o
         echo "Self-hosting test passed: Parse/Primitives.elm compiles successfully"
 
     - name: Test self-hosting (compile AST/Source.elm)
       run: |
         node bin/tcelm-compile.js src/AST/Source.elm --target module > /tmp/ast_source.c
-        ./tcc/bin/tcc -c /tmp/ast_source.c -I runtime -o /tmp/ast_source.o
+        gcc -c /tmp/ast_source.c -I runtime -o /tmp/ast_source.o
         echo "Self-hosting test passed: AST/Source.elm compiles successfully"
 
     - name: Test module linking
