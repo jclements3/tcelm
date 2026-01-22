@@ -185,6 +185,22 @@ test-multicore: $(BUILD_DIR)/multicore_test.elf
 		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
 	@echo ""
 
+# IPI (Inter-Processor Interrupt) test
+$(BUILD_DIR)/ipi_test.o: examples/ipi_test.c | $(BUILD_DIR)
+	$(TCC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/ipi_test.elf: $(CRT_OBJ) $(BUILD_DIR)/ipi_test.o $(LIBTCELM)
+	$(LD) $(LDFLAGS) $^ -o $@
+
+.PHONY: test-ipi
+test-ipi: $(BUILD_DIR)/ipi_test.elf
+	@echo ""
+	@echo "Running IPI test in QEMU (4 cores)..."
+	@echo ""
+	@timeout $(QEMU_TIMEOUT) $(QEMU) -kernel $< $(QEMU_FLAGS_SMP) || \
+		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
+	@echo ""
+
 # =============================================================================
 # Help
 # =============================================================================
@@ -198,6 +214,8 @@ help:
 	@echo "  test-runtime     - Build and run tcelm runtime tests in QEMU"
 	@echo "  test-runtime-smp - Run runtime tests with 4 CPU cores"
 	@echo "  test-smp         - Build and run SMP-specific tests"
+	@echo "  test-multicore   - Run multi-core workload test"
+	@echo "  test-ipi         - Run IPI (Inter-Processor Interrupt) demo"
 	@echo "  clean            - Remove build artifacts"
 	@echo "  scripts          - Make wrapper scripts executable"
 	@echo "  help             - Show this help"
