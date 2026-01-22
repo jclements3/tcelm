@@ -13,6 +13,8 @@ COMMON_SRCS = tcelm_arena.c tcelm_types.c tcelm_basics.c
 STDLIB_SRCS = tcelm_string.c tcelm_list.c tcelm_char.c tcelm_maybe.c
 # Math/Matrix library
 MATH_SRCS = tcelm_matrix.c
+# TAOS trajectory simulation
+TAOS_SRCS = tcelm_taos.c
 # New RTEMS integration layer (Task, Channel, MVar, Semaphore, Barrier, Budget, Protected, Timer, IO, Worker, Platform)
 NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_semaphore.c tcelm_barrier.c tcelm_budget.c tcelm_protected.c tcelm_timer.c tcelm_io.c tcelm_worker.c tcelm_platform.c
 # Legacy RTEMS sources (kept separate to avoid conflicts)
@@ -73,7 +75,7 @@ objs: $(CORE_OBJS)
 
 # Host build
 .PHONY: host
-host: test_runtime test_rtems test_shell_ops test_pmap test_worker test_matrix
+host: test_runtime test_rtems test_shell_ops test_pmap test_worker test_matrix test_taos
 
 test_runtime: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
@@ -92,6 +94,9 @@ test_worker: test_worker.c $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_worker.c
 
 test_matrix: test_matrix.c $(COMMON_SRCS) $(STDLIB_SRCS) $(MATH_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
+
+test_taos: test_taos.c $(COMMON_SRCS) $(STDLIB_SRCS) $(TAOS_SRCS)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS) -ldl
 
 # TCC build (faster compilation for development)
 .PHONY: tcc
@@ -162,8 +167,8 @@ libtcelm_integration.a: $(COMMON_SRCS:.c=.o) $(STDLIB_SRCS:.c=.o) $(NEW_INTEGRAT
 # Clean
 .PHONY: clean
 clean:
-	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap test_worker test_matrix
-	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc test_worker_tcc test_integration_tcc test_matrix_tcc
+	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap test_worker test_matrix test_taos
+	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc test_worker_tcc test_integration_tcc test_matrix_tcc test_taos_tcc
 	rm -f *.o *.rtems.o
 	rm -f libtcelm_rtems.a libtcelm_integration.a
 
