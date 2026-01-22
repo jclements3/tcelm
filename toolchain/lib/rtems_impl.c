@@ -5,22 +5,19 @@
  * that can run on bare-metal x86 (QEMU or real hardware).
  *
  * Features:
- *   - Cooperative task scheduling (no preemption)
+ *   - SMP support (up to 4 cores)
+ *   - Cooperative task scheduling with CPU affinity
  *   - Binary and counting semaphores
  *   - Message queues
  *   - Software timers
  *   - Event flags
- *
- * Limitations:
- *   - Single processor only
- *   - No hardware interrupt-driven preemption
- *   - Tasks must yield voluntarily
  */
 
 #include <rtems.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/cpuset.h>
+#include <smp.h>
 
 /* Configuration limits */
 #define MAX_TASKS          32
@@ -59,6 +56,7 @@ typedef struct {
     rtems_interval      wake_tick;       /* Tick to wake at (0 = no timeout) */
     rtems_id            blocked_on;      /* Resource blocking on */
     cpu_set_t           affinity;        /* CPU affinity mask */
+    uint32_t            running_on_cpu;  /* Which CPU task is running on (-1 if not running) */
 } task_tcb_t;
 
 /* Semaphore control block */
@@ -110,7 +108,8 @@ static message_queue_t message_queues[MAX_MESSAGE_QUEUES];
 static timer_t         timers[MAX_TIMERS];
 static timer_t         rate_monotonic[MAX_RATE_MONOTONIC];
 
-static rtems_id        current_task_id = 0;
+/* Per-CPU current task (indexed by CPU ID) */
+static rtems_id        current_task_id[SMP_MAX_CPUS] = {0};
 static rtems_interval  system_ticks = 0;
 static rtems_interval  ticks_per_second = 1000;  /* 1ms tick */
 
@@ -121,6 +120,13 @@ static uint32_t        next_timer_id = 1;
 static uint32_t        next_rm_id = 1;
 
 static bool            scheduler_running = false;
+
+/* SMP locks for protecting shared data */
+static spinlock_t      tasks_lock = SPINLOCK_INITIALIZER;
+static spinlock_t      sem_lock = SPINLOCK_INITIALIZER;
+static spinlock_t      mq_lock = SPINLOCK_INITIALIZER;
+static spinlock_t      timer_lock = SPINLOCK_INITIALIZER;
+static spinlock_t      id_lock = SPINLOCK_INITIALIZER;
 
 /* Forward declarations */
 static void scheduler_tick(void);
@@ -138,8 +144,26 @@ void rtems_initialize_executive(void) {
     memset(message_queues, 0, sizeof(message_queues));
     memset(timers, 0, sizeof(timers));
     memset(rate_monotonic, 0, sizeof(rate_monotonic));
+    memset(current_task_id, 0, sizeof(current_task_id));
+
+    /* Initialize SMP subsystem */
+    smp_init();
 
     scheduler_running = true;
+}
+
+/* Get current CPU's task ID */
+static inline rtems_id get_current_task_id(void) {
+    uint32_t cpu = smp_cpu_id();
+    return current_task_id[cpu < SMP_MAX_CPUS ? cpu : 0];
+}
+
+/* Set current CPU's task ID */
+static inline void set_current_task_id(rtems_id id) {
+    uint32_t cpu = smp_cpu_id();
+    if (cpu < SMP_MAX_CPUS) {
+        current_task_id[cpu] = id;
+    }
 }
 
 /*
@@ -222,7 +246,7 @@ static task_tcb_t *find_task(rtems_id id) {
 }
 
 static task_tcb_t *get_current_task(void) {
-    return find_task(current_task_id);
+    return find_task(get_current_task_id());
 }
 
 rtems_status_code rtems_task_create(
@@ -294,20 +318,23 @@ rtems_status_code rtems_task_start(
 }
 
 rtems_status_code rtems_task_delete(rtems_id id) {
-    if (id == RTEMS_SELF) id = current_task_id;
+    rtems_id my_task = get_current_task_id();
+    if (id == RTEMS_SELF) id = my_task;
 
     task_tcb_t *task = find_task(id);
     if (!task) return RTEMS_INVALID_ID;
 
+    spinlock_acquire(&tasks_lock);
     if (task->stack) {
         free(task->stack);
         task->stack = NULL;
     }
     task->state = TASK_STATE_FREE;
     task->id = 0;
+    spinlock_release(&tasks_lock);
 
-    if (id == current_task_id) {
-        current_task_id = 0;
+    if (id == my_task) {
+        set_current_task_id(0);
         schedule();
     }
 
@@ -315,15 +342,18 @@ rtems_status_code rtems_task_delete(rtems_id id) {
 }
 
 rtems_status_code rtems_task_suspend(rtems_id id) {
-    if (id == RTEMS_SELF) id = current_task_id;
+    rtems_id my_task = get_current_task_id();
+    if (id == RTEMS_SELF) id = my_task;
 
     task_tcb_t *task = find_task(id);
     if (!task) return RTEMS_INVALID_ID;
     if (task->state == TASK_STATE_SUSPENDED) return RTEMS_ALREADY_SUSPENDED;
 
+    spinlock_acquire(&tasks_lock);
     task->state = TASK_STATE_SUSPENDED;
+    spinlock_release(&tasks_lock);
 
-    if (id == current_task_id) {
+    if (id == my_task) {
         schedule();
     }
 
@@ -344,23 +374,28 @@ rtems_status_code rtems_task_set_priority(
     rtems_task_priority  new_priority,
     rtems_task_priority *old_priority
 ) {
-    if (id == RTEMS_SELF) id = current_task_id;
+    if (id == RTEMS_SELF) id = get_current_task_id();
 
     task_tcb_t *task = find_task(id);
     if (!task) return RTEMS_INVALID_ID;
 
+    spinlock_acquire(&tasks_lock);
     if (old_priority) *old_priority = task->priority;
 
     if (new_priority != RTEMS_CURRENT_PRIORITY) {
-        if (new_priority > RTEMS_MAXIMUM_PRIORITY) return RTEMS_INVALID_PRIORITY;
+        if (new_priority > RTEMS_MAXIMUM_PRIORITY) {
+            spinlock_release(&tasks_lock);
+            return RTEMS_INVALID_PRIORITY;
+        }
         task->priority = new_priority;
     }
+    spinlock_release(&tasks_lock);
 
     return RTEMS_SUCCESSFUL;
 }
 
 rtems_id rtems_task_self(void) {
-    return current_task_id;
+    return get_current_task_id();
 }
 
 rtems_status_code rtems_task_wake_after(rtems_interval ticks) {
@@ -392,18 +427,17 @@ rtems_status_code rtems_task_set_affinity(
     size_t           cpusetsize,
     const cpu_set_t *cpuset
 ) {
-    if (id == RTEMS_SELF) id = current_task_id;
+    if (id == RTEMS_SELF) id = get_current_task_id();
     if (!cpuset) return RTEMS_INVALID_ADDRESS;
     if (cpusetsize < sizeof(cpu_set_t)) return RTEMS_INVALID_SIZE;
 
     task_tcb_t *task = find_task(id);
     if (!task) return RTEMS_INVALID_ID;
 
-    /* Copy the affinity mask */
+    spinlock_acquire(&tasks_lock);
+    /* Copy the affinity mask - scheduler will respect this for SMP */
     task->affinity = *cpuset;
-
-    /* In a single-core cooperative scheduler, this is informational only.
-     * On a real SMP system, this would affect scheduling decisions. */
+    spinlock_release(&tasks_lock);
 
     return RTEMS_SUCCESSFUL;
 }
@@ -413,15 +447,17 @@ rtems_status_code rtems_task_get_affinity(
     size_t     cpusetsize,
     cpu_set_t *cpuset
 ) {
-    if (id == RTEMS_SELF) id = current_task_id;
+    if (id == RTEMS_SELF) id = get_current_task_id();
     if (!cpuset) return RTEMS_INVALID_ADDRESS;
     if (cpusetsize < sizeof(cpu_set_t)) return RTEMS_INVALID_SIZE;
 
     task_tcb_t *task = find_task(id);
     if (!task) return RTEMS_INVALID_ID;
 
+    spinlock_acquire(&tasks_lock);
     /* Return the affinity mask */
     *cpuset = task->affinity;
+    spinlock_release(&tasks_lock);
 
     return RTEMS_SUCCESSFUL;
 }
@@ -493,13 +529,16 @@ rtems_status_code rtems_semaphore_obtain(
     semaphore_t *sem = find_semaphore(id);
     if (!sem) return RTEMS_INVALID_ID;
 
+    spinlock_acquire(&sem_lock);
     if (sem->count > 0) {
         sem->count--;
         if (sem->attributes & RTEMS_BINARY_SEMAPHORE) {
-            sem->holder = current_task_id;
+            sem->holder = get_current_task_id();
         }
+        spinlock_release(&sem_lock);
         return RTEMS_SUCCESSFUL;
     }
+    spinlock_release(&sem_lock);
 
     if (option_set & RTEMS_NO_WAIT) {
         return RTEMS_UNSATISFIED;
@@ -509,9 +548,11 @@ rtems_status_code rtems_semaphore_obtain(
     task_tcb_t *task = get_current_task();
     if (!task) return RTEMS_INCORRECT_STATE;
 
+    spinlock_acquire(&tasks_lock);
     task->state = TASK_STATE_BLOCKED;
     task->blocked_on = id;
     task->wake_tick = (timeout == RTEMS_NO_TIMEOUT) ? 0 : system_ticks + timeout;
+    spinlock_release(&tasks_lock);
 
     schedule();
 
@@ -951,17 +992,24 @@ retry:
 }
 
 /*
- * Scheduler (simple priority-based)
+ * Scheduler (SMP-aware priority-based)
  */
 
 static void schedule(void) {
-    /* Find highest priority ready task */
+    uint32_t cpu = smp_cpu_id();
+
+    spinlock_acquire(&tasks_lock);
+
+    /* Find highest priority ready task that can run on this CPU */
     task_tcb_t *best = NULL;
 
     for (int i = 0; i < MAX_TASKS; i++) {
         if (tasks[i].state == TASK_STATE_READY) {
-            if (!best || tasks[i].priority < best->priority) {
-                best = &tasks[i];
+            /* Check CPU affinity */
+            if (CPU_ISSET(cpu, &tasks[i].affinity)) {
+                if (!best || tasks[i].priority < best->priority) {
+                    best = &tasks[i];
+                }
             }
         }
     }
@@ -970,41 +1018,76 @@ static void schedule(void) {
         task_tcb_t *prev = get_current_task();
         if (prev && prev->state == TASK_STATE_RUNNING) {
             prev->state = TASK_STATE_READY;
+            prev->running_on_cpu = (uint32_t)-1;
         }
 
         best->state = TASK_STATE_RUNNING;
-        current_task_id = best->id;
+        best->running_on_cpu = cpu;
+        set_current_task_id(best->id);
+    }
 
-        /* In a real implementation, we would context switch here.
-         * For cooperative scheduling, we just return and let the
-         * task loop call us again. */
+    spinlock_release(&tasks_lock);
+}
+
+/*
+ * SMP-aware cooperative scheduler main loop
+ * Call this from your main() to run all tasks
+ * Each CPU runs its own instance of this loop
+ */
+void rtems_scheduler_run(void) {
+    uint32_t cpu = smp_cpu_id();
+
+    while (scheduler_running) {
+        /* Only BSP (CPU 0) handles system tick */
+        if (cpu == 0) {
+            scheduler_tick();
+        }
+
+        spinlock_acquire(&tasks_lock);
+
+        /* Find a ready task that can run on this CPU */
+        task_tcb_t *task = NULL;
+        for (int i = 0; i < MAX_TASKS; i++) {
+            if (tasks[i].state == TASK_STATE_READY && CPU_ISSET(cpu, &tasks[i].affinity)) {
+                task = &tasks[i];
+                break;
+            }
+        }
+
+        if (task) {
+            task->state = TASK_STATE_RUNNING;
+            task->running_on_cpu = cpu;
+            set_current_task_id(task->id);
+            spinlock_release(&tasks_lock);
+
+            if (task->entry) {
+                task->entry(task->argument);
+            }
+
+            /* Task returned - delete it */
+            rtems_task_delete(task->id);
+        } else {
+            spinlock_release(&tasks_lock);
+            /* No work - yield to allow other CPUs/tasks */
+            __asm__ volatile ("pause");
+        }
     }
 }
 
 /*
- * Simple cooperative scheduler main loop
- * Call this from your main() to run all tasks
+ * Get number of available processors
  */
-void rtems_scheduler_run(void) {
-    while (scheduler_running) {
-        scheduler_tick();
+uint32_t rtems_get_processor_count(void) {
+    /* Return configured CPU count (detected via CPUID) */
+    extern uint32_t smp_get_configured_cpus(void);
+    return smp_get_configured_cpus();
+}
 
-        /* Find a ready task and run its entry point */
-        for (int i = 0; i < MAX_TASKS; i++) {
-            if (tasks[i].state == TASK_STATE_READY) {
-                tasks[i].state = TASK_STATE_RUNNING;
-                current_task_id = tasks[i].id;
-
-                if (tasks[i].entry) {
-                    tasks[i].entry(tasks[i].argument);
-                }
-
-                /* Task returned - delete it */
-                rtems_task_delete(tasks[i].id);
-                break;
-            }
-        }
-    }
+/*
+ * Get current processor index
+ */
+uint32_t rtems_get_current_processor(void) {
+    return smp_cpu_id();
 }
 
 /*

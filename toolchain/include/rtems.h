@@ -128,6 +128,19 @@ rtems_status_code rtems_scheduler_ident_by_processor(
 );
 
 /*
+ * SMP Support
+ */
+
+/* Get number of configured/available processors */
+uint32_t rtems_get_processor_count(void);
+
+/* Get current processor index */
+uint32_t rtems_get_current_processor(void);
+
+/* Run the scheduler (call from main, each CPU runs this) */
+void rtems_scheduler_run(void);
+
+/*
  * Initialization
  */
 

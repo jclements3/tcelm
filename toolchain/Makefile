@@ -32,16 +32,19 @@ LIB_DIR := $(TOOLCHAIN_DIR)/lib
 # QEMU
 QEMU := qemu-system-i386
 QEMU_FLAGS := -nographic -no-reboot -serial mon:stdio
+QEMU_FLAGS_SMP := -nographic -no-reboot -serial mon:stdio -smp 4
 QEMU_TIMEOUT := 15
 
 # Sources
 LIBC_SRC := lib/libc_impl.c
 RTEMS_SRC := lib/rtems_impl.c
+SMP_SRC := lib/smp_impl.c
 CRT_SRC := crt/crt0.S
 
 # Objects
 LIBC_OBJ := $(BUILD_DIR)/libc_impl.o
 RTEMS_OBJ := $(BUILD_DIR)/rtems_impl.o
+SMP_OBJ := $(BUILD_DIR)/smp_impl.o
 CRT_OBJ := $(BUILD_DIR)/crt0.o
 
 # Libraries
@@ -62,12 +65,16 @@ $(LIBC_OBJ): $(LIBC_SRC) | $(BUILD_DIR)
 $(RTEMS_OBJ): $(RTEMS_SRC) | $(BUILD_DIR)
 	$(TCC) $(CFLAGS) -c $< -o $@
 
+# Compile SMP implementation
+$(SMP_OBJ): $(SMP_SRC) | $(BUILD_DIR)
+	$(TCC) $(CFLAGS) -c $< -o $@
+
 # Assemble CRT
 $(CRT_OBJ): $(CRT_SRC) | $(BUILD_DIR)
 	$(AS) $(ASFLAGS) $< -o $@
 
 # Create library
-$(LIBTCELM): $(LIBC_OBJ) $(RTEMS_OBJ)
+$(LIBTCELM): $(LIBC_OBJ) $(RTEMS_OBJ) $(SMP_OBJ)
 	$(AR) rcs $@ $^
 
 # Install (copy to lib directory)
@@ -131,6 +138,38 @@ build-runtime-test: $(BUILD_DIR)/tcelm_runtime_test.elf
 	@echo "Built: $<"
 
 # =============================================================================
+# SMP Tests
+# =============================================================================
+
+# SMP test sources
+$(BUILD_DIR)/smp_test.o: examples/smp_test.c | $(BUILD_DIR)
+	$(TCC) $(CFLAGS) -c $< -o $@
+
+# Link SMP test
+$(BUILD_DIR)/smp_test.elf: $(CRT_OBJ) $(BUILD_DIR)/smp_test.o $(LIBTCELM)
+	$(LD) $(LDFLAGS) $^ -o $@
+
+# Build and run SMP test with 4 cores
+.PHONY: test-smp
+test-smp: $(BUILD_DIR)/smp_test.elf
+	@echo ""
+	@echo "Running SMP tests in QEMU (4 cores)..."
+	@echo ""
+	@timeout $(QEMU_TIMEOUT) $(QEMU) -kernel $< $(QEMU_FLAGS_SMP) || \
+		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
+	@echo ""
+
+# Run runtime test with SMP enabled
+.PHONY: test-runtime-smp
+test-runtime-smp: $(BUILD_DIR)/tcelm_runtime_test.elf
+	@echo ""
+	@echo "Running tcelm runtime tests in QEMU (4 cores)..."
+	@echo ""
+	@timeout $(QEMU_TIMEOUT) $(QEMU) -kernel $< $(QEMU_FLAGS_SMP) || \
+		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
+	@echo ""
+
+# =============================================================================
 # Help
 # =============================================================================
 
@@ -138,12 +177,14 @@ help:
 	@echo "tcelm NUC Toolchain"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all           - Build runtime library and CRT"
-	@echo "  install       - Install to lib directory"
-	@echo "  test-runtime  - Build and run tcelm runtime tests in QEMU"
-	@echo "  clean         - Remove build artifacts"
-	@echo "  scripts       - Make wrapper scripts executable"
-	@echo "  help          - Show this help"
+	@echo "  all              - Build runtime library and CRT"
+	@echo "  install          - Install to lib directory"
+	@echo "  test-runtime     - Build and run tcelm runtime tests in QEMU"
+	@echo "  test-runtime-smp - Run runtime tests with 4 CPU cores"
+	@echo "  test-smp         - Build and run SMP-specific tests"
+	@echo "  clean            - Remove build artifacts"
+	@echo "  scripts          - Make wrapper scripts executable"
+	@echo "  help             - Show this help"
 	@echo ""
 	@echo "Usage:"
 	@echo "  ./bin/tcelm-cc -c source.c -o output.o"
