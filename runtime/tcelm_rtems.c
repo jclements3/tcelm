@@ -8,6 +8,7 @@
 #include "tcelm_basics.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef __rtems__
 #include <rtems/rtems/clock.h>
@@ -15,7 +16,6 @@
 #else
 /* Host stubs for testing */
 #include <time.h>
-#include <stdlib.h>
 static uint32_t stub_tick = 0;
 #endif
 

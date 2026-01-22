@@ -42,14 +42,16 @@ endif
 TCC = $(TCC_DIR)/tcc
 TCC_FLAGS = -Wall
 
-# RTEMS cross-compiler
+# RTEMS cross-compiler (RTEMS 7 for x86_64/amd64 - NUC)
 RTEMS_PREFIX ?= $(HOME)/projects/hwil/rtems/7
-RTEMS_BSP ?= pc686
+RTEMS_BSP ?= amd64
+RTEMS_BSP_DIR = $(RTEMS_PREFIX)/x86_64-rtems7/$(RTEMS_BSP)
 RTEMS_CC = $(RTEMS_PREFIX)/bin/x86_64-rtems7-gcc
+RTEMS_ABI_FLAGS = -mno-red-zone -mcmodel=large
 RTEMS_CFLAGS = -Wall -Wextra -O2 -D__rtems__ \
-    -I$(RTEMS_PREFIX)/include \
-    -specs bsp_specs -qrtems
-RTEMS_LDFLAGS = -L$(RTEMS_PREFIX)/lib -lm
+    $(RTEMS_ABI_FLAGS) \
+    -isystem $(RTEMS_BSP_DIR)/lib/include
+RTEMS_LDFLAGS = $(RTEMS_ABI_FLAGS) -B$(RTEMS_BSP_DIR)/lib -qrtems -Wl,--gc-sections
 
 # Default target
 .PHONY: all
