@@ -34,6 +34,8 @@
 #include "tcelm_mvar.h"
 #include "tcelm_semaphore.h"
 #include "tcelm_barrier.h"
+#include "tcelm_budget.h"
+#include "tcelm_protected.h"
 
 /* Time and I/O */
 #include "tcelm_timer.h"
@@ -50,6 +52,8 @@ static inline int tcelm_runtime_init(void) {
     result |= tcelm_mvar_init();
     result |= tcelm_semaphore_init();
     result |= tcelm_barrier_init();
+    result |= tcelm_budget_init();
+    result |= tcelm_protected_init();
     result |= tcelm_timer_init();
     result |= tcelm_io_init();
     return result;
@@ -62,6 +66,8 @@ static inline int tcelm_runtime_init(void) {
 static inline void tcelm_runtime_shutdown(void) {
     tcelm_io_shutdown();
     tcelm_timer_shutdown();
+    tcelm_protected_shutdown();
+    tcelm_budget_shutdown();
     tcelm_barrier_shutdown();
     tcelm_semaphore_shutdown();
     tcelm_mvar_shutdown();

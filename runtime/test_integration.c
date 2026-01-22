@@ -385,6 +385,173 @@ void test_barrier(void) {
 }
 
 /*
+ * Test Budget (execution time) operations
+ */
+void test_budget(void) {
+    printf("\n=== Budget Tests ===\n");
+
+    tcelm_arena_t *arena = tcelm_arena_create(4096);
+
+    TEST("budget create");
+    tcelm_budget_t *budget = tcelm_budget_create_ms(arena, 100);  /* 100ms budget */
+    assert(budget != NULL);
+    PASS();
+
+    TEST("budget attach");
+    int result = tcelm_budget_attach(budget);
+    assert(result == 0);
+    PASS();
+
+    TEST("budget start/stop");
+    result = tcelm_budget_start(budget);
+    assert(result == 0);
+    usleep(10000);  /* 10ms of work */
+    result = tcelm_budget_stop(budget);
+    assert(result == 0);
+    PASS();
+
+    TEST("budget get used");
+    uint64_t used = tcelm_budget_get_used(budget);
+    assert(used > 0);  /* Should have used some CPU time */
+    PASS();
+
+    TEST("budget get remaining");
+    uint64_t remaining = tcelm_budget_get_remaining(budget);
+    assert(remaining > 0);  /* Should have budget remaining */
+    assert(remaining < 100000);  /* Less than full 100ms */
+    PASS();
+
+    TEST("budget not exhausted");
+    bool exhausted = tcelm_budget_is_exhausted(budget);
+    assert(exhausted == false);
+    PASS();
+
+    TEST("budget reset");
+    result = tcelm_budget_reset(budget);
+    assert(result == 0);
+    used = tcelm_budget_get_used(budget);
+    assert(used == 0);
+    PASS();
+
+    TEST("budget set limit");
+    result = tcelm_budget_set_limit(budget, 50000);  /* 50ms */
+    assert(result == 0);
+    PASS();
+
+    TEST("cpu time self");
+    uint64_t cpu_time = tcelm_cpu_time_self_us();
+    assert(cpu_time > 0);
+    PASS();
+
+    TEST("budget delete");
+    tcelm_budget_delete(budget);
+    PASS();
+
+    tcelm_arena_free(arena);
+}
+
+/*
+ * Test Protected type operations
+ */
+
+/* Test data structure for protected object */
+typedef struct {
+    int counter;
+    bool ready;
+} test_protected_data_t;
+
+/* Test guard: only proceed when ready */
+static bool test_guard_ready(void *data) {
+    test_protected_data_t *d = (test_protected_data_t *)data;
+    return d->ready;
+}
+
+/* Test procedure: increment counter */
+static void test_proc_increment(void *data, void *arg) {
+    test_protected_data_t *d = (test_protected_data_t *)data;
+    int amount = arg ? *(int *)arg : 1;
+    d->counter += amount;
+}
+
+/* Test function: get counter value */
+static void *test_func_get_counter(void *data, void *arg) {
+    (void)arg;
+    test_protected_data_t *d = (test_protected_data_t *)data;
+    return (void *)(intptr_t)d->counter;
+}
+
+void test_protected(void) {
+    printf("\n=== Protected Type Tests ===\n");
+
+    tcelm_arena_t *arena = tcelm_arena_create(4096);
+
+    TEST("protected create");
+    test_protected_data_t init_data = { .counter = 0, .ready = false };
+    tcelm_protected_t *prot = tcelm_protected_create_with_data(
+        arena,
+        &init_data,
+        sizeof(test_protected_data_t)
+    );
+    assert(prot != NULL);
+    PASS();
+
+    TEST("protected call proc");
+    int amount = 5;
+    tcelm_protected_call_proc(prot, test_proc_increment, &amount);
+    PASS();
+
+    TEST("protected call func");
+    void *result = tcelm_protected_call_func(prot, test_func_get_counter, NULL);
+    assert((intptr_t)result == 5);
+    PASS();
+
+    TEST("protected add entry");
+    int entry_idx = tcelm_protected_add_entry(
+        prot,
+        "increment_when_ready",
+        test_guard_ready,
+        test_proc_increment
+    );
+    assert(entry_idx >= 0);
+    PASS();
+
+    TEST("protected try_call_entry (guard false)");
+    int rc = tcelm_protected_try_call_entry(prot, entry_idx, &amount);
+    assert(rc == -1);  /* Guard is false, should fail */
+    PASS();
+
+    TEST("protected manual lock/unlock");
+    tcelm_protected_lock_write(prot);
+    test_protected_data_t *data = (test_protected_data_t *)tcelm_protected_get_data(prot);
+    data->ready = true;  /* Set guard condition */
+    data->counter = 10;
+    tcelm_protected_unlock_write(prot);
+    PASS();
+
+    TEST("protected try_call_entry (guard true)");
+    amount = 7;
+    rc = tcelm_protected_try_call_entry(prot, entry_idx, &amount);
+    assert(rc == 0);  /* Guard is true, should succeed */
+    result = tcelm_protected_call_func(prot, test_func_get_counter, NULL);
+    assert((intptr_t)result == 17);  /* 10 + 7 */
+    PASS();
+
+    TEST("protected call entry by name");
+    amount = 3;
+    rc = tcelm_protected_call_entry_by_name(prot, "increment_when_ready", &amount);
+    assert(rc == 0);
+    result = tcelm_protected_call_func(prot, test_func_get_counter, NULL);
+    assert((intptr_t)result == 20);  /* 17 + 3 */
+    PASS();
+
+    TEST("protected delete");
+    tcelm_protected_delete(prot);
+    PASS();
+
+    tcelm_arena_free(arena);
+}
+
+/*
  * Test Timer operations
  */
 void test_timer(void) {
@@ -514,6 +681,8 @@ int main(int argc, char **argv) {
     test_mvar();
     test_semaphore();
     test_barrier();
+    test_budget();
+    test_protected();
     test_timer();
     test_io();
     test_task_basic();
