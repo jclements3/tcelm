@@ -90,6 +90,9 @@ compile target source =
                     else if target == "native" then
                         generateNativeCode ast
 
+                    else if target == "native-worker" then
+                        C.generateNativeWorkerModule ast
+
                     else
                         C.generateModule ast
             in

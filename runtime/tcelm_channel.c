@@ -5,6 +5,7 @@
  */
 
 #include "tcelm_channel.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -69,7 +70,7 @@ tcelm_channel_t *tcelm_channel_create(
 
     /* Build unique queue name */
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&channel_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&channel_counter, 1);
     snprintf(name, 5, "C%03u", num % 1000);
     rtems_name queue_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 

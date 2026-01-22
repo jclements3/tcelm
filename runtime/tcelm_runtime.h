@@ -41,6 +41,9 @@
 #include "tcelm_timer.h"
 #include "tcelm_io.h"
 
+/* Platform.worker for native/TCC self-hosting */
+#include "tcelm_worker.h"
+
 /*
  * Initialize all runtime subsystems
  * Call this before any tcelm operations

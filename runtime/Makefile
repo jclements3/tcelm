@@ -11,8 +11,8 @@
 COMMON_SRCS = tcelm_arena.c tcelm_types.c tcelm_basics.c
 # Standard library modules (for bootstrap)
 STDLIB_SRCS = tcelm_string.c tcelm_list.c tcelm_char.c tcelm_maybe.c
-# New RTEMS integration layer (Task, Channel, MVar, Semaphore, Barrier, Budget, Protected, Timer, IO)
-NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_semaphore.c tcelm_barrier.c tcelm_budget.c tcelm_protected.c tcelm_timer.c tcelm_io.c
+# New RTEMS integration layer (Task, Channel, MVar, Semaphore, Barrier, Budget, Protected, Timer, IO, Worker)
+NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_semaphore.c tcelm_barrier.c tcelm_budget.c tcelm_protected.c tcelm_timer.c tcelm_io.c tcelm_worker.c
 # Legacy RTEMS sources (kept separate to avoid conflicts)
 RTEMS_SRCS = tcelm_rtems.c tcelm_shell.c tcelm_shell_ops.c tcelm_hwil.c
 
@@ -39,7 +39,10 @@ HOST_LDFLAGS = -lm -lpthread -lrt
 endif
 
 # TCC (Tiny C Compiler) - for fast iteration
-TCC = $(TCC_DIR)/tcc
+# Use system TCC for host builds (x86_64), project TCC is for RTEMS cross-compilation
+TCC_HOST = /usr/local/bin/tcc
+TCC_RTEMS = $(TCC_DIR)/tcc
+TCC = $(TCC_HOST)
 TCC_FLAGS = -Wall
 
 # RTEMS cross-compiler (RTEMS 7 for x86_64/amd64 - NUC)
@@ -68,7 +71,7 @@ objs: $(CORE_OBJS)
 
 # Host build
 .PHONY: host
-host: test_runtime test_rtems test_shell_ops test_pmap
+host: test_runtime test_rtems test_shell_ops test_pmap test_worker
 
 test_runtime: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
@@ -82,14 +85,20 @@ test_rtems: $(TEST_RTEMS_SRC) $(LIB_SRCS)
 test_shell_ops: $(TEST_SHELL_OPS_SRC) $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_shell_ops.c
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
 
+test_worker: test_worker.c $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_worker.c
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
+
 # TCC build (faster compilation for development)
 .PHONY: tcc
-tcc: test_runtime_tcc test_rtems_tcc
+tcc: test_runtime_tcc test_rtems_tcc test_worker_tcc
 
 test_runtime_tcc: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
 	$(TCC) $(TCC_FLAGS) -o $@ $^ -lm
 
 test_rtems_tcc: $(TEST_RTEMS_SRC) $(LIB_SRCS)
+	$(TCC) $(TCC_FLAGS) -o $@ $^ -lm
+
+test_worker_tcc: test_worker.c $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_worker.c
 	$(TCC) $(TCC_FLAGS) -o $@ $^ -lm
 
 # RTEMS build (cross-compile)
@@ -104,7 +113,7 @@ libtcelm_rtems.a: $(LIB_SRCS:.c=.rtems.o)
 
 # Run tests
 .PHONY: test
-test: test_runtime test_rtems test_shell_ops test_pmap
+test: test_runtime test_rtems test_shell_ops test_pmap test_worker
 	@echo "=== Running runtime tests ==="
 	./test_runtime
 	@echo ""
@@ -116,14 +125,20 @@ test: test_runtime test_rtems test_shell_ops test_pmap
 	@echo ""
 	@echo "=== Running pmap (parallel map) tests ==="
 	./test_pmap
+	@echo ""
+	@echo "=== Running Platform.worker tests ==="
+	./test_worker
 
 .PHONY: test-tcc
-test-tcc: test_runtime_tcc test_rtems_tcc
+test-tcc: test_runtime_tcc test_rtems_tcc test_worker_tcc
 	@echo "=== Running runtime tests (TCC) ==="
 	./test_runtime_tcc
 	@echo ""
 	@echo "=== Running RTEMS integration tests (TCC) ==="
 	./test_rtems_tcc
+	@echo ""
+	@echo "=== Running Platform.worker tests (TCC) ==="
+	./test_worker_tcc
 
 # New integration layer build (Task, Channel, MVar, Timer, IO)
 .PHONY: integration
@@ -139,8 +154,8 @@ libtcelm_integration.a: $(COMMON_SRCS:.c=.o) $(STDLIB_SRCS:.c=.o) $(NEW_INTEGRAT
 # Clean
 .PHONY: clean
 clean:
-	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap
-	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc
+	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap test_worker
+	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc test_worker_tcc test_integration_tcc
 	rm -f *.o *.rtems.o
 	rm -f libtcelm_rtems.a libtcelm_integration.a
 

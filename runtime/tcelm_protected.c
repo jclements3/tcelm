@@ -6,6 +6,7 @@
  */
 
 #include "tcelm_protected.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,7 +69,7 @@ tcelm_protected_t *tcelm_protected_create(
 
     /* Build unique mutex name */
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&protected_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&protected_counter, 1);
     snprintf(name, 5, "P%03u", num % 1000);
     rtems_name mutex_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 
@@ -261,7 +262,7 @@ tcelm_protected_t *tcelm_protected_create(
     prot->reader_count = 0;
     prot->writer_waiting = false;
 
-    __sync_fetch_and_add(&protected_counter, 1);
+    tcelm_atomic_fetch_add_u32(&protected_counter, 1);
 
     return prot;
 }
@@ -291,7 +292,7 @@ void tcelm_protected_lock_read(tcelm_protected_t *prot) {
     if (!prot || !prot->native_data) return;
     native_protected_data_t *native = (native_protected_data_t *)prot->native_data;
     pthread_rwlock_rdlock(&native->rwlock);
-    __sync_fetch_and_add(&prot->reader_count, 1);
+    tcelm_atomic_fetch_add_u32(&prot->reader_count, 1);
 }
 
 /*
@@ -300,7 +301,7 @@ void tcelm_protected_lock_read(tcelm_protected_t *prot) {
 void tcelm_protected_unlock_read(tcelm_protected_t *prot) {
     if (!prot || !prot->native_data) return;
     native_protected_data_t *native = (native_protected_data_t *)prot->native_data;
-    __sync_fetch_and_sub(&prot->reader_count, 1);
+    tcelm_atomic_fetch_sub_u32(&prot->reader_count, 1);
     pthread_rwlock_unlock(&native->rwlock);
 }
 

@@ -5,6 +5,7 @@
  */
 
 #include "tcelm_task.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -116,7 +117,7 @@ tcelm_task_handle_t *tcelm_task_spawn(
 
     /* Build unique task name */
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&task_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&task_counter, 1);
     snprintf(name, 5, "T%03u", num % 1000);
     rtems_name rtems_task_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 

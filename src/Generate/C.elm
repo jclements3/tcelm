@@ -1,4 +1,4 @@
-module Generate.C exposing (generate, generateModule, generateRtemsModule)
+module Generate.C exposing (generate, generateModule, generateNativeWorkerModule, generateRtemsModule)
 
 {-| C Code Generator for tcelm
 
@@ -3202,6 +3202,91 @@ generateRtemsModule mod =
         ++ String.join "\n" taskDef
         ++ String.join "\n" registerFunc
         ++ String.join "\n" autoRegister
+        ++ String.join "\n" mainEntry
+
+
+{-| Generate a native Platform.worker for file I/O based compilation.
+
+This generates code that uses tcelm_worker_run instead of RTEMS tasks,
+enabling self-hosting with TCC or GCC on native platforms.
+
+The generated worker:
+- Reads input from a file (passed via flags.source)
+- Processes it through init/update
+- Outputs result via worker commands
+-}
+generateNativeWorkerModule : Module -> String
+generateNativeWorkerModule mod =
+    let
+        moduleName =
+            mod.name
+                |> Maybe.map (\(Src.At _ n) -> n)
+                |> Maybe.withDefault "Main"
+
+        baseCode =
+            generateModule mod
+
+        workerIncludes =
+            [ ""
+            , "/* Native Worker Integration */"
+            , "#include \"tcelm_worker.h\""
+            , ""
+            ]
+
+        -- Generate init function wrapper
+        initWrapper =
+            [ "/* Init function wrapper for native worker */"
+            , "static tcelm_value_t *" ++ mangle moduleName ++ "_worker_init("
+            , "        tcelm_arena_t *arena,"
+            , "        tcelm_value_t *flags) {"
+            , "    /* Extract source from flags record */"
+            , "    tcelm_value_t *source = tcelm_record_get(flags, \"source\");"
+            , "    return elm_init(arena);"
+            , "}"
+            , ""
+            ]
+
+        -- Generate update function wrapper
+        updateWrapper =
+            [ "/* Update function wrapper for native worker */"
+            , "static tcelm_value_t *" ++ mangle moduleName ++ "_worker_update("
+            , "        tcelm_arena_t *arena,"
+            , "        tcelm_value_t *msg,"
+            , "        tcelm_value_t *model) {"
+            , "    return tcelm_apply_n(arena, elm_update(arena), 2, msg, model);"
+            , "}"
+            , ""
+            ]
+
+        -- Generate worker program definition
+        workerDef =
+            [ "/* Worker program definition */"
+            , "static const tcelm_worker_program_t " ++ mangle moduleName ++ "_worker_program = {"
+            , "    .name = \"" ++ moduleName ++ "\","
+            , "    .init = " ++ mangle moduleName ++ "_worker_init,"
+            , "    .update = " ++ mangle moduleName ++ "_worker_update,"
+            , "    .subscriptions = NULL"
+            , "};"
+            , ""
+            ]
+
+        -- Generate main entry point
+        mainEntry =
+            [ "/* Main entry point for native worker */"
+            , "#ifndef TCELM_NO_MAIN"
+            , "int main(int argc, char **argv) {"
+            , "    return tcelm_worker_run(&" ++ mangle moduleName ++ "_worker_program, NULL, argc, argv);"
+            , "}"
+            , "#endif"
+            , ""
+            ]
+    in
+    baseCode
+        ++ "\n"
+        ++ String.join "\n" workerIncludes
+        ++ String.join "\n" initWrapper
+        ++ String.join "\n" updateWrapper
+        ++ String.join "\n" workerDef
         ++ String.join "\n" mainEntry
 
 

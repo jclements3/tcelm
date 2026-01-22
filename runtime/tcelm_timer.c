@@ -5,6 +5,7 @@
  */
 
 #include "tcelm_timer.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -76,7 +77,7 @@ tcelm_timer_t *tcelm_timer_create_oneshot(
 
     /* Build unique timer name */
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&timer_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&timer_counter, 1);
     snprintf(name, 5, "T%03u", num % 1000);
     rtems_name timer_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 
@@ -129,7 +130,7 @@ tcelm_timer_t *tcelm_timer_create_rate_monotonic(
     if (!timer) return NULL;
 
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&timer_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&timer_counter, 1);
     snprintf(name, 5, "R%03u", num % 1000);
     rtems_name period_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 

@@ -6,6 +6,7 @@
  */
 
 #include "tcelm_budget.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -101,7 +102,7 @@ tcelm_budget_t *tcelm_budget_create(
     budget->exhausted = false;
     budget->task_id = 0;
 
-    __sync_fetch_and_add(&budget_counter, 1);
+    tcelm_atomic_fetch_add_u32(&budget_counter, 1);
 
     return budget;
 }
@@ -214,7 +215,7 @@ tcelm_budget_t *tcelm_budget_create(
     budget->active = false;
     budget->exhausted = false;
 
-    __sync_fetch_and_add(&budget_counter, 1);
+    tcelm_atomic_fetch_add_u32(&budget_counter, 1);
 
     return budget;
 }

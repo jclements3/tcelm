@@ -5,6 +5,7 @@
  */
 
 #include "tcelm_barrier.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -60,7 +61,7 @@ tcelm_barrier_t *tcelm_barrier_create(
 
     /* Build unique barrier name */
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&barrier_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&barrier_counter, 1);
     snprintf(name, 5, "B%03u", num % 1000);
     rtems_name bar_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 

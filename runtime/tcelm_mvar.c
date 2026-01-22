@@ -5,6 +5,7 @@
  */
 
 #include "tcelm_mvar.h"
+#include "tcelm_atomic.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -48,7 +49,7 @@ tcelm_mvar_t *tcelm_mvar_new(tcelm_arena_t *arena, tcelm_value_t *value) {
 
     /* Build unique semaphore name */
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&mvar_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&mvar_counter, 1);
     snprintf(name, 5, "M%03u", num % 1000);
     rtems_name sem_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 
@@ -84,7 +85,7 @@ tcelm_mvar_t *tcelm_mvar_new_empty(tcelm_arena_t *arena) {
     if (!mvar) return NULL;
 
     char name[5];
-    uint32_t num = __sync_fetch_and_add(&mvar_counter, 1);
+    uint32_t num = tcelm_atomic_fetch_add_u32(&mvar_counter, 1);
     snprintf(name, 5, "M%03u", num % 1000);
     rtems_name sem_name = rtems_build_name(name[0], name[1], name[2], name[3]);
 
