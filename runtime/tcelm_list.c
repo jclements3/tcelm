@@ -3,7 +3,17 @@
  */
 
 #include "tcelm_list.h"
+#include "tcelm_arena.h"  /* For TCELM_TLS and tcelm_current_arena */
 #include <string.h>
+#include <stdlib.h>
+
+#ifdef __rtems__
+#include <rtems.h>
+#include <sys/cpuset.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#endif
 
 /* Helper to compare two values for equality */
 static bool values_equal(tcelm_value_t *a, tcelm_value_t *b);
@@ -596,4 +606,214 @@ static bool values_equal(tcelm_value_t *a, tcelm_value_t *b) {
             /* For complex types, compare by pointer (reference equality) */
             return a == b;
     }
+}
+
+/* =========================================================================
+ * Parallel Map (pmap) Implementation
+ * ========================================================================= */
+
+/*
+ * Get number of available CPU cores
+ */
+int tcelm_get_num_cores(void) {
+#ifdef __rtems__
+    /* RTEMS: use configured processor count */
+    return (int)rtems_scheduler_get_processor_maximum();
+#else
+    /* POSIX: use sysconf */
+    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    return (cores > 0) ? (int)cores : 1;
+#endif
+}
+
+/*
+ * Worker data for parallel map - uses array-based approach
+ */
+typedef struct pmap_worker_data {
+    tcelm_arena_t *arena;       /* Shared arena (main arena) */
+    tcelm_value_t *fn;          /* Function to apply */
+    tcelm_value_t **input;      /* Input array slice */
+    tcelm_value_t **output;     /* Output array slice */
+    int start_idx;              /* Start index in arrays */
+    int count;                  /* Number of elements to process */
+    volatile int done;          /* Completion flag */
+} pmap_worker_data_t;
+
+/*
+ * Worker function - maps fn over array slice
+ */
+static void pmap_worker_fn(pmap_worker_data_t *data) {
+    /* Set thread-local arena */
+    tcelm_current_arena = data->arena;
+
+    for (int i = 0; i < data->count; i++) {
+        data->output[data->start_idx + i] = tcelm_apply(data->arena, data->fn, data->input[data->start_idx + i]);
+    }
+
+    data->done = 1;
+}
+
+#ifndef __rtems__
+/*
+ * pthread wrapper for worker
+ */
+static void *pmap_pthread_wrapper(void *arg) {
+    pmap_worker_data_t *data = (pmap_worker_data_t *)arg;
+    pmap_worker_fn(data);
+    return NULL;
+}
+#endif
+
+/*
+ * Helper: get list length as int
+ */
+static int list_length_int(tcelm_value_t *list) {
+    int count = 0;
+    while (!tcelm_is_nil(list)) {
+        count++;
+        list = tcelm_list_tail(list);
+    }
+    return count;
+}
+
+/*
+ * List.pmapN : Int -> (a -> b) -> List a -> List b
+ *
+ * Parallel map with explicit worker count.
+ * Uses array-based approach: convert list to array, map in parallel, convert back.
+ */
+tcelm_value_t *tcelm_list_pmapN(tcelm_arena_t *arena, int num_workers, tcelm_value_t *fn, tcelm_value_t *list) {
+    int len = list_length_int(list);
+
+    /* For empty lists, return empty */
+    if (len == 0) {
+        return TCELM_NIL;
+    }
+
+    /* For small lists or single worker, use sequential map */
+    if (num_workers <= 1 || len < num_workers * 2) {
+        return tcelm_list_map(arena, fn, list);
+    }
+
+    /* Cap workers to reasonable number */
+    if (num_workers > len / 2) {
+        num_workers = len / 2;
+    }
+    if (num_workers > 16) {
+        num_workers = 16;  /* Cap at 16 workers to avoid overhead */
+    }
+
+    /* Convert list to array */
+    tcelm_value_t **input = malloc(len * sizeof(tcelm_value_t *));
+    tcelm_value_t **output = malloc(len * sizeof(tcelm_value_t *));
+    if (!input || !output) {
+        free(input);
+        free(output);
+        return tcelm_list_map(arena, fn, list);
+    }
+
+    tcelm_value_t *curr = list;
+    for (int i = 0; i < len; i++) {
+        input[i] = tcelm_list_head(curr);
+        curr = tcelm_list_tail(curr);
+    }
+
+    /* Allocate worker data */
+    pmap_worker_data_t *workers = malloc(num_workers * sizeof(pmap_worker_data_t));
+    if (!workers) {
+        free(input);
+        free(output);
+        return tcelm_list_map(arena, fn, list);
+    }
+
+#ifndef __rtems__
+    pthread_t *threads = malloc(num_workers * sizeof(pthread_t));
+    if (!threads) {
+        free(workers);
+        free(input);
+        free(output);
+        return tcelm_list_map(arena, fn, list);
+    }
+#endif
+
+    /* Calculate chunk sizes and spawn workers */
+    int base_chunk_size = len / num_workers;
+    int remainder = len % num_workers;
+    int offset = 0;
+
+    for (int i = 0; i < num_workers; i++) {
+        int chunk_size = base_chunk_size + (i < remainder ? 1 : 0);
+
+        workers[i].arena = arena;  /* Share main arena */
+        workers[i].fn = fn;
+        workers[i].input = input;
+        workers[i].output = output;
+        workers[i].start_idx = offset;
+        workers[i].count = chunk_size;
+        workers[i].done = 0;
+
+        offset += chunk_size;
+
+#ifdef __rtems__
+        /* RTEMS: create task */
+        rtems_id task_id;
+        rtems_name task_name = rtems_build_name('P', 'M', 'A', '0' + (i % 10));
+        rtems_status_code status = rtems_task_create(
+            task_name,
+            100,
+            8192,
+            RTEMS_DEFAULT_MODES,
+            RTEMS_DEFAULT_ATTRIBUTES,
+            &task_id
+        );
+        if (status == RTEMS_SUCCESSFUL) {
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(i % tcelm_get_num_cores(), &cpuset);
+            rtems_task_set_affinity(task_id, sizeof(cpuset), &cpuset);
+            rtems_task_start(task_id, (rtems_task_entry)pmap_worker_fn, (rtems_task_argument)&workers[i]);
+        }
+#else
+        pthread_create(&threads[i], NULL, pmap_pthread_wrapper, &workers[i]);
+#endif
+    }
+
+    /* Wait for all workers */
+#ifdef __rtems__
+    for (int i = 0; i < num_workers; i++) {
+        while (!workers[i].done) {
+            rtems_task_wake_after(1);
+        }
+    }
+#else
+    for (int i = 0; i < num_workers; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    free(threads);
+#endif
+
+    /* Restore main thread's arena */
+    tcelm_current_arena = arena;
+
+    /* Convert output array back to list */
+    tcelm_value_t *result = TCELM_NIL;
+    for (int i = len - 1; i >= 0; i--) {
+        result = tcelm_cons(arena, output[i], result);
+    }
+
+    free(workers);
+    free(input);
+    free(output);
+
+    return result;
+}
+
+/*
+ * List.pmap : (a -> b) -> List a -> List b
+ *
+ * Parallel map using all available cores.
+ */
+tcelm_value_t *tcelm_list_pmap(tcelm_arena_t *arena, tcelm_value_t *fn, tcelm_value_t *list) {
+    int num_cores = tcelm_get_num_cores();
+    return tcelm_list_pmapN(arena, num_cores, fn, list);
 }

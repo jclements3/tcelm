@@ -66,9 +66,12 @@ objs: $(CORE_OBJS)
 
 # Host build
 .PHONY: host
-host: test_runtime test_rtems test_shell_ops
+host: test_runtime test_rtems test_shell_ops test_pmap
 
 test_runtime: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
+
+test_pmap: test_pmap.c $(COMMON_SRCS) $(STDLIB_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
 
 test_rtems: $(TEST_RTEMS_SRC) $(LIB_SRCS)
@@ -99,7 +102,7 @@ libtcelm_rtems.a: $(LIB_SRCS:.c=.rtems.o)
 
 # Run tests
 .PHONY: test
-test: test_runtime test_rtems test_shell_ops
+test: test_runtime test_rtems test_shell_ops test_pmap
 	@echo "=== Running runtime tests ==="
 	./test_runtime
 	@echo ""
@@ -108,6 +111,9 @@ test: test_runtime test_rtems test_shell_ops
 	@echo ""
 	@echo "=== Running Shell Ops tests (Turtle/Shelly style) ==="
 	./test_shell_ops
+	@echo ""
+	@echo "=== Running pmap (parallel map) tests ==="
+	./test_pmap
 
 .PHONY: test-tcc
 test-tcc: test_runtime_tcc test_rtems_tcc
@@ -131,7 +137,7 @@ libtcelm_integration.a: $(COMMON_SRCS:.c=.o) $(STDLIB_SRCS:.c=.o) $(NEW_INTEGRAT
 # Clean
 .PHONY: clean
 clean:
-	rm -f test_runtime test_rtems test_shell_ops test_integration
+	rm -f test_runtime test_rtems test_shell_ops test_integration test_pmap
 	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc
 	rm -f *.o *.rtems.o
 	rm -f libtcelm_rtems.a libtcelm_integration.a

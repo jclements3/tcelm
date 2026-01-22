@@ -52,6 +52,30 @@ tcelm_value_t *tcelm_list_unzip(tcelm_arena_t *arena, tcelm_value_t *list);
 /* List testing */
 tcelm_value_t *tcelm_list_isEmpty(tcelm_arena_t *arena, tcelm_value_t *list);
 
+/* Parallel operations */
+
+/*
+ * List.pmap : (a -> b) -> List a -> List b
+ *
+ * Parallel map - applies function to list elements using all available cores.
+ * Automatically splits work across cores and combines results in order.
+ * Falls back to sequential map for small lists (< num_cores elements).
+ */
+tcelm_value_t *tcelm_list_pmap(tcelm_arena_t *arena, tcelm_value_t *fn, tcelm_value_t *list);
+
+/*
+ * List.pmapN : Int -> (a -> b) -> List a -> List b
+ *
+ * Parallel map with explicit core count.
+ * Useful when you want to limit parallelism or for testing.
+ */
+tcelm_value_t *tcelm_list_pmapN(tcelm_arena_t *arena, int num_workers, tcelm_value_t *fn, tcelm_value_t *list);
+
+/*
+ * Get number of available CPU cores
+ */
+int tcelm_get_num_cores(void);
+
 /* Compatibility aliases for backwards compatibility */
 #define tcelm_list_length tcelm_list_length_fn
 #define tcelm_list_reverse tcelm_list_reverse_fn
