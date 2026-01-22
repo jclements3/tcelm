@@ -12,7 +12,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUNTIME_DIR="$PROJECT_ROOT/runtime"
-TCC="$PROJECT_ROOT/tcc/tcc"
+# Use GCC for compilation tests (needs system headers like stdio.h)
+CC="${CC:-gcc}"
 TEST_DIR="$PROJECT_ROOT/tests/fixtures"
 TMP_DIR="/tmp/tcelm_codegen_tests"
 
@@ -66,10 +67,10 @@ test_module_compiles() {
     fi
 
     # Compile with tcc
-    if "$TCC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" -Wall 2>"$TMP_DIR/${name}_tcc.log"; then
+    if "$CC" -c "$c_file" -I "$RUNTIME_DIR" -o "$o_file" -Wall 2>"$TMP_DIR/${name}_cc.log"; then
         log_pass "$name compiles"
     else
-        log_fail "$name" "tcc compilation failed: $(cat "$TMP_DIR/${name}_tcc.log" | head -5)"
+        log_fail "$name" "compilation failed: $(cat "$TMP_DIR/${name}_cc.log" | head -5)"
     fi
 }
 
