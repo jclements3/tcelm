@@ -2,4 +2,6 @@ module Main exposing (main)
 
 main : Int
 main =
-    Maybe.withDefault 0 (List.head (List.reverse (List.sort [3, 1, 4, 1, 5, 9, 2, 6])))
+    case List.head (List.sort (List.reverse [1, 2, 3, 4, 5])) of
+        Just x -> x
+        Nothing -> 0
