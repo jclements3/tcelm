@@ -31,6 +31,7 @@ generateModule mod =
             , "#include \"tcelm_arena.h\""
             , "#include \"tcelm_types.h\""
             , "#include \"tcelm_basics.h\""
+            , "#include \"tcelm_platform.h\""
             , ""
             ]
 
@@ -3230,8 +3231,13 @@ generateNativeWorkerModule mod =
             [ ""
             , "/* Native Worker Integration */"
             , "#include \"tcelm_worker.h\""
+            , "#include \"tcelm_platform.h\""
             , ""
             ]
+
+        -- Module prefix for function names
+        modulePrefix =
+            "elm_" ++ String.replace "." "_" moduleName
 
         -- Generate init function wrapper
         initWrapper =
@@ -3241,7 +3247,8 @@ generateNativeWorkerModule mod =
             , "        tcelm_value_t *flags) {"
             , "    /* Extract source from flags record */"
             , "    tcelm_value_t *source = tcelm_record_get(flags, \"source\");"
-            , "    return elm_init(arena);"
+            , "    (void)source;  /* Available for use in init */"
+            , "    return " ++ modulePrefix ++ "_init(arena, TCELM_UNIT);"
             , "}"
             , ""
             ]
@@ -3253,7 +3260,7 @@ generateNativeWorkerModule mod =
             , "        tcelm_arena_t *arena,"
             , "        tcelm_value_t *msg,"
             , "        tcelm_value_t *model) {"
-            , "    return tcelm_apply_n(arena, elm_update(arena), 2, msg, model);"
+            , "    return " ++ modulePrefix ++ "_update(arena, msg, model);"
             , "}"
             , ""
             ]

@@ -44,6 +44,9 @@
 /* Platform.worker for native/TCC self-hosting */
 #include "tcelm_worker.h"
 
+/* Elm standard library stubs */
+#include "tcelm_platform.h"
+
 /*
  * Initialize all runtime subsystems
  * Call this before any tcelm operations
