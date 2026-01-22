@@ -11,8 +11,8 @@
 COMMON_SRCS = tcelm_arena.c tcelm_types.c tcelm_basics.c
 # Standard library modules (for bootstrap)
 STDLIB_SRCS = tcelm_string.c tcelm_list.c tcelm_char.c tcelm_maybe.c
-# New RTEMS integration layer (Task, Channel, MVar, Timer, IO) - future direction
-NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_timer.c tcelm_io.c
+# New RTEMS integration layer (Task, Channel, MVar, Semaphore, Barrier, Timer, IO)
+NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_semaphore.c tcelm_barrier.c tcelm_timer.c tcelm_io.c
 # Legacy RTEMS sources (kept separate to avoid conflicts)
 RTEMS_SRCS = tcelm_rtems.c tcelm_shell.c tcelm_shell_ops.c tcelm_hwil.c
 

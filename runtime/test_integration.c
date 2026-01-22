@@ -10,6 +10,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "tcelm_runtime.h"
 
@@ -231,6 +232,159 @@ void test_mvar(void) {
 }
 
 /*
+ * Test Semaphore operations
+ */
+void test_semaphore(void) {
+    printf("\n=== Semaphore Tests ===\n");
+
+    tcelm_arena_t *arena = tcelm_arena_create(4096);
+
+    TEST("semaphore create");
+    tcelm_semaphore_t *sem = tcelm_semaphore_create_with_count(arena, 3);
+    assert(sem != NULL);
+    PASS();
+
+    TEST("semaphore acquire");
+    int result = tcelm_semaphore_acquire(sem);
+    assert(result == 0);
+    PASS();
+
+    TEST("semaphore try_acquire");
+    result = tcelm_semaphore_try_acquire(sem);  /* Count was 3, now 1 */
+    assert(result == 0);
+    result = tcelm_semaphore_try_acquire(sem);  /* Count now 0 */
+    assert(result == 0);
+    result = tcelm_semaphore_try_acquire(sem);  /* Should fail, count is 0 */
+    assert(result == -1);
+    PASS();
+
+    TEST("semaphore release");
+    result = tcelm_semaphore_release(sem);
+    assert(result == 0);
+    PASS();
+
+    TEST("semaphore release multiple");
+    result = tcelm_semaphore_release_multiple(sem, 2);
+    assert(result == 0);
+    PASS();
+
+    TEST("semaphore get count");
+    uint32_t count = tcelm_semaphore_get_count(sem);
+    assert(count == 3);  /* Started with 3, acquired 3, released 1+2 = 3 */
+    PASS();
+
+    TEST("semaphore acquire timeout");
+    /* Drain the semaphore */
+    tcelm_semaphore_acquire(sem);
+    tcelm_semaphore_acquire(sem);
+    tcelm_semaphore_acquire(sem);
+    /* Now try with timeout - should fail */
+    result = tcelm_semaphore_acquire_timeout(sem, 10);  /* 10ms timeout */
+    assert(result == -1);
+    PASS();
+
+    TEST("semaphore delete");
+    tcelm_semaphore_delete(sem);
+    PASS();
+
+    tcelm_arena_free(arena);
+}
+
+/*
+ * Test Barrier operations
+ */
+static void *barrier_thread_fn(void *arg);
+
+typedef struct barrier_test_data {
+    tcelm_barrier_t *barrier;
+    int thread_id;
+    int *arrival_order;
+    int *arrival_index;
+    pthread_mutex_t *mutex;
+} barrier_test_data_t;
+
+static void *barrier_thread_fn(void *arg) {
+    barrier_test_data_t *data = (barrier_test_data_t *)arg;
+
+    /* Small delay based on thread id to stagger arrivals */
+    usleep(data->thread_id * 1000);
+
+    /* Wait at barrier */
+    tcelm_barrier_wait_result_t result = tcelm_barrier_wait(data->barrier);
+
+    /* Record that we passed the barrier */
+    pthread_mutex_lock(data->mutex);
+    data->arrival_order[(*data->arrival_index)++] = data->thread_id;
+    pthread_mutex_unlock(data->mutex);
+
+    return (void *)(intptr_t)result;
+}
+
+void test_barrier(void) {
+    printf("\n=== Barrier Tests ===\n");
+
+    tcelm_arena_t *arena = tcelm_arena_create(4096);
+
+    TEST("barrier create");
+    tcelm_barrier_t *barrier = tcelm_barrier_create_with_count(arena, 3);
+    assert(barrier != NULL);
+    PASS();
+
+    TEST("barrier wait (3 threads)");
+    {
+        pthread_t threads[3];
+        barrier_test_data_t data[3];
+        int arrival_order[3] = {-1, -1, -1};
+        int arrival_index = 0;
+        pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+        for (int i = 0; i < 3; i++) {
+            data[i].barrier = barrier;
+            data[i].thread_id = i;
+            data[i].arrival_order = arrival_order;
+            data[i].arrival_index = &arrival_index;
+            data[i].mutex = &mutex;
+            pthread_create(&threads[i], NULL, barrier_thread_fn, &data[i]);
+        }
+
+        for (int i = 0; i < 3; i++) {
+            pthread_join(threads[i], NULL);
+        }
+
+        /* All threads should have passed the barrier */
+        assert(arrival_index == 3);
+        pthread_mutex_destroy(&mutex);
+    }
+    PASS();
+
+    TEST("barrier wait timeout");
+    {
+        /* Create a barrier for 2 threads but only one will wait */
+        tcelm_barrier_t *b2 = tcelm_barrier_create_with_count(arena, 2);
+        tcelm_barrier_wait_result_t result = tcelm_barrier_wait_timeout(b2, 10);
+        assert(result == TCELM_BARRIER_WAIT_TIMEOUT);
+        tcelm_barrier_delete(b2);
+    }
+    PASS();
+
+    TEST("barrier release");
+    {
+        tcelm_barrier_t *b3 = tcelm_barrier_create_with_count(arena, 5);
+        /* No one waiting yet */
+        uint32_t released = tcelm_barrier_release(b3);
+        assert(released == 0);
+        tcelm_barrier_delete(b3);
+    }
+    PASS();
+
+    TEST("barrier delete");
+    tcelm_barrier_delete(barrier);
+    PASS();
+
+    tcelm_arena_free(arena);
+}
+
+/*
  * Test Timer operations
  */
 void test_timer(void) {
@@ -358,6 +512,8 @@ int main(int argc, char **argv) {
     test_types();
     test_channel();
     test_mvar();
+    test_semaphore();
+    test_barrier();
     test_timer();
     test_io();
     test_task_basic();
