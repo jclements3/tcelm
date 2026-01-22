@@ -47,8 +47,14 @@ typedef struct tcelm_arena {
 /* Initialize arena with given block size */
 int tcelm_arena_init(tcelm_arena_t *arena, size_t block_size);
 
-/* Destroy arena and free all memory */
+/* Create and initialize a new arena (heap-allocated) */
+tcelm_arena_t *tcelm_arena_create(size_t block_size);
+
+/* Destroy arena and free all memory (for stack-allocated arenas) */
 void tcelm_arena_destroy(tcelm_arena_t *arena);
+
+/* Free a heap-allocated arena (created with tcelm_arena_create) */
+void tcelm_arena_free(tcelm_arena_t *arena);
 
 /* Reset arena for reuse (keeps allocated blocks) */
 void tcelm_arena_reset(tcelm_arena_t *arena);

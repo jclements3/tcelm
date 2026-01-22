@@ -49,6 +49,18 @@ int tcelm_arena_init(tcelm_arena_t *arena, size_t block_size) {
     return 0;
 }
 
+tcelm_arena_t *tcelm_arena_create(size_t block_size) {
+    tcelm_arena_t *arena = (tcelm_arena_t *)malloc(sizeof(tcelm_arena_t));
+    if (!arena) return NULL;
+
+    if (tcelm_arena_init(arena, block_size) != 0) {
+        free(arena);
+        return NULL;
+    }
+
+    return arena;
+}
+
 void tcelm_arena_destroy(tcelm_arena_t *arena) {
     if (!arena) return;
 
@@ -63,6 +75,12 @@ void tcelm_arena_destroy(tcelm_arena_t *arena) {
     arena->current = NULL;
     arena->total_allocated = 0;
     arena->total_used = 0;
+}
+
+void tcelm_arena_free(tcelm_arena_t *arena) {
+    if (!arena) return;
+    tcelm_arena_destroy(arena);
+    free(arena);
 }
 
 void tcelm_arena_reset(tcelm_arena_t *arena) {

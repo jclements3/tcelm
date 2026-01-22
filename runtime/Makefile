@@ -11,6 +11,9 @@
 COMMON_SRCS = tcelm_arena.c tcelm_types.c tcelm_basics.c
 # Standard library modules (for bootstrap)
 STDLIB_SRCS = tcelm_string.c tcelm_list.c tcelm_char.c tcelm_maybe.c
+# New RTEMS integration layer (Task, Channel, MVar, Timer, IO) - future direction
+NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_timer.c tcelm_io.c
+# Legacy RTEMS sources (kept separate to avoid conflicts)
 RTEMS_SRCS = tcelm_rtems.c tcelm_shell.c tcelm_shell_ops.c tcelm_hwil.c
 
 # All library sources
@@ -25,10 +28,10 @@ TEST_SHELL_OPS_SRC = test_shell_ops.c
 # Local TCC path (use project's bundled TCC)
 TCC_DIR ?= $(shell cd .. && pwd)/tcc
 
-# Host compiler (use local TCC)
-HOST_CC = $(TCC_DIR)/tcc
-HOST_CFLAGS = -Wall
-HOST_LDFLAGS = -lm
+# Host compiler (use system GCC for better compatibility)
+HOST_CC = gcc
+HOST_CFLAGS = -Wall -Wextra -g -O0
+HOST_LDFLAGS = -lm -lpthread -lrt
 
 # TCC (Tiny C Compiler) - for fast iteration
 TCC = $(TCC_DIR)/tcc
@@ -109,13 +112,24 @@ test-tcc: test_runtime_tcc test_rtems_tcc
 	@echo "=== Running RTEMS integration tests (TCC) ==="
 	./test_rtems_tcc
 
+# New integration layer build (Task, Channel, MVar, Timer, IO)
+.PHONY: integration
+integration: test_integration
+
+test_integration: test_integration.c $(COMMON_SRCS) $(STDLIB_SRCS) $(NEW_INTEGRATION_SRCS)
+	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
+
+# Build new integration as library
+libtcelm_integration.a: $(COMMON_SRCS:.c=.o) $(STDLIB_SRCS:.c=.o) $(NEW_INTEGRATION_SRCS:.c=.o)
+	ar rcs $@ $^
+
 # Clean
 .PHONY: clean
 clean:
-	rm -f test_runtime test_rtems test_shell_ops
+	rm -f test_runtime test_rtems test_shell_ops test_integration
 	rm -f test_runtime_tcc test_rtems_tcc test_shell_ops_tcc
 	rm -f *.o *.rtems.o
-	rm -f libtcelm_rtems.a
+	rm -f libtcelm_rtems.a libtcelm_integration.a
 
 # Install (copy headers and library to a target directory)
 .PHONY: install
