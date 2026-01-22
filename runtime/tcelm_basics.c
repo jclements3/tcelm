@@ -5,6 +5,7 @@
 #include "tcelm_basics.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Order type pre-allocated values */
@@ -263,7 +264,7 @@ tcelm_value_t *tcelm_string_from_float(tcelm_arena_t *arena, tcelm_value_t *f) {
 }
 
 tcelm_value_t *tcelm_string_to_int(tcelm_arena_t *arena, tcelm_value_t *s) {
-    const char *str = TCELM_AS_STRING(s);
+    const char *str = TCELM_AS_STRING(s)->data;
     char *endptr;
     long val = strtol(str, &endptr, 10);
 
@@ -278,7 +279,7 @@ tcelm_value_t *tcelm_string_to_int(tcelm_arena_t *arena, tcelm_value_t *s) {
 }
 
 tcelm_value_t *tcelm_string_to_float(tcelm_arena_t *arena, tcelm_value_t *s) {
-    const char *str = TCELM_AS_STRING(s);
+    const char *str = TCELM_AS_STRING(s)->data;
     char *endptr;
     double val = strtod(str, &endptr);
 
