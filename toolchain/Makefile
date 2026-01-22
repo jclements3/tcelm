@@ -169,6 +169,22 @@ test-runtime-smp: $(BUILD_DIR)/tcelm_runtime_test.elf
 		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
 	@echo ""
 
+# Multi-core test
+$(BUILD_DIR)/multicore_test.o: examples/multicore_test.c | $(BUILD_DIR)
+	$(TCC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/multicore_test.elf: $(CRT_OBJ) $(BUILD_DIR)/multicore_test.o $(LIBTCELM)
+	$(LD) $(LDFLAGS) $^ -o $@
+
+.PHONY: test-multicore
+test-multicore: $(BUILD_DIR)/multicore_test.elf
+	@echo ""
+	@echo "Running multi-core test in QEMU (4 cores)..."
+	@echo ""
+	@timeout $(QEMU_TIMEOUT) $(QEMU) -kernel $< $(QEMU_FLAGS_SMP) || \
+		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
+	@echo ""
+
 # =============================================================================
 # Help
 # =============================================================================
