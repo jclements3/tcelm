@@ -653,7 +653,16 @@ static void pmap_worker_fn(pmap_worker_data_t *data) {
     data->done = 1;
 }
 
-#ifndef __rtems__
+#ifdef __rtems__
+/*
+ * RTEMS task wrapper - runs worker and deletes self
+ */
+static void pmap_rtems_wrapper(rtems_task_argument arg) {
+    pmap_worker_data_t *data = (pmap_worker_data_t *)arg;
+    pmap_worker_fn(data);
+    rtems_task_delete(RTEMS_SELF);
+}
+#else
 /*
  * pthread wrapper for worker
  */
@@ -755,23 +764,27 @@ tcelm_value_t *tcelm_list_pmapN(tcelm_arena_t *arena, int num_workers, tcelm_val
         offset += chunk_size;
 
 #ifdef __rtems__
-        /* RTEMS: create task */
+        /* RTEMS: create task pinned to core */
         rtems_id task_id;
         rtems_name task_name = rtems_build_name('P', 'M', 'A', '0' + (i % 10));
         rtems_status_code status = rtems_task_create(
             task_name,
-            100,
-            8192,
+            100,            /* priority */
+            RTEMS_MINIMUM_STACK_SIZE + 4096,  /* stack */
             RTEMS_DEFAULT_MODES,
             RTEMS_DEFAULT_ATTRIBUTES,
             &task_id
         );
         if (status == RTEMS_SUCCESSFUL) {
-            cpu_set_t cpuset;
-            CPU_ZERO(&cpuset);
-            CPU_SET(i % tcelm_get_num_cores(), &cpuset);
-            rtems_task_set_affinity(task_id, sizeof(cpuset), &cpuset);
-            rtems_task_start(task_id, (rtems_task_entry)pmap_worker_fn, (rtems_task_argument)&workers[i]);
+            /* Pin to core (NUC has 4 cores: 0-3) */
+            int num_cores = tcelm_get_num_cores();
+            if (num_cores > 1) {
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(i % num_cores, &cpuset);
+                rtems_task_set_affinity(task_id, sizeof(cpuset), &cpuset);
+            }
+            rtems_task_start(task_id, pmap_rtems_wrapper, (rtems_task_argument)&workers[i]);
         }
 #else
         pthread_create(&threads[i], NULL, pmap_pthread_wrapper, &workers[i]);
