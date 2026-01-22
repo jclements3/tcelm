@@ -314,7 +314,7 @@ int tcelm_shell_cmd_spawn(int argc, char **argv) {
     tcelm_task_def_t custom_def = *def;
     custom_def.name = task_name;
 
-    tcelm_task_t *task = tcelm_task_spawn(&custom_def);
+    tcelm_task_t *task = tcelm_elm_task_spawn(&custom_def);
     if (!task) {
         printf("Error: Failed to spawn task\n");
         return 1;
@@ -342,7 +342,7 @@ int tcelm_shell_cmd_kill(int argc, char **argv) {
     /* Find and remove from registry */
     for (size_t i = 0; i < task_registry.count; i++) {
         if (strcmp(task_registry.names[i], task_name) == 0) {
-            tcelm_task_delete(task_registry.tasks[i]);
+            tcelm_elm_task_delete(task_registry.tasks[i]);
 
             /* Shift remaining entries */
             for (size_t j = i; j < task_registry.count - 1; j++) {

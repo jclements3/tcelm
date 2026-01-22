@@ -317,9 +317,18 @@ int tcelm_timer_get_stats(tcelm_timer_t *timer, tcelm_timer_stats_t *stats) {
 
     stats->count = rtems_stats.count;
     stats->missed_count = rtems_stats.missed_count;
-    stats->min_cpu_time_us = (uint32_t)(rtems_stats.min_cpu_time / 1000);
-    stats->max_cpu_time_us = (uint32_t)(rtems_stats.max_cpu_time / 1000);
-    stats->avg_cpu_time_us = (uint32_t)(rtems_stats.total_cpu_time / rtems_stats.count / 1000);
+    /* RTEMS 7: cpu_time fields are struct timespec, convert to microseconds */
+    stats->min_cpu_time_us = (uint32_t)(rtems_stats.min_cpu_time.tv_sec * 1000000 +
+                                        rtems_stats.min_cpu_time.tv_nsec / 1000);
+    stats->max_cpu_time_us = (uint32_t)(rtems_stats.max_cpu_time.tv_sec * 1000000 +
+                                        rtems_stats.max_cpu_time.tv_nsec / 1000);
+    if (rtems_stats.count > 0) {
+        uint64_t total_us = rtems_stats.total_cpu_time.tv_sec * 1000000 +
+                           rtems_stats.total_cpu_time.tv_nsec / 1000;
+        stats->avg_cpu_time_us = (uint32_t)(total_us / rtems_stats.count);
+    } else {
+        stats->avg_cpu_time_us = 0;
+    }
 
     return 0;
 }

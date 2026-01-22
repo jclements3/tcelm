@@ -50,7 +50,7 @@ static struct {
     size_t task_count;
 
     /* Channel registry */
-    tcelm_channel_t *channels[16];
+    tcelm_elm_channel_t *channels[16];
     size_t channel_count;
 
     /* Statistics */
@@ -100,7 +100,7 @@ struct tcelm_task {
  * ============================================================================
  */
 
-struct tcelm_channel {
+struct tcelm_elm_channel {
     const char *name;
     tcelm_task_t *subscribers[16];    /* TODO: make dynamic */
     size_t subscriber_count;
@@ -163,7 +163,7 @@ void tcelm_rtems_shutdown(void) {
     /* Delete all tasks */
     for (size_t i = 0; i < tcelm_runtime.task_count; i++) {
         if (tcelm_runtime.tasks[i]) {
-            tcelm_task_delete(tcelm_runtime.tasks[i]);
+            tcelm_elm_task_delete(tcelm_runtime.tasks[i]);
         }
     }
 
@@ -303,7 +303,7 @@ static rtems_task task_entry(rtems_task_argument arg) {
 }
 #endif
 
-tcelm_task_t *tcelm_task_spawn(const tcelm_task_def_t *def) {
+tcelm_task_t *tcelm_elm_task_spawn(const tcelm_task_def_t *def) {
     if (!tcelm_runtime.initialized) return NULL;
     if (tcelm_runtime.task_count >= 32) return NULL;  /* TODO: use config */
 
@@ -423,7 +423,7 @@ int tcelm_task_send_string(tcelm_task_t *task, const char *str) {
     return tcelm_task_send(task, msg);
 }
 
-void tcelm_task_delete(tcelm_task_t *task) {
+void tcelm_elm_task_delete(tcelm_task_t *task) {
     if (!task) return;
 
     task->running = false;
@@ -568,13 +568,13 @@ tcelm_value_t *tcelm_cmd_send(tcelm_arena_t *arena, tcelm_task_t *target, tcelm_
  * ============================================================================
  */
 
-tcelm_channel_t *tcelm_channel_create(const char *name, size_t max_subscribers) {
+tcelm_elm_channel_t *tcelm_elm_channel_create(const char *name, size_t max_subscribers) {
     if (tcelm_runtime.channel_count >= 16) return NULL;  /* TODO: use config */
 
-    tcelm_channel_t *channel = malloc(sizeof(tcelm_channel_t));
+    tcelm_elm_channel_t *channel = malloc(sizeof(tcelm_elm_channel_t));
     if (!channel) return NULL;
 
-    memset(channel, 0, sizeof(tcelm_channel_t));
+    memset(channel, 0, sizeof(tcelm_elm_channel_t));
     channel->name = name;
     channel->max_subscribers = max_subscribers < 16 ? max_subscribers : 16;
 
@@ -598,7 +598,7 @@ tcelm_channel_t *tcelm_channel_create(const char *name, size_t max_subscribers) 
     return channel;
 }
 
-tcelm_channel_t *tcelm_channel_find(const char *name) {
+tcelm_elm_channel_t *tcelm_elm_channel_find(const char *name) {
     for (size_t i = 0; i < tcelm_runtime.channel_count; i++) {
         if (strcmp(tcelm_runtime.channels[i]->name, name) == 0) {
             return tcelm_runtime.channels[i];
@@ -607,7 +607,7 @@ tcelm_channel_t *tcelm_channel_find(const char *name) {
     return NULL;
 }
 
-int tcelm_channel_subscribe(tcelm_channel_t *channel) {
+int tcelm_elm_channel_subscribe(tcelm_elm_channel_t *channel) {
     tcelm_task_t *task = tcelm_task_self();
     if (!task || !channel) return -1;
     if (channel->subscriber_count >= channel->max_subscribers) return -1;
@@ -625,7 +625,7 @@ int tcelm_channel_subscribe(tcelm_channel_t *channel) {
     return 0;
 }
 
-int tcelm_channel_unsubscribe(tcelm_channel_t *channel) {
+int tcelm_elm_channel_unsubscribe(tcelm_elm_channel_t *channel) {
     tcelm_task_t *task = tcelm_task_self();
     if (!task || !channel) return -1;
 
@@ -651,7 +651,7 @@ int tcelm_channel_unsubscribe(tcelm_channel_t *channel) {
     return 0;
 }
 
-int tcelm_channel_publish(tcelm_channel_t *channel, tcelm_value_t *msg) {
+int tcelm_elm_channel_publish(tcelm_elm_channel_t *channel, tcelm_value_t *msg) {
     if (!channel) return -1;
 
 #ifdef __rtems__

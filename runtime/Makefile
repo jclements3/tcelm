@@ -16,8 +16,8 @@ NEW_INTEGRATION_SRCS = tcelm_task.c tcelm_channel.c tcelm_mvar.c tcelm_timer.c t
 # Legacy RTEMS sources (kept separate to avoid conflicts)
 RTEMS_SRCS = tcelm_rtems.c tcelm_shell.c tcelm_shell_ops.c tcelm_hwil.c
 
-# All library sources
-LIB_SRCS = $(COMMON_SRCS) $(STDLIB_SRCS) $(RTEMS_SRCS)
+# All library sources (includes new integration layer)
+LIB_SRCS = $(COMMON_SRCS) $(STDLIB_SRCS) $(NEW_INTEGRATION_SRCS) $(RTEMS_SRCS)
 LIB_OBJS = $(LIB_SRCS:.c=.o)
 
 # Test sources

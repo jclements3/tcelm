@@ -129,7 +129,7 @@ int main(void) {
 
     /* Spawn counter task */
     printf("Spawning Counter task...\n");
-    tcelm_task_t *counter = tcelm_task_spawn(&counter_task_def);
+    tcelm_task_t *counter = tcelm_elm_task_spawn(&counter_task_def);
     assert(counter != NULL);
     printf("  Task spawned\n\n");
 
@@ -209,7 +209,7 @@ int main(void) {
 
     /* Clean up */
     printf("Cleaning up...\n");
-    tcelm_task_delete(counter);
+    tcelm_elm_task_delete(counter);
     tcelm_arena_destroy(&msg_arena);
     tcelm_rtems_shutdown();
     printf("  Done\n\n");

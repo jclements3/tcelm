@@ -124,7 +124,7 @@ typedef struct tcelm_task_def {
  * Spawn an Elm task
  * Returns task handle or NULL on failure
  */
-tcelm_task_t *tcelm_task_spawn(const tcelm_task_def_t *def);
+tcelm_task_t *tcelm_elm_task_spawn(const tcelm_task_def_t *def);
 
 /*
  * Send a message to an Elm task
@@ -147,7 +147,7 @@ tcelm_task_t *tcelm_task_self(void);
 /*
  * Delete/stop an Elm task
  */
-void tcelm_task_delete(tcelm_task_t *task);
+void tcelm_elm_task_delete(tcelm_task_t *task);
 
 /*
  * ============================================================================
@@ -225,23 +225,24 @@ tcelm_value_t *tcelm_cmd_send(tcelm_arena_t *arena, tcelm_task_t *target, tcelm_
 
 /*
  * Named channels for pub/sub communication between Elm tasks
+ * (Elm-style pub/sub, distinct from Go-style channels in tcelm_channel.h)
  */
-typedef struct tcelm_channel tcelm_channel_t;
+typedef struct tcelm_elm_channel tcelm_elm_channel_t;
 
 /* Create a named channel */
-tcelm_channel_t *tcelm_channel_create(const char *name, size_t max_subscribers);
+tcelm_elm_channel_t *tcelm_elm_channel_create(const char *name, size_t max_subscribers);
 
 /* Find channel by name */
-tcelm_channel_t *tcelm_channel_find(const char *name);
+tcelm_elm_channel_t *tcelm_elm_channel_find(const char *name);
 
 /* Subscribe current task to channel */
-int tcelm_channel_subscribe(tcelm_channel_t *channel);
+int tcelm_elm_channel_subscribe(tcelm_elm_channel_t *channel);
 
 /* Unsubscribe current task from channel */
-int tcelm_channel_unsubscribe(tcelm_channel_t *channel);
+int tcelm_elm_channel_unsubscribe(tcelm_elm_channel_t *channel);
 
 /* Publish message to all subscribers */
-int tcelm_channel_publish(tcelm_channel_t *channel, tcelm_value_t *msg);
+int tcelm_elm_channel_publish(tcelm_elm_channel_t *channel, tcelm_value_t *msg);
 
 /*
  * ============================================================================
