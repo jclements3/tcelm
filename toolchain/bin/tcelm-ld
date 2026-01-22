@@ -1,0 +1,87 @@
+#!/bin/bash
+#
+# tcelm-ld - Linker wrapper for NUC/RTEMS
+#
+# Usage: tcelm-ld [options] objects... -o output
+#
+
+set -e
+
+TOOLCHAIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Default settings
+ARCH="elf_i386"
+SCRIPT="${TOOLCHAIN_DIR}/scripts/nuc.ld"
+LIBS=""
+
+# Parse options
+OUTPUT=""
+OBJECTS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -o)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        --64)
+            ARCH="elf_x86_64"
+            SCRIPT="${TOOLCHAIN_DIR}/scripts/nuc64.ld"
+            shift
+            ;;
+        --32)
+            ARCH="elf_i386"
+            SCRIPT="${TOOLCHAIN_DIR}/scripts/nuc.ld"
+            shift
+            ;;
+        -T)
+            SCRIPT="$2"
+            shift 2
+            ;;
+        --script=*)
+            SCRIPT="${1#*=}"
+            shift
+            ;;
+        -l*)
+            LIBS="$LIBS $1"
+            shift
+            ;;
+        --help|-h)
+            cat <<EOF
+tcelm-ld - Linker wrapper for NUC/RTEMS
+
+Usage: tcelm-ld [options] objects... -o output
+
+Options:
+  -o FILE           Output file
+  -T SCRIPT         Use linker script
+  --32              Link for 32-bit (default)
+  --64              Link for 64-bit
+  -l LIB            Link with library
+  --help, -h        Show this help
+EOF
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            OBJECTS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$OUTPUT" ]; then
+    echo "Error: No output file specified (-o)" >&2
+    exit 1
+fi
+
+if [ ${#OBJECTS[@]} -eq 0 ]; then
+    echo "Error: No input objects" >&2
+    exit 1
+fi
+
+# Link
+exec ld -m "$ARCH" -T "$SCRIPT" "${OBJECTS[@]}" -o "$OUTPUT" $LIBS
