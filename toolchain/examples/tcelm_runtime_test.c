@@ -19,6 +19,10 @@
 #include "tcelm_arena.h"
 #include "tcelm_types.h"
 
+/* Include RTEMS headers for new API tests */
+#include <rtems.h>
+#include <sys/cpuset.h>
+
 /* Serial I/O for test output */
 #define COM1_PORT 0x3F8
 
@@ -371,6 +375,53 @@ static void test_closure_arity3(void) {
 }
 
 /*
+ * RTEMS API Tests (new APIs)
+ */
+static void test_rtems_yield_processor(void) {
+    TEST("RTEMS_YIELD_PROCESSOR");
+    /* RTEMS_YIELD_PROCESSOR should be defined as 0 */
+    ASSERT_EQ(RTEMS_YIELD_PROCESSOR, 0);
+    PASS();
+}
+
+static void test_rtems_clock_get_uptime(void) {
+    TEST("clock_get_uptime");
+    struct timespec ts;
+    rtems_status_code rc = rtems_clock_get_uptime(&ts);
+    ASSERT_EQ(rc, RTEMS_SUCCESSFUL);
+    /* Uptime should be >= 0 */
+    ASSERT(ts.tv_sec >= 0);
+    ASSERT(ts.tv_nsec >= 0);
+    ASSERT(ts.tv_nsec < 1000000000L);
+    PASS();
+}
+
+static void test_rtems_cpu_affinity(void) {
+    TEST("cpu_affinity");
+    cpu_set_t cpuset;
+
+    /* Test CPU_ZERO */
+    CPU_ZERO(&cpuset);
+    ASSERT(!CPU_ISSET(0, &cpuset));
+
+    /* Test CPU_SET */
+    CPU_SET(0, &cpuset);
+    ASSERT(CPU_ISSET(0, &cpuset));
+
+    /* Test CPU_CLR */
+    CPU_CLR(0, &cpuset);
+    ASSERT(!CPU_ISSET(0, &cpuset));
+
+    /* Test CPU_COUNT */
+    CPU_ZERO(&cpuset);
+    CPU_SET(0, &cpuset);
+    CPU_SET(2, &cpuset);
+    ASSERT_EQ(CPU_COUNT(&cpuset), 2);
+
+    PASS();
+}
+
+/*
  * Main
  */
 int main(int argc, char **argv) {
@@ -432,6 +483,11 @@ int main(int argc, char **argv) {
     test_closure_apply();
     test_closure_partial();
     test_closure_arity3();
+
+    puts("\n[RTEMS API Tests]\n");
+    test_rtems_yield_processor();
+    test_rtems_clock_get_uptime();
+    test_rtems_cpu_affinity();
 
     puts("\n========================================\n");
     puts("Tests: ");

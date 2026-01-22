@@ -20,6 +20,7 @@
 #include <rtems.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/cpuset.h>
 
 /* Configuration limits */
 #define MAX_TASKS          32
@@ -57,6 +58,7 @@ typedef struct {
     rtems_option        event_option;
     rtems_interval      wake_tick;       /* Tick to wake at (0 = no timeout) */
     rtems_id            blocked_on;      /* Resource blocking on */
+    cpu_set_t           affinity;        /* CPU affinity mask */
 } task_tcb_t;
 
 /* Semaphore control block */
@@ -166,6 +168,21 @@ rtems_status_code rtems_clock_set(const rtems_time_of_day *time_buffer) {
     return RTEMS_SUCCESSFUL;
 }
 
+rtems_status_code rtems_clock_get_uptime(struct timespec *uptime) {
+    if (!uptime) return RTEMS_INVALID_ADDRESS;
+
+    /* Convert ticks to timespec */
+    rtems_interval ticks = system_ticks;
+    rtems_interval tps = ticks_per_second;
+
+    uptime->tv_sec = ticks / tps;
+    /* Calculate nanoseconds from remaining ticks */
+    rtems_interval remaining_ticks = ticks % tps;
+    uptime->tv_nsec = (remaining_ticks * 1000000000L) / tps;
+
+    return RTEMS_SUCCESSFUL;
+}
+
 /* Called by timer interrupt or main loop */
 static void scheduler_tick(void) {
     system_ticks++;
@@ -250,6 +267,10 @@ rtems_status_code rtems_task_create(
     task->wanted_events = 0;
     task->wake_tick = 0;
     task->blocked_on = 0;
+
+    /* Default affinity: can run on all CPUs (CPU 0 for single-core) */
+    CPU_ZERO(&task->affinity);
+    CPU_SET(0, &task->affinity);
 
     *id = task->id;
     return RTEMS_SUCCESSFUL;
@@ -360,6 +381,49 @@ rtems_status_code rtems_task_wake_after(rtems_interval ticks) {
 
 void rtems_task_exit(void) {
     rtems_task_delete(RTEMS_SELF);
+}
+
+/*
+ * CPU Affinity
+ */
+
+rtems_status_code rtems_task_set_affinity(
+    rtems_id         id,
+    size_t           cpusetsize,
+    const cpu_set_t *cpuset
+) {
+    if (id == RTEMS_SELF) id = current_task_id;
+    if (!cpuset) return RTEMS_INVALID_ADDRESS;
+    if (cpusetsize < sizeof(cpu_set_t)) return RTEMS_INVALID_SIZE;
+
+    task_tcb_t *task = find_task(id);
+    if (!task) return RTEMS_INVALID_ID;
+
+    /* Copy the affinity mask */
+    task->affinity = *cpuset;
+
+    /* In a single-core cooperative scheduler, this is informational only.
+     * On a real SMP system, this would affect scheduling decisions. */
+
+    return RTEMS_SUCCESSFUL;
+}
+
+rtems_status_code rtems_task_get_affinity(
+    rtems_id   id,
+    size_t     cpusetsize,
+    cpu_set_t *cpuset
+) {
+    if (id == RTEMS_SELF) id = current_task_id;
+    if (!cpuset) return RTEMS_INVALID_ADDRESS;
+    if (cpusetsize < sizeof(cpu_set_t)) return RTEMS_INVALID_SIZE;
+
+    task_tcb_t *task = find_task(id);
+    if (!task) return RTEMS_INVALID_ID;
+
+    /* Return the affinity mask */
+    *cpuset = task->affinity;
+
+    return RTEMS_SUCCESSFUL;
 }
 
 /*

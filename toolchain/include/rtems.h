@@ -42,6 +42,25 @@ rtems_status_code rtems_clock_set(
     const rtems_time_of_day *time_buffer
 );
 
+/* Get uptime as timespec (time since boot) */
+rtems_status_code rtems_clock_get_uptime(
+    struct timespec *uptime
+);
+
+/* Get uptime in seconds (convenience) */
+static inline time_t rtems_clock_get_uptime_seconds(void) {
+    struct timespec ts;
+    rtems_clock_get_uptime(&ts);
+    return ts.tv_sec;
+}
+
+/* Get uptime in nanoseconds (convenience) */
+static inline uint64_t rtems_clock_get_uptime_nanoseconds(void) {
+    struct timespec ts;
+    rtems_clock_get_uptime(&ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
 /* Convert seconds to ticks */
 #define RTEMS_MILLISECONDS_TO_TICKS(ms) \
     ((ms) * rtems_clock_get_ticks_per_second() / 1000)

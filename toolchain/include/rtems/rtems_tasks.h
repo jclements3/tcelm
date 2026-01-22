@@ -106,4 +106,25 @@ rtems_status_code rtems_task_restart(
 /* Exit current task */
 void rtems_task_exit(void);
 
+/*
+ * CPU Affinity (SMP support)
+ */
+
+/* CPU set type for affinity */
+#include <sys/cpuset.h>
+
+/* Set task CPU affinity */
+rtems_status_code rtems_task_set_affinity(
+    rtems_id        id,
+    size_t          cpusetsize,
+    const cpu_set_t *cpuset
+);
+
+/* Get task CPU affinity */
+rtems_status_code rtems_task_get_affinity(
+    rtems_id   id,
+    size_t     cpusetsize,
+    cpu_set_t *cpuset
+);
+
 #endif /* _RTEMS_TASKS_H */

@@ -148,4 +148,16 @@ typedef uint32_t rtems_isr_entry;
 #define RTEMS_SEARCH_ALL_NODES        0
 #define RTEMS_SEARCH_LOCAL_NODE       0x7FFFFFFF
 
+/* Yield processor (special value for rtems_task_wake_after) */
+#define RTEMS_YIELD_PROCESSOR         0
+
+/* Time types */
+typedef long time_t;
+
+/* Timespec for high-resolution time */
+struct timespec {
+    time_t tv_sec;  /* Seconds */
+    long   tv_nsec; /* Nanoseconds */
+};
+
 #endif /* _RTEMS_TYPES_H */
