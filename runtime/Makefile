@@ -69,7 +69,7 @@ test_runtime: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
 test_rtems: $(TEST_RTEMS_SRC) $(LIB_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
 
-test_shell_ops: $(TEST_SHELL_OPS_SRC) $(COMMON_SRCS) tcelm_shell_ops.c
+test_shell_ops: $(TEST_SHELL_OPS_SRC) $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_shell_ops.c
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
 
 # TCC build (faster compilation for development)
