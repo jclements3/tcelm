@@ -18,9 +18,9 @@ TCC_DIR := $(PROJECT_ROOT)/tcc
 TCC_NUC_BSP := $(PROJECT_ROOT)/tcc-nuc-bsp
 
 # Compiler flags
-# Native tests use system TCC (has standard headers)
+# Native (host) tests use GCC for portability and system header access
 # QEMU tests use project TCC (configured for RTEMS/bare-metal)
-CC_NATIVE := tcc
+CC_NATIVE := gcc
 CC_QEMU := $(TCC_DIR)/tcc
 CFLAGS := -Wall -I$(RUNTIME_DIR)
 LDFLAGS := -lm -lpthread
