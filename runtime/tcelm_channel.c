@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <time.h>
 #endif
 
 /* Default channel configuration */
@@ -433,8 +434,37 @@ tcelm_value_t *tcelm_channel_receive_timeout(
     tcelm_channel_t *channel,
     uint32_t timeout_ms
 ) {
-    (void)timeout_ms;
-    tcelm_value_t *value = tcelm_channel_receive(arena, channel);
+    native_channel_data_t *data = (native_channel_data_t *)channel->native_data;
+
+    pthread_mutex_lock(&data->mutex);
+
+    if (data->count == 0) {
+        /* Calculate absolute timeout */
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += timeout_ms / 1000;
+        ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_sec++;
+            ts.tv_nsec -= 1000000000;
+        }
+
+        while (data->count == 0) {
+            int rc = pthread_cond_timedwait(&data->not_empty, &data->mutex, &ts);
+            if (rc == ETIMEDOUT) {
+                pthread_mutex_unlock(&data->mutex);
+                return tcelm_custom(arena, TCELM_CTOR_NOTHING, "Nothing", 0);
+            }
+        }
+    }
+
+    tcelm_value_t *value = data->buffer[data->head].value;
+    data->head = (data->head + 1) % data->capacity;
+    data->count--;
+
+    pthread_cond_signal(&data->not_full);
+    pthread_mutex_unlock(&data->mutex);
+
     return tcelm_custom(arena, TCELM_CTOR_JUST, "Just", 1, value);
 }
 
