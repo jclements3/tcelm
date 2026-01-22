@@ -55,3 +55,10 @@ tcelm_value_t *elm_Platform_worker(tcelm_arena_t *arena, tcelm_value_t *config) 
     /* Return the config record - the worker runtime will use it */
     return config;
 }
+
+/*
+ * Closure-compatible implementation of Platform.worker
+ */
+tcelm_value_t *elm_Platform_worker_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return elm_Platform_worker(arena, args[0]);
+}

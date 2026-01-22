@@ -157,6 +157,7 @@ type alias Module =
     , unions : List (Located Union)
     , aliases : List (Located Alias)
     , binops : List (Located Infix)
+    , ports : List Port
     }
 
 

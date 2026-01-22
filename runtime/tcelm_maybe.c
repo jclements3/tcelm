@@ -92,3 +92,19 @@ bool tcelm_maybe_isNothing(tcelm_value_t *maybe) {
 tcelm_value_t *tcelm_maybe_unwrap(tcelm_value_t *maybe) {
     return tcelm_custom_arg(maybe, 0);
 }
+
+/*
+ * Closure-compatible _impl wrappers
+ */
+
+tcelm_value_t *tcelm_maybe_withDefault_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_maybe_withDefault(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_maybe_map_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_maybe_map(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_maybe_andThen_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_maybe_andThen(arena, args[0], args[1]);
+}

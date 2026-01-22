@@ -11,6 +11,27 @@ For RTEMS targets, generates task definitions and shell registration.
 import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
 
 
+{-| Lifted lambda for TCC compatibility
+    Instead of GCC nested functions, lambdas are lifted to module level.
+-}
+type alias LiftedLambda =
+    { id : Int
+    , modulePrefix : String
+    , captures : List String -- Variables captured from enclosing scope
+    , args : List Pattern -- Lambda parameters
+    , body : Expr
+    , outerLocals : List String -- All locals visible in enclosing scope
+    }
+
+
+{-| State for lambda collection - tracks current ID and collected lambdas
+-}
+type alias LambdaState =
+    { nextId : Int
+    , lambdas : List LiftedLambda
+    }
+
+
 {-| Generate C code for an entire module
 -}
 generateModule : Module -> String
@@ -43,18 +64,37 @@ generateModule mod =
             , ""
             ]
 
+        -- Collect all lambdas from module values
+        initialState =
+            { nextId = 0, lambdas = [] }
+
+        lambdaState =
+            List.foldl (collectLambdasFromValue modulePrefix) initialState mod.values
+
+        -- Generate lifted lambda forward declarations and implementations
+        liftedLambdaForwardDecls =
+            List.map generateLiftedLambdaForwardDecl lambdaState.lambdas
+
+        liftedLambdaImpls =
+            List.map generateLiftedLambda lambdaState.lambdas
+
         -- Generate forward declarations with module prefix
         forwardDecls =
             List.map (generateForwardDeclWithPrefix modulePrefix) mod.values
 
         -- Generate function implementations with module prefix
+        -- Pass lambda counter state so lambdas emit references to lifted functions
         valueDefs =
-            List.map (generateValueWithPrefix modulePrefix) mod.values
+            generateValuesWithLiftedLambdas modulePrefix mod.values
 
         -- Generate type definitions for custom types
         typeDefs =
             List.map generateUnion mod.unions
                 ++ List.map generateAlias mod.aliases
+
+        -- Generate port stubs
+        portStubs =
+            List.map (generatePortStub modulePrefix) mod.ports
     in
     String.join "\n"
         (header
@@ -62,10 +102,771 @@ generateModule mod =
             ++ [ "/* Type definitions */" ]
             ++ typeDefs
             ++ [ "", "/* Forward declarations */" ]
+            ++ liftedLambdaForwardDecls
             ++ forwardDecls
+            ++ [ "", "/* Port stubs */" ]
+            ++ portStubs
+            ++ [ "", "/* Lifted lambda implementations */" ]
+            ++ liftedLambdaImpls
             ++ [ "", "/* Function implementations */" ]
             ++ valueDefs
         )
+
+
+{-| Generate values with lifted lambda references
+    Uses counter-based approach to match lambdas with their lifted versions
+-}
+generateValuesWithLiftedLambdas : String -> List (Src.Located Value) -> List String
+generateValuesWithLiftedLambdas modulePrefix values =
+    let
+        ( _, results ) =
+            List.foldl
+                (\value ( counter, acc ) ->
+                    let
+                        ( newCounter, code ) =
+                            generateValueWithLiftedLambdas modulePrefix counter value
+                    in
+                    ( newCounter, acc ++ [ code ] )
+                )
+                ( 0, [] )
+                values
+    in
+    results
+
+
+{-| Generate a single value with lifted lambda references
+    Returns (new counter, generated code)
+-}
+generateValueWithLiftedLambdas : String -> Int -> Src.Located Value -> ( Int, String )
+generateValueWithLiftedLambdas modulePrefix lambdaCounter (Src.At _ value) =
+    let
+        (Src.At _ name) =
+            value.name
+
+        args =
+            value.args
+
+        arity =
+            List.length args
+
+        -- Full name: elm_Module_Name_functionName
+        fullName =
+            "elm_" ++ modulePrefix ++ "_" ++ name
+
+        -- Collect local variable names from patterns
+        localVars =
+            collectPatternVars args
+
+        -- Generate pattern bindings for arguments
+        bindings =
+            List.map2 generateArgBinding args (List.indexedMap (\i _ -> "arg" ++ String.fromInt i) args)
+                |> List.concat
+
+        -- Generate body with lambda counter
+        ( newCounter, body ) =
+            generateExprWithLiftedLambdas modulePrefix localVars lambdaCounter value.body
+
+        -- Implementation function (NOT static - exported for cross-module linking)
+        implFunc =
+            String.join "\n"
+                [ ""
+                , "tcelm_value_t *" ++ fullName ++ "_impl(tcelm_arena_t *arena, tcelm_value_t **args) {"
+                , if arity == 0 then
+                    "    (void)args;"
+
+                  else
+                    String.join "\n" (List.indexedMap (\i _ -> "    tcelm_value_t *arg" ++ String.fromInt i ++ " = args[" ++ String.fromInt i ++ "];") args)
+                , String.join "\n" (List.map (\b -> "    " ++ b) bindings)
+                , "    return " ++ body ++ ";"
+                , "}"
+                ]
+
+        -- Direct-call wrapper for cross-module calls
+        directCallWrapper =
+            if arity == 0 then
+                String.join "\n"
+                    [ ""
+                    , "tcelm_value_t *" ++ fullName ++ "(tcelm_arena_t *arena) {"
+                    , "    return " ++ fullName ++ "_impl(arena, NULL);"
+                    , "}"
+                    ]
+
+            else
+                let
+                    paramList =
+                        List.indexedMap (\i _ -> "tcelm_value_t *__arg" ++ String.fromInt i) args
+                            |> String.join ", "
+
+                    argsArrayInit =
+                        List.indexedMap (\i _ -> "__arg" ++ String.fromInt i) args
+                            |> String.join ", "
+                in
+                String.join "\n"
+                    [ ""
+                    , "tcelm_value_t *" ++ fullName ++ "(tcelm_arena_t *arena, " ++ paramList ++ ") {"
+                    , "    tcelm_value_t *__args[] = {" ++ argsArrayInit ++ "};"
+                    , "    return " ++ fullName ++ "_impl(arena, __args);"
+                    , "}"
+                    ]
+    in
+    ( newCounter, implFunc ++ directCallWrapper )
+
+
+{-| Generate expression with lifted lambda references
+    Returns (new counter, generated code)
+-}
+generateExprWithLiftedLambdas : String -> List String -> Int -> Expr -> ( Int, String )
+generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
+    case expr of
+        Lambda args body ->
+            let
+                -- This lambda corresponds to __lambda_{counter}
+                lambdaName =
+                    "__lambda_" ++ String.fromInt counter
+
+                lambdaLocals =
+                    collectPatternVars args
+
+                -- Find free vars (only lambdaLocals are bound)
+                -- Captures are free vars that come from outer scope (locals)
+                captures =
+                    collectFreeVars lambdaLocals body
+                        |> List.filter (\v -> List.member v locals)
+                        |> unique
+
+                numCaptures =
+                    List.length captures
+
+                arity =
+                    List.length args
+
+                totalArity =
+                    numCaptures + arity
+
+                -- First, traverse the body to update counter for nested lambdas
+                ( counterAfterBody, _ ) =
+                    generateExprWithLiftedLambdas modulePrefix (lambdaLocals ++ locals) (counter + 1) body
+
+                -- Generate code to create closure and apply captures
+                closureCode =
+                    if numCaptures == 0 then
+                        -- No captures, just create the closure
+                        "tcelm_closure(arena, " ++ lambdaName ++ "_impl, " ++ String.fromInt arity ++ ")"
+
+                    else
+                        -- Create closure with full arity, then apply captured values
+                        let
+                            captureApplies =
+                                List.foldl
+                                    (\capName accCode ->
+                                        "tcelm_apply(arena, " ++ accCode ++ ", " ++ mangleLocal capName ++ ")"
+                                    )
+                                    ("tcelm_closure(arena, " ++ lambdaName ++ "_impl, " ++ String.fromInt totalArity ++ ")")
+                                    captures
+                        in
+                        captureApplies
+            in
+            ( counterAfterBody, closureCode )
+
+        Let defs body ->
+            let
+                letLocals =
+                    List.concatMap
+                        (\(Src.At _ def) ->
+                            case def of
+                                Src.Define (Src.At _ defName) _ _ _ ->
+                                    [ defName ]
+
+                                Src.Destruct pat _ ->
+                                    collectPatternVar pat
+                        )
+                        defs
+
+                allLocals =
+                    letLocals ++ locals
+
+                -- Process definitions (track destruct index for unique naming)
+                ( counterAfterDefs, defBindings, _ ) =
+                    List.foldl
+                        (\(Src.At _ def) ( c, acc, destructIdx ) ->
+                            case def of
+                                Src.Define (Src.At _ defName) defArgs defBody _ ->
+                                    if List.isEmpty defArgs then
+                                        let
+                                            ( c2, defCode ) =
+                                                generateExprWithLiftedLambdas modulePrefix allLocals c defBody
+                                        in
+                                        ( c2, acc ++ [ "tcelm_value_t *" ++ mangleLocal defName ++ " = " ++ defCode ++ ";" ], destructIdx )
+
+                                    else
+                                        -- Local function - generate as closure
+                                        -- This is handled like a lambda
+                                        let
+                                            lambdaName =
+                                                "__lambda_" ++ String.fromInt c
+
+                                            defLocals =
+                                                collectPatternVars defArgs
+
+                                            -- Find free vars (only defLocals are bound)
+                                            -- Captures are free vars from outer scope
+                                            captures =
+                                                collectFreeVars defLocals defBody
+                                                    |> List.filter (\v -> List.member v allLocals)
+                                                    |> unique
+
+                                            numCaptures =
+                                                List.length captures
+
+                                            defArity =
+                                                List.length defArgs
+
+                                            totalArity =
+                                                numCaptures + defArity
+
+                                            ( c2, _ ) =
+                                                generateExprWithLiftedLambdas modulePrefix (defLocals ++ allLocals) (c + 1) defBody
+
+                                            closureCode =
+                                                if numCaptures == 0 then
+                                                    "tcelm_closure(arena, " ++ lambdaName ++ "_impl, " ++ String.fromInt defArity ++ ")"
+
+                                                else
+                                                    List.foldl
+                                                        (\capName accCode ->
+                                                            "tcelm_apply(arena, " ++ accCode ++ ", " ++ mangleLocal capName ++ ")"
+                                                        )
+                                                        ("tcelm_closure(arena, " ++ lambdaName ++ "_impl, " ++ String.fromInt totalArity ++ ")")
+                                                        captures
+                                        in
+                                        ( c2, acc ++ [ "tcelm_value_t *" ++ mangleLocal defName ++ " = " ++ closureCode ++ ";" ], destructIdx )
+
+                                Src.Destruct pat defBody ->
+                                    let
+                                        ( c2, defCode ) =
+                                            generateExprWithLiftedLambdas modulePrefix allLocals c defBody
+
+                                        -- Use unique index for destruct name
+                                        destructName =
+                                            "__destruct_" ++ String.fromInt destructIdx
+
+                                        -- First bind the computed value to a temp, then destructure it
+                                        bindingCode =
+                                            "tcelm_value_t *" ++ destructName ++ " = " ++ defCode ++ ";"
+
+                                        patternBindings =
+                                            generatePatternBindingsLocal destructName pat
+                                    in
+                                    ( c2, acc ++ [ bindingCode ] ++ patternBindings, destructIdx + 1 )
+                        )
+                        ( counter, [], 0 )
+                        defs
+
+                -- Process body
+                ( counterAfterBody, bodyCode ) =
+                    generateExprWithLiftedLambdas modulePrefix allLocals counterAfterDefs body
+            in
+            ( counterAfterBody
+            , "({\n        " ++ String.join "\n        " defBindings ++ "\n        " ++ bodyCode ++ ";\n    })"
+            )
+
+        If branches elseExpr ->
+            let
+                ( counterAfterBranches, branchCodes ) =
+                    List.foldl
+                        (\( cond, thenExpr ) ( c, acc ) ->
+                            let
+                                ( c2, condCode ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c cond
+
+                                ( c3, thenCode ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c2 thenExpr
+                            in
+                            ( c3, acc ++ [ ( condCode, thenCode ) ] )
+                        )
+                        ( counter, [] )
+                        branches
+
+                ( counterAfterElse, elseCode ) =
+                    generateExprWithLiftedLambdas modulePrefix locals counterAfterBranches elseExpr
+            in
+            ( counterAfterElse
+            , generateIfChain branchCodes elseCode
+            )
+
+        Case scrutinee branches ->
+            let
+                ( counterAfterScrutinee, scrutineeCode ) =
+                    generateExprWithLiftedLambdas modulePrefix locals counter scrutinee
+
+                ( counterAfterBranches, branchCodes ) =
+                    List.foldl
+                        (\( pat, branchExpr ) ( c, acc ) ->
+                            let
+                                patLocals =
+                                    collectPatternVar pat ++ locals
+
+                                ( c2, branchCode ) =
+                                    generateExprWithLiftedLambdas modulePrefix patLocals c branchExpr
+                            in
+                            ( c2, acc ++ [ ( pat, branchCode ) ] )
+                        )
+                        ( counterAfterScrutinee, [] )
+                        branches
+            in
+            ( counterAfterBranches
+            , generateCaseExprWithLiftedLambdas scrutineeCode branchCodes
+            )
+
+        Call fn args ->
+            let
+                ( counterAfterFn, fnCode ) =
+                    generateExprWithLiftedLambdas modulePrefix locals counter fn
+
+                ( counterAfterArgs, argCodes ) =
+                    List.foldl
+                        (\arg ( c, acc ) ->
+                            let
+                                ( c2, argCode ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c arg
+                            in
+                            ( c2, acc ++ [ argCode ] )
+                        )
+                        ( counterAfterFn, [] )
+                        args
+
+                -- Check if it's a constructor call
+                isConstructorCall =
+                    case fn of
+                        Src.At _ (Var Src.CapVar _) ->
+                            True
+
+                        Src.At _ (VarQual Src.CapVar _ _) ->
+                            True
+
+                        _ ->
+                            False
+
+                -- Check if it's a direct qualified call to stdlib
+                isDirectCall =
+                    case fn of
+                        Src.At _ (VarQual Src.LowVar _ _) ->
+                            True
+
+                        _ ->
+                            False
+            in
+            if isConstructorCall then
+                let
+                    ( ctorNameUpper, ctorNameOrig ) =
+                        case fn of
+                            Src.At _ (Var Src.CapVar name) ->
+                                let
+                                    shortName =
+                                        extractCtorName name
+                                in
+                                ( String.toUpper shortName, shortName )
+
+                            Src.At _ (VarQual Src.CapVar _ name) ->
+                                ( String.toUpper name, name )
+
+                            _ ->
+                                ( "UNKNOWN", "Unknown" )
+
+                    numArgs =
+                        List.length argCodes
+                in
+                ( counterAfterArgs
+                , if numArgs == 0 then
+                    "tcelm_custom(arena, TCELM_CTOR_" ++ ctorNameUpper ++ ", \"" ++ ctorNameOrig ++ "\", 0)"
+
+                  else
+                    "tcelm_custom(arena, TCELM_CTOR_" ++ ctorNameUpper ++ ", \"" ++ ctorNameOrig ++ "\", " ++ String.fromInt numArgs ++ ", " ++ String.join ", " argCodes ++ ")"
+                )
+
+            else if isDirectCall then
+                let
+                    ( modulePath, fnNameLocal ) =
+                        case fn of
+                            Src.At _ (VarQual Src.LowVar mp n) ->
+                                ( mp, n )
+
+                            _ ->
+                                ( "", "" )
+
+                    fnName =
+                        mapStdLibFunction modulePath fnNameLocal
+
+                    numArgs =
+                        List.length argCodes
+
+                    maybeArity =
+                        getStdLibArity modulePath fnNameLocal
+
+                    needsArena =
+                        stdLibNeedsArena modulePath fnNameLocal
+                in
+                case maybeArity of
+                    Just stdArity ->
+                        ( counterAfterArgs
+                        , if numArgs >= stdArity then
+                            if needsArena then
+                                fnName ++ "(arena" ++ (if List.isEmpty argCodes then "" else ", " ++ String.join ", " argCodes) ++ ")"
+
+                            else
+                                fnName ++ "(" ++ String.join ", " argCodes ++ ")"
+
+                          else
+                            -- Partial application - fall through to general case
+                            "tcelm_apply_n(arena, " ++ fnCode ++ ", " ++ String.fromInt numArgs ++ ", " ++ String.join ", " argCodes ++ ")"
+                        )
+
+                    Nothing ->
+                        ( counterAfterArgs
+                        , "tcelm_apply_n(arena, " ++ fnCode ++ ", " ++ String.fromInt numArgs ++ ", " ++ String.join ", " argCodes ++ ")"
+                        )
+
+            else
+                ( counterAfterArgs
+                , if List.isEmpty argCodes then
+                    fnCode
+
+                  else
+                    "tcelm_apply_n(arena, " ++ fnCode ++ ", " ++ String.fromInt (List.length argCodes) ++ ", " ++ String.join ", " argCodes ++ ")"
+                )
+
+        Binops pairs final ->
+            let
+                ( counterAfterPairs, pairCodes ) =
+                    List.foldl
+                        (\( e, op ) ( c, acc ) ->
+                            let
+                                ( c2, code ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c e
+                            in
+                            ( c2, acc ++ [ ( code, op ) ] )
+                        )
+                        ( counter, [] )
+                        pairs
+
+                ( counterAfterFinal, finalCode ) =
+                    generateExprWithLiftedLambdas modulePrefix locals counterAfterPairs final
+
+                -- Fold the binops from left to right
+                result =
+                    List.foldl
+                        (\( leftCode, Src.At _ op ) rightCode ->
+                            generateBinop op leftCode rightCode
+                        )
+                        finalCode
+                        (List.reverse pairCodes)
+            in
+            ( counterAfterFinal, result )
+
+        List items ->
+            let
+                ( counterAfterItems, itemCodes ) =
+                    List.foldl
+                        (\item ( c, acc ) ->
+                            let
+                                ( c2, code ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c item
+                            in
+                            ( c2, acc ++ [ code ] )
+                        )
+                        ( counter, [] )
+                        items
+            in
+            ( counterAfterItems
+            , generateListLiteral itemCodes
+            )
+
+        Tuple first second rest ->
+            let
+                allElems =
+                    first :: second :: rest
+
+                ( counterAfterElems, elemCodes ) =
+                    List.foldl
+                        (\elem ( c, acc ) ->
+                            let
+                                ( c2, code ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c elem
+                            in
+                            ( c2, acc ++ [ code ] )
+                        )
+                        ( counter, [] )
+                        allElems
+            in
+            ( counterAfterElems
+            , case elemCodes of
+                [ a, b ] ->
+                    "tcelm_tuple2(arena, " ++ a ++ ", " ++ b ++ ")"
+
+                [ a, b, c ] ->
+                    "tcelm_tuple3(arena, " ++ a ++ ", " ++ b ++ ", " ++ c ++ ")"
+
+                _ ->
+                    "/* unsupported tuple size */"
+            )
+
+        Record fields ->
+            let
+                ( counterAfterFields, fieldCodes ) =
+                    List.foldl
+                        (\( Src.At _ fieldName, fieldExpr ) ( c, acc ) ->
+                            let
+                                ( c2, code ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c fieldExpr
+                            in
+                            ( c2, acc ++ [ ( fieldName, code ) ] )
+                        )
+                        ( counter, [] )
+                        fields
+
+                numFields =
+                    List.length fieldCodes
+
+                fieldArgs =
+                    List.map (\( n, v ) -> "\"" ++ n ++ "\", " ++ v) fieldCodes
+                        |> String.join ", "
+            in
+            ( counterAfterFields
+            , "tcelm_record(arena, " ++ String.fromInt numFields ++ ", " ++ fieldArgs ++ ")"
+            )
+
+        Update (Src.At _ recName) fields ->
+            let
+                ( counterAfterFields, fieldCodes ) =
+                    List.foldl
+                        (\( Src.At _ fieldName, fieldExpr ) ( c, acc ) ->
+                            let
+                                ( c2, code ) =
+                                    generateExprWithLiftedLambdas modulePrefix locals c fieldExpr
+                            in
+                            ( c2, acc ++ [ ( fieldName, code ) ] )
+                        )
+                        ( counter, [] )
+                        fields
+
+                -- Chain record updates
+                baseRec =
+                    if List.member recName locals then
+                        mangleLocal recName
+
+                    else
+                        mangle recName
+
+                updateChain =
+                    List.foldl
+                        (\( fieldName, fieldCode ) acc ->
+                            "tcelm_record_update(arena, " ++ acc ++ ", \"" ++ fieldName ++ "\", " ++ fieldCode ++ ")"
+                        )
+                        baseRec
+                        fieldCodes
+            in
+            ( counterAfterFields, updateChain )
+
+        Access inner (Src.At _ fieldName) ->
+            let
+                ( counterAfterInner, innerCode ) =
+                    generateExprWithLiftedLambdas modulePrefix locals counter inner
+            in
+            ( counterAfterInner
+            , "tcelm_record_get(" ++ innerCode ++ ", \"" ++ fieldName ++ "\")"
+            )
+
+        Negate inner ->
+            let
+                ( counterAfterInner, innerCode ) =
+                    generateExprWithLiftedLambdas modulePrefix locals counter inner
+            in
+            ( counterAfterInner
+            , "tcelm_negate(arena, " ++ innerCode ++ ")"
+            )
+
+        Int n ->
+            ( counter, "tcelm_int(arena, " ++ String.fromInt n ++ ")" )
+
+        Float f ->
+            ( counter, "tcelm_float(arena, " ++ String.fromFloat f ++ ")" )
+
+        Chr c ->
+            ( counter
+            , case String.uncons c of
+                Just ( ch, _ ) ->
+                    "tcelm_char(arena, " ++ String.fromInt (Char.toCode ch) ++ ")"
+
+                Nothing ->
+                    "tcelm_char(arena, 0)"
+            )
+
+        Str s ->
+            ( counter, "tcelm_string(arena, \"" ++ escapeString s ++ "\")" )
+
+        Var varType name ->
+            ( counter
+            , case varType of
+                Src.LowVar ->
+                    if List.member name locals then
+                        mangleLocal name
+
+                    else
+                        case name of
+                            "identity" ->
+                                "tcelm_closure(arena, tcelm_identity_impl, 1)"
+
+                            "toFloat" ->
+                                "tcelm_closure(arena, tcelm_to_float_impl, 1)"
+
+                            "min" ->
+                                "tcelm_closure(arena, tcelm_min_impl, 2)"
+
+                            "max" ->
+                                "tcelm_closure(arena, tcelm_max_impl, 2)"
+
+                            "not" ->
+                                "tcelm_closure(arena, tcelm_not_impl, 1)"
+
+                            "negate" ->
+                                "tcelm_closure(arena, tcelm_negate_impl, 1)"
+
+                            "abs" ->
+                                "tcelm_closure(arena, tcelm_abs_impl, 1)"
+
+                            _ ->
+                                let
+                                    qualName =
+                                        mangleWithPrefix modulePrefix name
+                                in
+                                "tcelm_closure(arena, " ++ qualName ++ "_impl, " ++ qualName ++ "_ARITY)"
+
+                Src.CapVar ->
+                    let
+                        shortName =
+                            extractCtorName name
+                    in
+                    "tcelm_custom(arena, TCELM_CTOR_" ++ String.toUpper shortName ++ ", \"" ++ shortName ++ "\", 0)"
+            )
+
+        VarQual varType modPath name ->
+            ( counter
+            , case varType of
+                Src.LowVar ->
+                    -- Special handling for Cmd.none and Sub.none - they're values, not functions
+                    if modPath == "Cmd" && name == "none" then
+                        "elm_Cmd_none"
+
+                    else if modPath == "Sub" && name == "none" then
+                        "elm_Sub_none"
+
+                    else
+                        let
+                            fnName =
+                                mapStdLibFunction modPath name
+
+                            maybeArity =
+                                getStdLibArity modPath name
+                        in
+                        case maybeArity of
+                            Just arity ->
+                                "tcelm_closure(arena, " ++ fnName ++ "_impl, " ++ String.fromInt arity ++ ")"
+
+                            Nothing ->
+                                "tcelm_closure(arena, " ++ fnName ++ "_impl, 1)"
+
+                Src.CapVar ->
+                    "tcelm_custom(arena, TCELM_CTOR_" ++ String.toUpper name ++ ", \"" ++ name ++ "\", 0)"
+            )
+
+        Unit ->
+            ( counter, "TCELM_UNIT" )
+
+        Accessor fieldName ->
+            ( counter
+            , "({\n        static tcelm_value_t *__accessor_impl(tcelm_arena_t *__a, tcelm_value_t **args) {\n"
+                ++ "            return tcelm_record_get(args[0], \""
+                ++ fieldName
+                ++ "\");\n        }\n"
+                ++ "        (void)__a;\n"
+                ++ "        tcelm_closure(arena, __accessor_impl, 1);\n    })"
+            )
+
+        _ ->
+            ( counter, "/* unsupported expr */" )
+
+
+{-| Generate case expression with lifted lambdas
+-}
+generateCaseExprWithLiftedLambdas : String -> List ( Pattern, String ) -> String
+generateCaseExprWithLiftedLambdas scrutineeCode branches =
+    let
+        branchCode =
+            List.map
+                (\( pat, bodyCode ) ->
+                    generateCaseBranch pat bodyCode
+                )
+                branches
+                |> String.join "\n        "
+    in
+    "({\n        tcelm_value_t *__case_subject = " ++ scrutineeCode ++ ";\n        " ++ branchCode ++ "\n        TCELM_UNIT; /* unreachable */\n    })"
+
+
+{-| Remove duplicates from a list
+-}
+unique : List String -> List String
+unique list =
+    List.foldl
+        (\item acc ->
+            if List.member item acc then
+                acc
+
+            else
+                acc ++ [ item ]
+        )
+        []
+        list
+
+
+{-| Generate if/else chain from pre-generated condition and body code strings
+-}
+generateIfChain : List ( String, String ) -> String -> String
+generateIfChain branches elseCode =
+    case branches of
+        [] ->
+            elseCode
+
+        [ ( condCode, thenCode ) ] ->
+            "(TCELM_AS_BOOL(" ++ condCode ++ ") ? " ++ thenCode ++ " : " ++ elseCode ++ ")"
+
+        ( condCode, thenCode ) :: rest ->
+            "(TCELM_AS_BOOL(" ++ condCode ++ ") ? " ++ thenCode ++ " : " ++ generateIfChain rest elseCode ++ ")"
+
+
+{-| Generate list literal from pre-generated element code strings
+-}
+generateListLiteral : List String -> String
+generateListLiteral items =
+    case items of
+        [] ->
+            "TCELM_NIL"
+
+        x :: xs ->
+            "tcelm_cons(arena, " ++ x ++ ", " ++ generateListLiteral xs ++ ")"
+
+
+{-| Generate a case branch with pattern matching
+-}
+generateCaseBranch : Pattern -> String -> String
+generateCaseBranch pattern bodyCode =
+    let
+        condition =
+            generatePatternMatch "__case_subject" pattern
+
+        bindings =
+            generatePatternBindingsLocal "__case_subject" pattern
+    in
+    "if (" ++ condition ++ ") {\n            " ++ String.join "\n            " bindings ++ "\n            " ++ bodyCode ++ ";\n        }"
 
 
 {-| Generate C code for a single expression (for testing)
@@ -294,7 +1095,391 @@ collectPatternVar (Src.At _ pattern) =
             []
 
 
-{-| Generate expression with knowledge of local variables
+{-| Collect all lambdas from an expression, assigning unique IDs
+    Returns updated state with new lambdas added
+-}
+collectLambdasFromExpr : String -> List String -> Expr -> LambdaState -> LambdaState
+collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
+    case expr of
+        Lambda args body ->
+            let
+                -- Variables bound by the lambda's arguments
+                lambdaLocals =
+                    collectPatternVars args
+
+                -- Find free vars in body (only lambdaLocals are bound)
+                freeVars =
+                    collectFreeVars lambdaLocals body
+
+                -- Captures are free vars that come from outer scope
+                captures =
+                    List.filter (\v -> List.member v outerLocals) freeVars
+                        |> unique
+
+                newLambda =
+                    { id = state.nextId
+                    , modulePrefix = modulePrefix
+                    , captures = captures
+                    , args = args
+                    , body = body
+                    , outerLocals = outerLocals
+                    }
+
+                stateWithLambda =
+                    { nextId = state.nextId + 1
+                    , lambdas = state.lambdas ++ [ newLambda ]
+                    }
+
+                -- Also collect lambdas from the lambda body
+                allLocals =
+                    lambdaLocals ++ outerLocals
+            in
+            collectLambdasFromExpr modulePrefix allLocals body stateWithLambda
+
+        Let defs body ->
+            let
+                -- Collect locals bound by let definitions
+                letLocals =
+                    List.concatMap
+                        (\(Src.At _ def) ->
+                            case def of
+                                Src.Define (Src.At _ name) _ _ _ ->
+                                    [ name ]
+
+                                Src.Destruct pat _ ->
+                                    collectPatternVar pat
+                        )
+                        defs
+
+                allLocals =
+                    letLocals ++ outerLocals
+
+                -- Collect from definition bodies, treating local functions as lambdas
+                stateAfterDefs =
+                    List.foldl
+                        (\(Src.At _ def) st ->
+                            case def of
+                                Src.Define _ defArgs defBody _ ->
+                                    if List.isEmpty defArgs then
+                                        -- Simple value binding - just descend into body
+                                        collectLambdasFromExpr modulePrefix allLocals defBody st
+
+                                    else
+                                        -- Local function - treat as a lambda
+                                        let
+                                            defLocals =
+                                                collectPatternVars defArgs
+
+                                            -- Find free vars in body (only defLocals are bound)
+                                            freeVars =
+                                                collectFreeVars defLocals defBody
+
+                                            -- Captures are free vars that come from outer scope
+                                            captures =
+                                                List.filter (\v -> List.member v allLocals) freeVars
+                                                    |> unique
+
+                                            newLambda =
+                                                { id = st.nextId
+                                                , modulePrefix = modulePrefix
+                                                , captures = captures
+                                                , args = defArgs
+                                                , body = defBody
+                                                , outerLocals = allLocals
+                                                }
+
+                                            stateWithLambda =
+                                                { nextId = st.nextId + 1
+                                                , lambdas = st.lambdas ++ [ newLambda ]
+                                                }
+                                        in
+                                        -- Also collect lambdas from the function body
+                                        collectLambdasFromExpr modulePrefix (defLocals ++ allLocals) defBody stateWithLambda
+
+                                Src.Destruct _ defBody ->
+                                    collectLambdasFromExpr modulePrefix allLocals defBody st
+                        )
+                        state
+                        defs
+            in
+            collectLambdasFromExpr modulePrefix allLocals body stateAfterDefs
+
+        If branches elseExpr ->
+            let
+                stateAfterBranches =
+                    List.foldl
+                        (\( cond, thenExpr ) st ->
+                            collectLambdasFromExpr modulePrefix outerLocals thenExpr
+                                (collectLambdasFromExpr modulePrefix outerLocals cond st)
+                        )
+                        state
+                        branches
+            in
+            collectLambdasFromExpr modulePrefix outerLocals elseExpr stateAfterBranches
+
+        Case scrutinee branches ->
+            let
+                stateAfterScrutinee =
+                    collectLambdasFromExpr modulePrefix outerLocals scrutinee state
+            in
+            List.foldl
+                (\( pat, branchExpr ) st ->
+                    let
+                        patLocals =
+                            collectPatternVar pat ++ outerLocals
+                    in
+                    collectLambdasFromExpr modulePrefix patLocals branchExpr st
+                )
+                stateAfterScrutinee
+                branches
+
+        Call fn args ->
+            let
+                stateAfterFn =
+                    collectLambdasFromExpr modulePrefix outerLocals fn state
+            in
+            List.foldl (collectLambdasFromExpr modulePrefix outerLocals) stateAfterFn args
+
+        Binops pairs final ->
+            let
+                stateAfterPairs =
+                    List.foldl
+                        (\( e, _ ) st -> collectLambdasFromExpr modulePrefix outerLocals e st)
+                        state
+                        pairs
+            in
+            collectLambdasFromExpr modulePrefix outerLocals final stateAfterPairs
+
+        List items ->
+            List.foldl (collectLambdasFromExpr modulePrefix outerLocals) state items
+
+        Tuple first second rest ->
+            List.foldl (collectLambdasFromExpr modulePrefix outerLocals) state (first :: second :: rest)
+
+        Record fields ->
+            List.foldl
+                (\( _, fieldExpr ) st -> collectLambdasFromExpr modulePrefix outerLocals fieldExpr st)
+                state
+                fields
+
+        Update _ fields ->
+            List.foldl
+                (\( _, fieldExpr ) st -> collectLambdasFromExpr modulePrefix outerLocals fieldExpr st)
+                state
+                fields
+
+        Access inner _ ->
+            collectLambdasFromExpr modulePrefix outerLocals inner state
+
+        Negate inner ->
+            collectLambdasFromExpr modulePrefix outerLocals inner state
+
+        _ ->
+            state
+
+
+{-| Collect free variables referenced in an expression (not in boundVars)
+-}
+collectFreeVars : List String -> Expr -> List String
+collectFreeVars boundVars (Src.At _ expr) =
+    case expr of
+        Var Src.LowVar name ->
+            if List.member name boundVars then
+                []
+
+            else
+                [ name ]
+
+        Lambda args body ->
+            let
+                lambdaBound =
+                    collectPatternVars args ++ boundVars
+            in
+            collectFreeVars lambdaBound body
+
+        Let defs body ->
+            let
+                letBound =
+                    List.concatMap
+                        (\(Src.At _ def) ->
+                            case def of
+                                Src.Define (Src.At _ name) _ _ _ ->
+                                    [ name ]
+
+                                Src.Destruct pat _ ->
+                                    collectPatternVar pat
+                        )
+                        defs
+                        ++ boundVars
+
+                defVars =
+                    List.concatMap
+                        (\(Src.At _ def) ->
+                            case def of
+                                Src.Define _ defArgs defBody _ ->
+                                    collectFreeVars (collectPatternVars defArgs ++ letBound) defBody
+
+                                Src.Destruct _ defBody ->
+                                    collectFreeVars letBound defBody
+                        )
+                        defs
+            in
+            defVars ++ collectFreeVars letBound body
+
+        If branches elseExpr ->
+            let
+                branchVars =
+                    List.concatMap
+                        (\( cond, thenExpr ) ->
+                            collectFreeVars boundVars cond ++ collectFreeVars boundVars thenExpr
+                        )
+                        branches
+            in
+            branchVars ++ collectFreeVars boundVars elseExpr
+
+        Case scrutinee branches ->
+            let
+                scrutineeVars =
+                    collectFreeVars boundVars scrutinee
+
+                branchVars =
+                    List.concatMap
+                        (\( pat, branchExpr ) ->
+                            collectFreeVars (collectPatternVar pat ++ boundVars) branchExpr
+                        )
+                        branches
+            in
+            scrutineeVars ++ branchVars
+
+        Call fn args ->
+            collectFreeVars boundVars fn ++ List.concatMap (collectFreeVars boundVars) args
+
+        Binops pairs final ->
+            List.concatMap (\( e, _ ) -> collectFreeVars boundVars e) pairs
+                ++ collectFreeVars boundVars final
+
+        List items ->
+            List.concatMap (collectFreeVars boundVars) items
+
+        Tuple first second rest ->
+            List.concatMap (collectFreeVars boundVars) (first :: second :: rest)
+
+        Record fields ->
+            List.concatMap (\( _, e ) -> collectFreeVars boundVars e) fields
+
+        Update _ fields ->
+            List.concatMap (\( _, e ) -> collectFreeVars boundVars e) fields
+
+        Access inner _ ->
+            collectFreeVars boundVars inner
+
+        Negate inner ->
+            collectFreeVars boundVars inner
+
+        _ ->
+            []
+
+
+{-| Collect all lambdas from a module value (function definition)
+-}
+collectLambdasFromValue : String -> Src.Located Value -> LambdaState -> LambdaState
+collectLambdasFromValue modulePrefix (Src.At _ value) state =
+    let
+        localVars =
+            collectPatternVars value.args
+    in
+    collectLambdasFromExpr modulePrefix localVars value.body state
+
+
+{-| Generate a lifted lambda as a module-level function
+    Captured variables become the first N parameters.
+    Takes starting counter for nested lambdas and returns (new counter, code).
+-}
+generateLiftedLambdaWithCounter : Int -> LiftedLambda -> ( Int, String )
+generateLiftedLambdaWithCounter startCounter lambda =
+    let
+        lambdaName =
+            "__lambda_" ++ String.fromInt lambda.id
+
+        -- Total parameters: captures + lambda args
+        numCaptures =
+            List.length lambda.captures
+
+        numArgs =
+            List.length lambda.args
+
+        totalArity =
+            numCaptures + numArgs
+
+        -- Generate parameter bindings - captures come first, then lambda args
+        captureBindings =
+            List.indexedMap
+                (\i name -> "tcelm_value_t *" ++ mangleLocal name ++ " = args[" ++ String.fromInt i ++ "];")
+                lambda.captures
+
+        argBindings =
+            List.indexedMap
+                (\i pattern ->
+                    generateLambdaArgBindingLocal pattern ("args[" ++ String.fromInt (numCaptures + i) ++ "]")
+                )
+                lambda.args
+                |> List.concat
+
+        -- Generate body with all locals in scope, using lifted lambda references
+        lambdaLocals =
+            collectPatternVars lambda.args
+
+        allLocals =
+            lambdaLocals ++ lambda.captures ++ lambda.outerLocals
+
+        -- Use the counter-based generator so nested lambdas are properly referenced
+        ( newCounter, bodyCode ) =
+            generateExprWithLiftedLambdas lambda.modulePrefix allLocals startCounter lambda.body
+
+        code =
+            String.join "\n"
+                [ ""
+                , "static tcelm_value_t *" ++ lambdaName ++ "_impl(tcelm_arena_t *arena, tcelm_value_t **args) {"
+                , if totalArity == 0 then
+                    "    (void)args;"
+
+                  else
+                    String.join "\n" (List.map (\b -> "    " ++ b) (captureBindings ++ argBindings))
+                , "    return " ++ bodyCode ++ ";"
+                , "}"
+                ]
+    in
+    ( newCounter, code )
+
+
+{-| Generate a lifted lambda (wrapper for backward compatibility)
+-}
+generateLiftedLambda : LiftedLambda -> String
+generateLiftedLambda lambda =
+    -- Start from the next lambda ID after this one
+    let
+        ( _, code ) =
+            generateLiftedLambdaWithCounter (lambda.id + 1) lambda
+    in
+    code
+
+
+{-| Generate forward declaration for a lifted lambda
+-}
+generateLiftedLambdaForwardDecl : LiftedLambda -> String
+generateLiftedLambdaForwardDecl lambda =
+    let
+        lambdaName =
+            "__lambda_" ++ String.fromInt lambda.id
+
+        totalArity =
+            List.length lambda.captures + List.length lambda.args
+    in
+    "#define " ++ lambdaName ++ "_ARITY " ++ String.fromInt totalArity ++ "\n"
+        ++ "static tcelm_value_t *" ++ lambdaName ++ "_impl(tcelm_arena_t *arena, tcelm_value_t **args);"
+
+
+{-| Generate C code for an entire module
 -}
 generateExprWithLocals : List String -> Expr -> String
 generateExprWithLocals locals expr =
@@ -1024,10 +2209,68 @@ generateLambdaInContext outerLocals args body =
             ++ "        })"
 
 
+{-| Sanitize an expression to make it a valid C identifier suffix
+-}
+sanitizeForCIdent : String -> String
+sanitizeForCIdent s =
+    -- Truncate long expressions to avoid extremely long identifiers
+    let
+        truncated =
+            if String.length s > 60 then
+                String.left 60 s
+
+            else
+                s
+    in
+    String.replace "[" "_" truncated
+        |> String.replace "]" ""
+        |> String.replace "(" "_"
+        |> String.replace ")" ""
+        |> String.replace "{" "_"
+        |> String.replace "}" ""
+        |> String.replace "," "_"
+        |> String.replace " " ""
+        |> String.replace "\"" ""
+        |> String.replace "'" ""
+        |> String.replace "-" "_"
+        |> String.replace "." "_"
+        |> String.replace "+" "_"
+        |> String.replace "*" "_"
+        |> String.replace "/" "_"
+        |> String.replace "=" "_"
+        |> String.replace "<" "_"
+        |> String.replace ">" "_"
+        |> String.replace "!" "_"
+        |> String.replace "&" "_"
+        |> String.replace "|" "_"
+        |> String.replace ";" "_"
+        |> String.replace ":" "_"
+        |> String.replace "\\" "_"
+        |> String.replace "\n" "_"
+        |> String.replace "\t" "_"
+
+
 {-| Generate lambda arg binding using local mangling
 -}
 generateLambdaArgBindingLocal : Pattern -> String -> List String
 generateLambdaArgBindingLocal pattern argExpr =
+    let
+        -- Create unique temp names based on argExpr
+        suffix =
+            sanitizeForCIdent argExpr
+
+        t1Name =
+            "__t1_" ++ suffix
+
+        t2Name =
+            "__t2_" ++ suffix
+
+        headName =
+            "__head_" ++ suffix
+
+        tailName =
+            "__tail_" ++ suffix
+    in
     case patternValue pattern of
         PVar varName ->
             [ "tcelm_value_t *" ++ mangleLocal varName ++ " = " ++ argExpr ++ ";" ]
@@ -1048,19 +2291,39 @@ generateLambdaArgBindingLocal pattern argExpr =
                 )
                 fields
 
-        PTuple p1 p2 _ ->
-            [ "tcelm_value_t *__t1 = tcelm_tuple2_first(" ++ argExpr ++ ");"
-            , "tcelm_value_t *__t2 = tcelm_tuple2_second(" ++ argExpr ++ ");"
-            ]
-                ++ generateLambdaArgBindingLocal p1 "__t1"
-                ++ generateLambdaArgBindingLocal p2 "__t2"
+        PTuple p1 p2 rest ->
+            case rest of
+                [] ->
+                    -- 2-tuple
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple2_first(" ++ argExpr ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple2_second(" ++ argExpr ++ ");"
+                    ]
+                        ++ generateLambdaArgBindingLocal p1 t1Name
+                        ++ generateLambdaArgBindingLocal p2 t2Name
+
+                [ p3 ] ->
+                    -- 3-tuple
+                    let
+                        t3Name =
+                            "__t3_" ++ suffix
+                    in
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple3_first(" ++ argExpr ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple3_second(" ++ argExpr ++ ");"
+                    , "tcelm_value_t *" ++ t3Name ++ " = tcelm_tuple3_third(" ++ argExpr ++ ");"
+                    ]
+                        ++ generateLambdaArgBindingLocal p1 t1Name
+                        ++ generateLambdaArgBindingLocal p2 t2Name
+                        ++ generateLambdaArgBindingLocal p3 t3Name
+
+                _ ->
+                    [ "/* tuple with more than 3 elements not supported */" ]
 
         PCons head tail ->
-            [ "tcelm_value_t *__head = tcelm_list_head(" ++ argExpr ++ ");"
-            , "tcelm_value_t *__tail = tcelm_list_tail(" ++ argExpr ++ ");"
+            [ "tcelm_value_t *" ++ headName ++ " = tcelm_list_head(" ++ argExpr ++ ");"
+            , "tcelm_value_t *" ++ tailName ++ " = tcelm_list_tail(" ++ argExpr ++ ");"
             ]
-                ++ generateLambdaArgBindingLocal head "__head"
-                ++ generateLambdaArgBindingLocal tail "__tail"
+                ++ generateLambdaArgBindingLocal head headName
+                ++ generateLambdaArgBindingLocal tail tailName
 
         PCtor _ _ args ->
             List.indexedMap
@@ -1469,24 +2732,37 @@ generatePatternBindingsLocal subject (Src.At _ pattern) =
                 fields
 
         PTuple p1 p2 rest ->
+            let
+                suffix =
+                    sanitizeForCIdent subject
+
+                t1Name =
+                    "__tuple_1_" ++ suffix
+
+                t2Name =
+                    "__tuple_2_" ++ suffix
+
+                t3Name =
+                    "__tuple_3_" ++ suffix
+            in
             case rest of
                 [] ->
                     -- 2-tuple
-                    [ "tcelm_value_t *__tuple_1 = tcelm_tuple2_first(" ++ subject ++ ");"
-                    , "tcelm_value_t *__tuple_2 = tcelm_tuple2_second(" ++ subject ++ ");"
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple2_first(" ++ subject ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple2_second(" ++ subject ++ ");"
                     ]
-                        ++ generatePatternBindingsLocal "__tuple_1" p1
-                        ++ generatePatternBindingsLocal "__tuple_2" p2
+                        ++ generatePatternBindingsLocal t1Name p1
+                        ++ generatePatternBindingsLocal t2Name p2
 
                 [ p3 ] ->
                     -- 3-tuple
-                    [ "tcelm_value_t *__tuple_1 = tcelm_tuple3_first(" ++ subject ++ ");"
-                    , "tcelm_value_t *__tuple_2 = tcelm_tuple3_second(" ++ subject ++ ");"
-                    , "tcelm_value_t *__tuple_3 = tcelm_tuple3_third(" ++ subject ++ ");"
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple3_first(" ++ subject ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple3_second(" ++ subject ++ ");"
+                    , "tcelm_value_t *" ++ t3Name ++ " = tcelm_tuple3_third(" ++ subject ++ ");"
                     ]
-                        ++ generatePatternBindingsLocal "__tuple_1" p1
-                        ++ generatePatternBindingsLocal "__tuple_2" p2
-                        ++ generatePatternBindingsLocal "__tuple_3" p3
+                        ++ generatePatternBindingsLocal t1Name p1
+                        ++ generatePatternBindingsLocal t2Name p2
+                        ++ generatePatternBindingsLocal t3Name p3
 
                 _ ->
                     [ "/* tuple with more than 3 elements not supported */" ]
@@ -1565,6 +2841,20 @@ Uses a special prefix for local variables to distinguish from top-level function
 -}
 generateArgBinding : Pattern -> String -> List String
 generateArgBinding pattern argName =
+    let
+        -- Create unique temp names based on argName
+        suffix =
+            sanitizeForCIdent argName
+
+        t1Name =
+            "__t1_" ++ suffix
+
+        t2Name =
+            "__t2_" ++ suffix
+
+        t3Name =
+            "__t3_" ++ suffix
+    in
     case patternValue pattern of
         PVar varName ->
             [ "tcelm_value_t *" ++ mangleLocal varName ++ " = " ++ argName ++ ";" ]
@@ -1589,21 +2879,21 @@ generateArgBinding pattern argName =
             case rest of
                 [] ->
                     -- 2-tuple
-                    [ "tcelm_value_t *__t1 = tcelm_tuple2_first(" ++ argName ++ ");"
-                    , "tcelm_value_t *__t2 = tcelm_tuple2_second(" ++ argName ++ ");"
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple2_first(" ++ argName ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple2_second(" ++ argName ++ ");"
                     ]
-                        ++ generateArgBinding p1 "__t1"
-                        ++ generateArgBinding p2 "__t2"
+                        ++ generateArgBinding p1 t1Name
+                        ++ generateArgBinding p2 t2Name
 
                 [ p3 ] ->
                     -- 3-tuple
-                    [ "tcelm_value_t *__t1 = tcelm_tuple3_first(" ++ argName ++ ");"
-                    , "tcelm_value_t *__t2 = tcelm_tuple3_second(" ++ argName ++ ");"
-                    , "tcelm_value_t *__t3 = tcelm_tuple3_third(" ++ argName ++ ");"
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple3_first(" ++ argName ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple3_second(" ++ argName ++ ");"
+                    , "tcelm_value_t *" ++ t3Name ++ " = tcelm_tuple3_third(" ++ argName ++ ");"
                     ]
-                        ++ generateArgBinding p1 "__t1"
-                        ++ generateArgBinding p2 "__t2"
-                        ++ generateArgBinding p3 "__t3"
+                        ++ generateArgBinding p1 t1Name
+                        ++ generateArgBinding p2 t2Name
+                        ++ generateArgBinding p3 t3Name
 
                 _ ->
                     [ "/* tuple with more than 3 elements not supported */" ]
@@ -1912,27 +3202,13 @@ generateBinop op l r =
 
         ">>" ->
             -- Forward composition: f >> g  means  \x -> g(f(x))
-            -- Create a closure that composes two functions
-            "({\n"
-                ++ "            tcelm_value_t *__f = " ++ l ++ ";\n"
-                ++ "            tcelm_value_t *__g = " ++ r ++ ";\n"
-                ++ "            auto tcelm_value_t *__compose_impl(tcelm_arena_t *a, tcelm_value_t **args) {\n"
-                ++ "                return tcelm_apply(a, __g, tcelm_apply(a, __f, args[0]));\n"
-                ++ "            }\n"
-                ++ "            tcelm_closure(arena, __compose_impl, 1);\n"
-                ++ "        })"
+            -- Use runtime composition function
+            "tcelm_compose_fwd(arena, " ++ l ++ ", " ++ r ++ ")"
 
         "<<" ->
             -- Backward composition: f << g  means  \x -> f(g(x))
-            -- Create a closure that composes two functions
-            "({\n"
-                ++ "            tcelm_value_t *__f = " ++ l ++ ";\n"
-                ++ "            tcelm_value_t *__g = " ++ r ++ ";\n"
-                ++ "            auto tcelm_value_t *__compose_impl(tcelm_arena_t *a, tcelm_value_t **args) {\n"
-                ++ "                return tcelm_apply(a, __f, tcelm_apply(a, __g, args[0]));\n"
-                ++ "            }\n"
-                ++ "            tcelm_closure(arena, __compose_impl, 1);\n"
-                ++ "        })"
+            -- Use runtime composition function
+            "tcelm_compose_bwd(arena, " ++ l ++ ", " ++ r ++ ")"
 
         _ ->
             "/* unknown binop " ++ op ++ " */ tcelm_apply_n(arena, " ++ mangle op ++ ", 2, " ++ l ++ ", " ++ r ++ ")"
@@ -1990,6 +3266,23 @@ generateLambda args body =
 -}
 generateLambdaArgBinding : Pattern -> String -> List String
 generateLambdaArgBinding pattern argExpr =
+    let
+        -- Create unique temp names based on argExpr
+        suffix =
+            sanitizeForCIdent argExpr
+
+        t1Name =
+            "__t1_" ++ suffix
+
+        t2Name =
+            "__t2_" ++ suffix
+
+        headName =
+            "__head_" ++ suffix
+
+        tailName =
+            "__tail_" ++ suffix
+    in
     case patternValue pattern of
         PVar varName ->
             [ "tcelm_value_t *" ++ mangle varName ++ " = " ++ argExpr ++ ";" ]
@@ -2011,18 +3304,18 @@ generateLambdaArgBinding pattern argExpr =
                 fields
 
         PTuple p1 p2 _ ->
-            [ "tcelm_value_t *__t1 = tcelm_tuple2_first(" ++ argExpr ++ ");"
-            , "tcelm_value_t *__t2 = tcelm_tuple2_second(" ++ argExpr ++ ");"
+            [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple2_first(" ++ argExpr ++ ");"
+            , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple2_second(" ++ argExpr ++ ");"
             ]
-                ++ generateLambdaArgBinding p1 "__t1"
-                ++ generateLambdaArgBinding p2 "__t2"
+                ++ generateLambdaArgBinding p1 t1Name
+                ++ generateLambdaArgBinding p2 t2Name
 
         PCons head tail ->
-            [ "tcelm_value_t *__head = tcelm_list_head(" ++ argExpr ++ ");"
-            , "tcelm_value_t *__tail = tcelm_list_tail(" ++ argExpr ++ ");"
+            [ "tcelm_value_t *" ++ headName ++ " = tcelm_list_head(" ++ argExpr ++ ");"
+            , "tcelm_value_t *" ++ tailName ++ " = tcelm_list_tail(" ++ argExpr ++ ");"
             ]
-                ++ generateLambdaArgBinding head "__head"
-                ++ generateLambdaArgBinding tail "__tail"
+                ++ generateLambdaArgBinding head headName
+                ++ generateLambdaArgBinding tail tailName
 
         _ ->
             [ "/* complex lambda pattern not yet supported */" ]
@@ -2380,9 +3673,13 @@ generatePatternMatch subject (Src.At _ pattern) =
                     -- Two element list
                     "(!tcelm_is_nil(" ++ subject ++ ") && !tcelm_is_nil(tcelm_list_tail(" ++ subject ++ ")) && tcelm_is_nil(tcelm_list_tail(tcelm_list_tail(" ++ subject ++ "))))"
 
+                [ _, _, _ ] ->
+                    -- Three element list
+                    "(!tcelm_is_nil(" ++ subject ++ ") && !tcelm_is_nil(tcelm_list_tail(" ++ subject ++ ")) && !tcelm_is_nil(tcelm_list_tail(tcelm_list_tail(" ++ subject ++ "))) && tcelm_is_nil(tcelm_list_tail(tcelm_list_tail(tcelm_list_tail(" ++ subject ++ ")))))"
+
                 _ ->
-                    -- For longer lists, check length
-                    "/* list pattern with " ++ String.fromInt (List.length patterns) ++ " elements - TODO */"
+                    -- For longer lists, use length check
+                    "(tcelm_list_length_fn(arena, " ++ subject ++ ")->data.i == " ++ String.fromInt (List.length patterns) ++ ")"
 
         PCons head tail ->
             "!tcelm_is_nil(" ++ subject ++ ")"
@@ -2456,24 +3753,37 @@ generatePatternBindings subject (Src.At _ pattern) =
                 fields
 
         PTuple p1 p2 rest ->
+            let
+                suffix =
+                    sanitizeForCIdent subject
+
+                t1Name =
+                    "__tuple_1_" ++ suffix
+
+                t2Name =
+                    "__tuple_2_" ++ suffix
+
+                t3Name =
+                    "__tuple_3_" ++ suffix
+            in
             case rest of
                 [] ->
                     -- 2-tuple
-                    [ "tcelm_value_t *__tuple_1 = tcelm_tuple2_first(" ++ subject ++ ");"
-                    , "tcelm_value_t *__tuple_2 = tcelm_tuple2_second(" ++ subject ++ ");"
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple2_first(" ++ subject ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple2_second(" ++ subject ++ ");"
                     ]
-                        ++ generatePatternBindings "__tuple_1" p1
-                        ++ generatePatternBindings "__tuple_2" p2
+                        ++ generatePatternBindings t1Name p1
+                        ++ generatePatternBindings t2Name p2
 
                 [ p3 ] ->
                     -- 3-tuple
-                    [ "tcelm_value_t *__tuple_1 = tcelm_tuple3_first(" ++ subject ++ ");"
-                    , "tcelm_value_t *__tuple_2 = tcelm_tuple3_second(" ++ subject ++ ");"
-                    , "tcelm_value_t *__tuple_3 = tcelm_tuple3_third(" ++ subject ++ ");"
+                    [ "tcelm_value_t *" ++ t1Name ++ " = tcelm_tuple3_first(" ++ subject ++ ");"
+                    , "tcelm_value_t *" ++ t2Name ++ " = tcelm_tuple3_second(" ++ subject ++ ");"
+                    , "tcelm_value_t *" ++ t3Name ++ " = tcelm_tuple3_third(" ++ subject ++ ");"
                     ]
-                        ++ generatePatternBindings "__tuple_1" p1
-                        ++ generatePatternBindings "__tuple_2" p2
-                        ++ generatePatternBindings "__tuple_3" p3
+                        ++ generatePatternBindings t1Name p1
+                        ++ generatePatternBindings t2Name p2
+                        ++ generatePatternBindings t3Name p3
 
                 _ ->
                     [ "/* tuple with more than 3 elements not supported */" ]
@@ -2589,6 +3899,76 @@ generateAlias (Src.At _ alias_) =
         "/* type alias " ++ name ++ " */"
 
 
+{-| Generate a stub for an Elm port.
+    Outgoing ports (Value -> Cmd msg) return Cmd.none
+    Incoming ports ((a -> msg) -> Sub msg) return Sub.none
+-}
+generatePortStub : String -> Src.Port -> String
+generatePortStub modulePrefix port_ =
+    let
+        (Src.At _ name) =
+            port_.name
+
+        funcName =
+            "elm_" ++ modulePrefix ++ "_" ++ name
+
+        -- Determine port arity from type
+        -- Outgoing: Value -> Cmd msg (arity 1)
+        -- Incoming: (a -> msg) -> Sub msg (arity 1)
+        arity =
+            1
+
+        -- Generate forward declaration
+        forwardDecl =
+            "#define " ++ funcName ++ "_ARITY " ++ String.fromInt arity ++ "\n"
+                ++ "tcelm_value_t *" ++ funcName ++ "_impl(tcelm_arena_t *arena, tcelm_value_t **args);"
+
+        -- Generate implementation that returns Cmd.none or Sub.none
+        -- We check if the type contains "Sub" to determine if it's an incoming port
+        isIncomingPort =
+            String.contains "Sub" (typeToString port_.type_)
+
+        impl =
+            "tcelm_value_t *" ++ funcName ++ "_impl(tcelm_arena_t *arena, tcelm_value_t **args) {\n"
+                ++ "    (void)arena; (void)args;\n"
+                ++ "    return "
+                ++ (if isIncomingPort then "elm_Sub_none" else "elm_Cmd_none")
+                ++ ";\n"
+                ++ "}"
+    in
+    "/* port " ++ name ++ " */\n" ++ forwardDecl ++ "\n" ++ impl
+
+
+{-| Simple type to string for port detection -}
+typeToString : Src.Type -> String
+typeToString (Src.At _ tipe) =
+    case tipe of
+        Src.TLambda a b ->
+            typeToString a ++ " -> " ++ typeToString b
+
+        Src.TVar name ->
+            name
+
+        Src.TType _ name args ->
+            name ++ " " ++ String.join " " (List.map typeToString args)
+
+        Src.TTypeQual _ mod name args ->
+            mod ++ "." ++ name ++ " " ++ String.join " " (List.map typeToString args)
+
+        Src.TRecord fields _ ->
+            "{ " ++ String.join ", " (List.map (\(Src.At _ f, t) -> f ++ ": " ++ typeToString t) fields) ++ " }"
+
+        Src.TUnit ->
+            "()"
+
+        Src.TTuple a b rest ->
+            let
+                allTypes =
+                    [ a, b ] ++ rest
+            in
+            "(" ++ String.join ", " (List.map typeToString allTypes) ++ ")"
+
+
 {-| Generate a closure that creates a constructor when called.
     For example, makeConstructorClosure "Just" 1 creates a closure that,
     when applied to one argument, creates Just(arg).
@@ -2682,6 +4062,18 @@ mapStdLibFunction modulePath name =
         ( "String", "reverse" ) ->
             "tcelm_string_reverse"
 
+        ( "String", "contains" ) ->
+            "tcelm_string_contains"
+
+        ( "String", "isEmpty" ) ->
+            "tcelm_string_isEmpty"
+
+        ( "String", "startsWith" ) ->
+            "tcelm_string_startsWith"
+
+        ( "String", "endsWith" ) ->
+            "tcelm_string_endsWith"
+
         -- Char module
         ( "Char", "isAlphaNum" ) ->
             "tcelm_char_isAlphaNum"
@@ -2753,6 +4145,24 @@ mapStdLibFunction modulePath name =
         ( "List", "repeat" ) ->
             "tcelm_list_repeat"
 
+        ( "List", "any" ) ->
+            "tcelm_list_any"
+
+        ( "List", "all" ) ->
+            "tcelm_list_all"
+
+        ( "List", "drop" ) ->
+            "tcelm_list_drop"
+
+        ( "List", "take" ) ->
+            "tcelm_list_take"
+
+        ( "List", "filterMap" ) ->
+            "tcelm_list_filterMap"
+
+        ( "List", "partition" ) ->
+            "tcelm_list_partition"
+
         -- Maybe module
         ( "Maybe", "map" ) ->
             "tcelm_maybe_map"
@@ -2779,6 +4189,10 @@ mapStdLibFunction modulePath name =
 
         ( "Basics", "max" ) ->
             "tcelm_max"
+
+        -- Platform module
+        ( "Platform", "worker" ) ->
+            "elm_Platform_worker"
 
         -- Default: mangle as elm_Module_name
         _ ->
@@ -2860,6 +4274,18 @@ getStdLibArity modulePath name =
         ( "String", "reverse" ) ->
             Just 1
 
+        ( "String", "contains" ) ->
+            Just 2
+
+        ( "String", "isEmpty" ) ->
+            Just 1
+
+        ( "String", "startsWith" ) ->
+            Just 2
+
+        ( "String", "endsWith" ) ->
+            Just 2
+
         ( "Char", "toCode" ) ->
             Just 1
 
@@ -2914,6 +4340,24 @@ getStdLibArity modulePath name =
         ( "List", "repeat" ) ->
             Just 2
 
+        ( "List", "any" ) ->
+            Just 2
+
+        ( "List", "all" ) ->
+            Just 2
+
+        ( "List", "drop" ) ->
+            Just 2
+
+        ( "List", "take" ) ->
+            Just 2
+
+        ( "List", "filterMap" ) ->
+            Just 2
+
+        ( "List", "partition" ) ->
+            Just 2
+
         ( "Basics", "identity" ) ->
             Just 1
 
@@ -2925,6 +4369,10 @@ getStdLibArity modulePath name =
 
         ( "Basics", "max" ) ->
             Just 2
+
+        -- Platform module
+        ( "Platform", "worker" ) ->
+            Just 1
 
         _ ->
             Nothing

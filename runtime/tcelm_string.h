@@ -47,4 +47,33 @@ tcelm_value_t *tcelm_string_trim(tcelm_arena_t *arena, tcelm_value_t *s);
 tcelm_value_t *tcelm_string_split(tcelm_arena_t *arena, tcelm_value_t *sep, tcelm_value_t *s);
 tcelm_value_t *tcelm_string_replace(tcelm_arena_t *arena, tcelm_value_t *from, tcelm_value_t *to, tcelm_value_t *s);
 
+/* Closure-compatible _impl wrappers */
+tcelm_value_t *tcelm_string_join_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_append_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_contains_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_startsWith_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_endsWith_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_isEmpty_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_concat_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_replace_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_left_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_right_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_dropLeft_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_dropRight_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_slice_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_length_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_repeat_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_split_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_toList_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_fromList_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_toUpper_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_toLower_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_trim_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_reverse_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_uncons_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_cons_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_fromInt_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_fromFloat_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_string_fromChar_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+
 #endif /* TCELM_STRING_H */

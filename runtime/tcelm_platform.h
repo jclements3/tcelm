@@ -30,6 +30,9 @@ extern tcelm_value_t *elm_Sub_none;
  */
 tcelm_value_t *elm_Platform_worker(tcelm_arena_t *arena, tcelm_value_t *config);
 
+/* Closure-compatible implementation (for passing as first-class function) */
+tcelm_value_t *elm_Platform_worker_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+
 /*
  * Initialize Platform module globals
  * Call this before using any Platform functions

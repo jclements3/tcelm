@@ -830,3 +830,80 @@ tcelm_value_t *tcelm_list_pmap(tcelm_arena_t *arena, tcelm_value_t *fn, tcelm_va
     int num_cores = tcelm_get_num_cores();
     return tcelm_list_pmapN(arena, num_cores, fn, list);
 }
+
+/*
+ * Closure-compatible _impl wrappers
+ * These unpack args[] and call the actual implementation
+ */
+
+tcelm_value_t *tcelm_list_any_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_any(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_all_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_all(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_filter_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_filter(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_map_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_map(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_indexedMap_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_indexedMap(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_foldl_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_foldl(arena, args[0], args[1], args[2]);
+}
+
+tcelm_value_t *tcelm_list_foldr_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_foldr(arena, args[0], args[1], args[2]);
+}
+
+tcelm_value_t *tcelm_list_map2_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_map2(arena, args[0], args[1], args[2]);
+}
+
+tcelm_value_t *tcelm_list_concatMap_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_concatMap(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_member_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_member(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_repeat_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_repeat(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_range_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_range(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_drop_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_drop(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_take_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_take(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_filterMap_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_filterMap(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_partition_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_partition(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_concat_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_concat_fn(arena, args[0]);
+}
+
+tcelm_value_t *tcelm_list_indexedMap_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_indexedMap(arena, args[0], args[1]);
+}

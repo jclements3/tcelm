@@ -371,6 +371,83 @@ tcelm_value_t *tcelm_max_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
     return tcelm_max(arena, args[0], args[1]);
 }
 
+tcelm_value_t *tcelm_not_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_not(arena, args[0]);
+}
+
+/* Generic negate - dispatches based on type */
+tcelm_value_t *tcelm_negate(tcelm_arena_t *arena, tcelm_value_t *a) {
+    if (a->tag == TCELM_TAG_FLOAT) {
+        return tcelm_negate_float(arena, a);
+    }
+    return tcelm_negate_int(arena, a);
+}
+
+tcelm_value_t *tcelm_negate_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_negate(arena, args[0]);
+}
+
+/* Generic abs - dispatches based on type */
+tcelm_value_t *tcelm_abs(tcelm_arena_t *arena, tcelm_value_t *a) {
+    if (a->tag == TCELM_TAG_FLOAT) {
+        return tcelm_abs_float(arena, a);
+    }
+    return tcelm_abs_int(arena, a);
+}
+
+tcelm_value_t *tcelm_abs_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_abs(arena, args[0]);
+}
+
+/*
+ * Function composition
+ *
+ * Forward composition (>>): f >> g means \x -> g(f(x))
+ * Backward composition (<<): f << g means \x -> f(g(x))
+ *
+ * These use partial application: compose takes (f, g, x) with arity 3,
+ * and tcelm_compose_fwd/bwd returns a partially applied closure.
+ */
+
+/* Forward composition impl: (f, g, x) -> g(f(x)) */
+tcelm_value_t *tcelm_compose_fwd_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    tcelm_value_t *f = args[0];
+    tcelm_value_t *g = args[1];
+    tcelm_value_t *x = args[2];
+    tcelm_value_t *fx = tcelm_apply(arena, f, x);
+    return tcelm_apply(arena, g, fx);
+}
+
+/* Backward composition impl: (f, g, x) -> f(g(x)) */
+tcelm_value_t *tcelm_compose_bwd_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    tcelm_value_t *f = args[0];
+    tcelm_value_t *g = args[1];
+    tcelm_value_t *x = args[2];
+    tcelm_value_t *gx = tcelm_apply(arena, g, x);
+    return tcelm_apply(arena, f, gx);
+}
+
+/* Forward composition: f >> g */
+tcelm_value_t *tcelm_compose_fwd(tcelm_arena_t *arena, tcelm_value_t *f, tcelm_value_t *g) {
+    tcelm_value_t *closure = tcelm_closure(arena, tcelm_compose_fwd_impl, 3);
+    closure = tcelm_apply(arena, closure, f);
+    closure = tcelm_apply(arena, closure, g);
+    return closure;
+}
+
+/* Backward composition: f << g */
+tcelm_value_t *tcelm_compose_bwd(tcelm_arena_t *arena, tcelm_value_t *f, tcelm_value_t *g) {
+    tcelm_value_t *closure = tcelm_closure(arena, tcelm_compose_bwd_impl, 3);
+    closure = tcelm_apply(arena, closure, f);
+    closure = tcelm_apply(arena, closure, g);
+    return closure;
+}
+
+/* Generic compose (same as backward for compatibility) */
+tcelm_value_t *tcelm_compose(tcelm_arena_t *arena, tcelm_value_t *f, tcelm_value_t *g) {
+    return tcelm_compose_bwd(arena, f, g);
+}
+
 /*
  * Debug
  */

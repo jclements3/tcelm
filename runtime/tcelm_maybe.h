@@ -29,4 +29,9 @@ bool tcelm_maybe_isNothing(tcelm_value_t *maybe);
 /* Maybe unwrap (for internal use) */
 tcelm_value_t *tcelm_maybe_unwrap(tcelm_value_t *maybe);
 
+/* Closure-compatible _impl wrappers */
+tcelm_value_t *tcelm_maybe_withDefault_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_maybe_map_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_maybe_andThen_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+
 #endif /* TCELM_MAYBE_H */

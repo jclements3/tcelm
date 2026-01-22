@@ -282,3 +282,4 @@ extern tcelm_value_t tcelm_nil_val;
 #define TCELM_CTOR_TTYPEQUAL 3
 #define TCELM_CTOR_TRECORD 4
 #define TCELM_CTOR_TUNIT 5
+#define TCELM_CTOR_TTUPLE 6

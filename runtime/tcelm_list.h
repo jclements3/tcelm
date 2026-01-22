@@ -81,4 +81,24 @@ int tcelm_get_num_cores(void);
 #define tcelm_list_reverse tcelm_list_reverse_fn
 #define tcelm_list_concat tcelm_list_concat_fn
 
+/* Closure-compatible _impl wrappers */
+tcelm_value_t *tcelm_list_any_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_all_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_filter_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_map_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_indexedMap_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_foldl_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_foldr_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_map2_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_concatMap_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_member_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_repeat_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_range_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_drop_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_take_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_filterMap_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_partition_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_concat_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_indexedMap_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+
 #endif /* TCELM_LIST_H */

@@ -40,7 +40,7 @@ module_ =
                                     (\decls ->
                                         let
                                             categorized =
-                                                categorizeDecls [] [] [] [] decls
+                                                categorizeDecls [] [] [] [] [] decls
                                         in
                                         case maybeHeader of
                                             Just ( name, exports ) ->
@@ -52,6 +52,7 @@ module_ =
                                                     , unions = categorized.unions
                                                     , aliases = categorized.aliases
                                                     , binops = categorized.binops
+                                                    , ports = categorized.ports
                                                     }
 
                                             Nothing ->
@@ -63,6 +64,7 @@ module_ =
                                                     , unions = categorized.unions
                                                     , aliases = categorized.aliases
                                                     , binops = categorized.binops
+                                                    , ports = categorized.ports
                                                     }
                                     )
                         )
@@ -74,6 +76,7 @@ type alias CategorizedDecls =
     , unions : List (Src.Located Src.Union)
     , aliases : List (Src.Located Src.Alias)
     , binops : List (Src.Located Src.Infix)
+    , ports : List Src.Port
     }
 
 
@@ -82,31 +85,32 @@ categorizeDecls :
     -> List (Src.Located Src.Union)
     -> List (Src.Located Src.Alias)
     -> List (Src.Located Src.Infix)
+    -> List Src.Port
     -> List Decl.Decl
     -> CategorizedDecls
-categorizeDecls values unions aliases binops decls =
+categorizeDecls values unions aliases binops ports decls =
     case decls of
         [] ->
             { values = List.reverse values
             , unions = List.reverse unions
             , aliases = List.reverse aliases
             , binops = List.reverse binops
+            , ports = List.reverse ports
             }
 
         decl :: rest ->
             case decl of
                 Decl.Value value ->
-                    categorizeDecls (value :: values) unions aliases binops rest
+                    categorizeDecls (value :: values) unions aliases binops ports rest
 
                 Decl.Union union ->
-                    categorizeDecls values (union :: unions) aliases binops rest
+                    categorizeDecls values (union :: unions) aliases binops ports rest
 
                 Decl.Alias alias_ ->
-                    categorizeDecls values unions (alias_ :: aliases) binops rest
+                    categorizeDecls values unions (alias_ :: aliases) binops ports rest
 
-                Decl.PortDecl _ ->
-                    -- Ports are handled separately
-                    categorizeDecls values unions aliases binops rest
+                Decl.PortDecl port_ ->
+                    categorizeDecls values unions aliases binops (port_ :: ports) rest
 
 
 

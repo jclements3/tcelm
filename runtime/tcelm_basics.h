@@ -38,6 +38,12 @@ tcelm_value_t *tcelm_negate_float(tcelm_arena_t *arena, tcelm_value_t *a);
 tcelm_value_t *tcelm_abs_float(tcelm_arena_t *arena, tcelm_value_t *a);
 
 /*
+ * Generic numeric operations (dispatch based on type)
+ */
+tcelm_value_t *tcelm_negate(tcelm_arena_t *arena, tcelm_value_t *a);
+tcelm_value_t *tcelm_abs(tcelm_arena_t *arena, tcelm_value_t *a);
+
+/*
  * Math functions
  */
 tcelm_value_t *tcelm_sqrt(tcelm_arena_t *arena, tcelm_value_t *a);
@@ -131,8 +137,15 @@ extern tcelm_value_t tcelm_order_gt;
 
 /*
  * Function composition and piping
+ *
+ * Forward composition (>>): f >> g means \x -> g(f(x))
+ * Backward composition (<<): f << g means \x -> f(g(x))
  */
 tcelm_value_t *tcelm_compose(tcelm_arena_t *arena, tcelm_value_t *f, tcelm_value_t *g);
+tcelm_value_t *tcelm_compose_fwd(tcelm_arena_t *arena, tcelm_value_t *f, tcelm_value_t *g);
+tcelm_value_t *tcelm_compose_bwd(tcelm_arena_t *arena, tcelm_value_t *f, tcelm_value_t *g);
+tcelm_value_t *tcelm_compose_fwd_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_compose_bwd_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 tcelm_value_t *tcelm_identity(tcelm_arena_t *arena, tcelm_value_t *a);
 tcelm_value_t *tcelm_always(tcelm_arena_t *arena, tcelm_value_t *a, tcelm_value_t *b);
 
@@ -144,6 +157,9 @@ tcelm_value_t *tcelm_identity_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 tcelm_value_t *tcelm_to_float_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 tcelm_value_t *tcelm_min_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 tcelm_value_t *tcelm_max_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_not_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_negate_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_abs_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 
 /*
  * Debug/Development
