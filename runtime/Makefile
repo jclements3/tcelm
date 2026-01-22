@@ -31,7 +31,12 @@ TCC_DIR ?= $(shell cd .. && pwd)/tcc
 # Host compiler (use system GCC for better compatibility)
 HOST_CC = gcc
 HOST_CFLAGS = -Wall -Wextra -g -O0
+# -lrt is needed on Linux for clock_gettime, not on macOS
+ifeq ($(shell uname),Darwin)
+HOST_LDFLAGS = -lm -lpthread
+else
 HOST_LDFLAGS = -lm -lpthread -lrt
+endif
 
 # TCC (Tiny C Compiler) - for fast iteration
 TCC = $(TCC_DIR)/tcc
