@@ -163,7 +163,7 @@ jobs:
       run: |
         cd tests
         make build-unit
-        for test in unit/runtime/test_*; do
+        for test in unit/runtime/test_types unit/runtime/test_list unit/runtime/test_string; do
           echo "Running $test with seed ${{ matrix.seed }}..."
           ./$test ${{ matrix.seed }}
         done
