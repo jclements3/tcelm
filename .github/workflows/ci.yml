@@ -42,6 +42,7 @@ jobs:
         make install
         cd ..
         rm -rf tcc-src
+        ln -s bin/tcc tcc/tcc
 
     - name: Build Elm compiler (tcelm-compiler.js)
       run: |
@@ -91,6 +92,7 @@ jobs:
         make install
         cd ..
         rm -rf tcc-src
+        ln -s bin/tcc tcc/tcc
 
     - name: Build tcelm
       run: |
@@ -150,6 +152,7 @@ jobs:
         make install
         cd ..
         rm -rf tcc-src
+        ln -s bin/tcc tcc/tcc
 
     - name: Build
       run: |
@@ -190,6 +193,7 @@ jobs:
         make install
         cd ..
         rm -rf tcc-src
+        ln -s bin/tcc tcc/tcc
 
     - name: Build
       run: |
@@ -225,6 +229,7 @@ jobs:
         make install
         cd ..
         rm -rf tcc-src
+        ln -s bin/tcc tcc/tcc
 
     - name: Check Elm formatting
       run: |
@@ -268,6 +273,7 @@ jobs:
         make install
         cd ..
         rm -rf tcc-src
+        ln -s bin/tcc tcc/tcc
 
     - name: Build
       run: |
