@@ -385,6 +385,50 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Basics" "isOdd") ->
             Just (generateIsOdd genExpr args)
 
+        -- Trig functions (unqualified)
+        Src.At _ (Src.Var _ "sin") ->
+            Just (generateSin genExpr args)
+
+        Src.At _ (Src.Var _ "cos") ->
+            Just (generateCos genExpr args)
+
+        Src.At _ (Src.Var _ "tan") ->
+            Just (generateTan genExpr args)
+
+        Src.At _ (Src.Var _ "asin") ->
+            Just (generateAsin genExpr args)
+
+        Src.At _ (Src.Var _ "acos") ->
+            Just (generateAcos genExpr args)
+
+        Src.At _ (Src.Var _ "atan") ->
+            Just (generateAtan genExpr args)
+
+        Src.At _ (Src.Var _ "atan2") ->
+            Just (generateAtan2 genExpr args)
+
+        -- Trig functions (qualified)
+        Src.At _ (Src.VarQual _ "Basics" "sin") ->
+            Just (generateSin genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "cos") ->
+            Just (generateCos genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "tan") ->
+            Just (generateTan genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "asin") ->
+            Just (generateAsin genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "acos") ->
+            Just (generateAcos genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "atan") ->
+            Just (generateAtan genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "atan2") ->
+            Just (generateAtan2 genExpr args)
+
         -- Not a builtin we handle here
         _ ->
             Nothing
@@ -1602,3 +1646,77 @@ generateListSort genExpr args =
 
         _ ->
             "/* List.sort wrong arity */ 0"
+
+
+
+-- TRIG FUNCTIONS
+
+
+generateSin : GenExpr -> List Src.Expr -> String
+generateSin genExpr args =
+    case args of
+        [ x ] ->
+            "sin(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* sin wrong arity */ 0"
+
+
+generateCos : GenExpr -> List Src.Expr -> String
+generateCos genExpr args =
+    case args of
+        [ x ] ->
+            "cos(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* cos wrong arity */ 0"
+
+
+generateTan : GenExpr -> List Src.Expr -> String
+generateTan genExpr args =
+    case args of
+        [ x ] ->
+            "tan(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* tan wrong arity */ 0"
+
+
+generateAsin : GenExpr -> List Src.Expr -> String
+generateAsin genExpr args =
+    case args of
+        [ x ] ->
+            "asin(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* asin wrong arity */ 0"
+
+
+generateAcos : GenExpr -> List Src.Expr -> String
+generateAcos genExpr args =
+    case args of
+        [ x ] ->
+            "acos(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* acos wrong arity */ 0"
+
+
+generateAtan : GenExpr -> List Src.Expr -> String
+generateAtan genExpr args =
+    case args of
+        [ x ] ->
+            "atan(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* atan wrong arity */ 0"
+
+
+generateAtan2 : GenExpr -> List Src.Expr -> String
+generateAtan2 genExpr args =
+    case args of
+        [ y, x ] ->
+            "atan2(" ++ genExpr y ++ ", " ++ genExpr x ++ ")"
+
+        _ ->
+            "/* atan2 wrong arity */ 0"
