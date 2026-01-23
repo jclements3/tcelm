@@ -1265,6 +1265,10 @@ generateTccCode ast =
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
 
+        -- Dead Code Elimination: only keep functions reachable from main
+        values =
+            filterReachableValues ast.values
+
         -- Process imports to generate includes and extern declarations
         importCode =
             generateImportCode ast.imports
@@ -1323,7 +1327,7 @@ generateTccCode ast =
 
         -- Collect all lambdas from complex constants that are records
         recordLambdaFunctions =
-            ast.values
+            values
                 |> List.filterMap
                     (\(Src.At _ value) ->
                         let
@@ -1356,7 +1360,7 @@ generateTccCode ast =
         -- Generate module-level constants (non-main values without arguments)
         -- Simple expressions become static const, complex ones become getter functions
         ( simpleConstants, complexConstants ) =
-            ast.values
+            values
                 |> List.filterMap
                     (\(Src.At _ value) ->
                         let
@@ -1462,7 +1466,7 @@ generateTccCode ast =
 
         -- Generate user-defined functions (non-main values with arguments)
         userFunctions =
-            ast.values
+            values
                 |> List.filterMap
                     (\(Src.At _ value) ->
                         let
@@ -1479,7 +1483,7 @@ generateTccCode ast =
 
         -- Collect and generate lifted local functions from all values
         liftedFunctions =
-            ast.values
+            values
                 |> List.concatMap
                     (\(Src.At _ value) ->
                         let
@@ -1594,7 +1598,7 @@ generateTccCode ast =
         -- Generate forward declarations for user-defined functions
         -- Skip functions that return anonymous structs (they cause redefinition errors)
         forwardDecls =
-            ast.values
+            values
                 |> List.filterMap
                     (\(Src.At _ value) ->
                         let
