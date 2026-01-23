@@ -2578,20 +2578,20 @@ generateStandaloneExpr expr =
 -}
 generateStandaloneExprWithCtx : ExprCtx -> Src.Expr -> String
 generateStandaloneExprWithCtx ctx (Src.At _ expr) =
+    -- Try literal generation first (delegates to Codegen.Expr)
+    case Expr.generateLiteral expr of
+        Just litStr ->
+            litStr
+
+        Nothing ->
+            generateStandaloneExprWithCtxImpl ctx expr
+
+
+{-| Implementation of expression generation for non-literal cases
+-}
+generateStandaloneExprWithCtxImpl : ExprCtx -> Src.Expr_ -> String
+generateStandaloneExprWithCtxImpl ctx expr =
     case expr of
-        Src.Int n ->
-            String.fromInt n
-
-        Src.Float f ->
-            String.fromFloat f
-
-        Src.Str s ->
-            "\"" ++ escapeC s ++ "\""
-
-        Src.Chr c ->
-            -- Char as integer (ASCII value)
-            "'" ++ escapeC c ++ "'"
-
         Src.Negate inner ->
             "(-" ++ generateStandaloneExprWithCtx ctx inner ++ ")"
 
@@ -6584,25 +6584,14 @@ generateDestructuring pattern expr =
 -}
 generateStandaloneIf : List ( Src.Expr, Src.Expr ) -> Src.Expr -> String
 generateStandaloneIf branches elseExpr =
-    generateStandaloneIfWithCtx Shared.defaultExprCtx branches elseExpr
+    Expr.generateIfExpr generateStandaloneExpr branches elseExpr
 
 
 {-| Generate if/else with function context
 -}
 generateStandaloneIfWithCtx : ExprCtx -> List ( Src.Expr, Src.Expr ) -> Src.Expr -> String
 generateStandaloneIfWithCtx ctx branches elseExpr =
-    case branches of
-        [] ->
-            generateStandaloneExprWithCtx ctx elseExpr
-
-        ( condition, thenExpr ) :: rest ->
-            "("
-                ++ generateStandaloneExprWithCtx ctx condition
-                ++ " ? "
-                ++ generateStandaloneExprWithCtx ctx thenExpr
-                ++ " : "
-                ++ generateStandaloneIfWithCtx ctx rest elseExpr
-                ++ ")"
+    Expr.generateIfExpr (generateStandaloneExprWithCtx ctx) branches elseExpr
 
 
 {-| Generate standalone C code for case expressions
