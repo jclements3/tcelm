@@ -285,11 +285,29 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Debug" "todo") ->
             Just (generateDebugTodo genExpr args)
 
-        -- Maybe module (simple functions only - map/andThen have lambda handling in Cli.elm)
+        -- Maybe module
         Src.At _ (Src.VarQual _ "Maybe" "withDefault") ->
             Just (generateMaybeWithDefault genExpr args)
 
-        -- Result module (simple functions only - map/mapError/andThen have lambda handling in Cli.elm)
+        Src.At _ (Src.VarQual _ "Maybe" "map") ->
+            Just (generateMaybeMap genExpr args)
+
+        Src.At _ (Src.VarQual _ "Maybe" "andThen") ->
+            Just (generateMaybeAndThen genExpr args)
+
+        Src.At _ (Src.VarQual _ "Maybe" "map2") ->
+            Just (generateMaybeMap2 genExpr args)
+
+        Src.At _ (Src.VarQual _ "Maybe" "map3") ->
+            Just (generateMaybeMap3 genExpr args)
+
+        Src.At _ (Src.VarQual _ "Maybe" "map4") ->
+            Just (generateMaybeMap4 genExpr args)
+
+        Src.At _ (Src.VarQual _ "Maybe" "map5") ->
+            Just (generateMaybeMap5 genExpr args)
+
+        -- Result module
         Src.At _ (Src.VarQual _ "Result" "withDefault") ->
             Just (generateResultWithDefault genExpr args)
 
@@ -298,6 +316,15 @@ generateBuiltinCall genExpr ctx fn args =
 
         Src.At _ (Src.VarQual _ "Result" "fromMaybe") ->
             Just (generateResultFromMaybe genExpr args)
+
+        Src.At _ (Src.VarQual _ "Result" "map") ->
+            Just (generateResultMap genExpr args)
+
+        Src.At _ (Src.VarQual _ "Result" "mapError") ->
+            Just (generateResultMapError genExpr args)
+
+        Src.At _ (Src.VarQual _ "Result" "andThen") ->
+            Just (generateResultAndThen genExpr args)
 
         -- Math functions (Basics module, unqualified)
         Src.At _ (Src.Var _ "floor") ->
@@ -376,6 +403,60 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "List" "sort") ->
             Just (generateListSort genExpr args)
 
+        Src.At _ (Src.VarQual _ "List" "foldl") ->
+            Just (generateListFoldl genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "foldr") ->
+            Just (generateListFoldr genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "all") ->
+            Just (generateListAll genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "any") ->
+            Just (generateListAny genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "length") ->
+            Just (generateListLength genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "isEmpty") ->
+            Just (generateListIsEmpty genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "singleton") ->
+            Just (generateListSingleton genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "map") ->
+            Just (generateListMap genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "map2") ->
+            Just (generateListMap2 genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "map3") ->
+            Just (generateListMap3 genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "filter") ->
+            Just (generateListFilter genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "partition") ->
+            Just (generateListPartition genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "sortBy") ->
+            Just (generateListSortBy genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "indexedMap") ->
+            Just (generateListIndexedMap genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "concat") ->
+            Just (generateListConcat genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "filterMap") ->
+            Just (generateListFilterMap genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "concatMap") ->
+            Just (generateListConcatMap genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "unzip") ->
+            Just (generateListUnzip genExpr args)
+
         -- Math functions (Basics module, qualified)
         Src.At _ (Src.VarQual _ "Basics" "floor") ->
             Just (generateFloor genExpr args)
@@ -448,6 +529,16 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Basics" "atan2") ->
             Just (generateAtan2 genExpr args)
 
+        -- Built-in constructors
+        Src.At _ (Src.Var Src.CapVar "Just") ->
+            Just (generateJustCtor genExpr args)
+
+        Src.At _ (Src.Var _ "Ok") ->
+            Just (generateOkCtor genExpr args)
+
+        Src.At _ (Src.Var _ "Err") ->
+            Just (generateErrCtor genExpr args)
+
         -- Not a builtin we handle here
         _ ->
             Nothing
@@ -458,8 +549,73 @@ Returns Nothing if not a known builtin.
 -}
 generateBuiltinCallWithPipeArg : GenExpr -> ExprCtx -> Src.Expr -> List Src.Expr -> String -> Maybe String
 generateBuiltinCallWithPipeArg genExpr ctx fn partialArgs pipeArg =
-    -- This can be expanded as we migrate more pipe-specific builtins
-    Nothing
+    case fn of
+        -- List.map with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "map") ->
+            Just (generateListMapPipe genExpr partialArgs pipeArg)
+
+        -- List.filter with predicate and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "filter") ->
+            Just (generateListFilterPipe genExpr partialArgs pipeArg)
+
+        -- List.take with count and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "take") ->
+            Just (generateListTakePipe genExpr partialArgs pipeArg)
+
+        -- List.indexedMap with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "indexedMap") ->
+            Just (generateListIndexedMapPipe genExpr partialArgs pipeArg)
+
+        -- List.filterMap with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "filterMap") ->
+            Just (generateListFilterMapPipe genExpr partialArgs pipeArg)
+
+        -- List.concatMap with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "concatMap") ->
+            Just (generateListConcatMapPipe genExpr partialArgs pipeArg)
+
+        -- List.sortBy with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "sortBy") ->
+            Just (generateListSortByPipe genExpr partialArgs pipeArg)
+
+        -- List.partition with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "partition") ->
+            Just (generateListPartitionPipe genExpr partialArgs pipeArg)
+
+        -- List.sum with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "sum") ->
+            Just ("({ elm_list_t __lst = " ++ pipeArg ++ "; double __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i].d; __sum; })")
+
+        -- List.product with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "product") ->
+            Just ("({ elm_list_t __lst = " ++ pipeArg ++ "; double __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i].d; __prod; })")
+
+        -- List.reverse with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "reverse") ->
+            Just ("({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __rev; __rev.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __rev.data[__i] = __lst.data[__lst.length - 1 - __i]; __rev; })")
+
+        -- List.length with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "length") ->
+            Just ("({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length; })")
+
+        -- List.head with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "head") ->
+            Just ("({ typeof(" ++ pipeArg ++ ") __lst = " ++ pipeArg ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.ptr = (void*)&__lst.data[0]}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })")
+
+        -- List.last with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "last") ->
+            Just ("({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.num = __lst.data[__lst.length - 1].d}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })")
+
+        -- Maybe.map with function and pipe arg (Maybe)
+        Src.At _ (Src.VarQual _ "Maybe" "map") ->
+            Just (generateMaybeMapPipe genExpr partialArgs pipeArg)
+
+        -- Maybe.andThen with function and pipe arg (Maybe)
+        Src.At _ (Src.VarQual _ "Maybe" "andThen") ->
+            Just (generateMaybeAndThenPipe genExpr partialArgs pipeArg)
+
+        _ ->
+            Nothing
 
 
 
@@ -1427,6 +1583,173 @@ generateMaybeWithDefault genExpr args =
             "/* Maybe.withDefault wrong arity */ 0"
 
 
+generateMaybeMap : GenExpr -> List Src.Expr -> String
+generateMaybeMap genExpr args =
+    case args of
+        [ fnExpr, maybeVal ] ->
+            let
+                maybeStr = genExpr maybeVal
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar varName) ] body) ->
+                            "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
+                            "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
+                            "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Accessor fieldName) ->
+                            "((struct { const char *" ++ fieldName ++ "; } *)__maybe_val.data.ptr)->" ++ fieldName
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_val.data)"
+            in
+            "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { elm_union_t __inner = {0}; __inner.data.num = " ++ fnAppStr ++ "; __result = elm_Just(__inner); } else { __result = elm_Nothing(); } __result; })"
+
+        _ ->
+            "/* Maybe.map wrong arity */ 0"
+
+
+generateMaybeAndThen : GenExpr -> List Src.Expr -> String
+generateMaybeAndThen genExpr args =
+    case args of
+        [ fnExpr, maybeVal ] ->
+            let
+                maybeStr = genExpr maybeVal
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar varName) ] body) ->
+                            "({ double elm_" ++ varName ++ " = __maybe_val.data.child->data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] body) ->
+                            let
+                                extractBinding idx pat =
+                                    case pat of
+                                        Src.PVar vn -> "double elm_" ++ vn ++ " = __tuple._" ++ String.fromInt idx ++ ".d;"
+                                        Src.PAnything -> ""
+                                        _ -> "/* unsupported nested pattern */"
+
+                                firstBinding = extractBinding 0 first
+                                secondBinding = extractBinding 1 second
+                                restBindings = rest |> List.indexedMap (\i (Src.At _ p) -> extractBinding (i + 2) p)
+
+                                allBindings = [ firstBinding, secondBinding ] ++ restBindings
+                                    |> List.filter (\s -> s /= "")
+                                    |> String.join " "
+
+                                tupleType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                            in
+                            "({ " ++ tupleType ++ " __tuple = *(" ++ tupleType ++ "*)&(__maybe_val.data.child->data.num); " ++ allBindings ++ " " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PRecord fieldNames) ] body) ->
+                            let
+                                bindings = fieldNames
+                                    |> List.map (\(Src.At _ fld) -> "double elm_" ++ fld ++ " = __rec." ++ fld ++ ";")
+                                    |> String.join " "
+                            in
+                            "({ typeof(__maybe_val.data.child->data.num) __rec = __maybe_val.data.child->data.num; " ++ bindings ++ " " ++ genExpr body ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_val.data)"
+            in
+            "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; __maybe_val.tag == TAG_Just ? " ++ fnAppStr ++ " : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* Maybe.andThen wrong arity */ 0"
+
+
+generateMaybeMap2 : GenExpr -> List Src.Expr -> String
+generateMaybeMap2 genExpr args =
+    case args of
+        [ fnExpr, maybeA, maybeB ] ->
+            let
+                maybeAStr = genExpr maybeA
+                maybeBStr = genExpr maybeB
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __maybe_a.data; double elm_" ++ pname2 ++ " = __maybe_b.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data)"
+            in
+            "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* Maybe.map2 wrong arity */ 0"
+
+
+generateMaybeMap3 : GenExpr -> List Src.Expr -> String
+generateMaybeMap3 genExpr args =
+    case args of
+        [ fnExpr, maybeA, maybeB, maybeC ] ->
+            let
+                maybeAStr = genExpr maybeA
+                maybeBStr = genExpr maybeB
+                maybeCStr = genExpr maybeC
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar p1), Src.At _ (Src.PVar p2), Src.At _ (Src.PVar p3) ] lambdaBody) ->
+                            "({ double elm_" ++ p1 ++ " = __maybe_a.data; double elm_" ++ p2 ++ " = __maybe_b.data; double elm_" ++ p3 ++ " = __maybe_c.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data, __maybe_c.data)"
+            in
+            "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; elm_union_t __maybe_c = " ++ maybeCStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just && __maybe_c.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* Maybe.map3 wrong arity */ 0"
+
+
+generateMaybeMap4 : GenExpr -> List Src.Expr -> String
+generateMaybeMap4 genExpr args =
+    case args of
+        [ fnExpr, maybeA, maybeB, maybeC, maybeD ] ->
+            let
+                maybeAStr = genExpr maybeA
+                maybeBStr = genExpr maybeB
+                maybeCStr = genExpr maybeC
+                maybeDStr = genExpr maybeD
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar p1), Src.At _ (Src.PVar p2), Src.At _ (Src.PVar p3), Src.At _ (Src.PVar p4) ] lambdaBody) ->
+                            "({ double elm_" ++ p1 ++ " = __maybe_a.data; double elm_" ++ p2 ++ " = __maybe_b.data; double elm_" ++ p3 ++ " = __maybe_c.data; double elm_" ++ p4 ++ " = __maybe_d.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data, __maybe_c.data, __maybe_d.data)"
+            in
+            "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; elm_union_t __maybe_c = " ++ maybeCStr ++ "; elm_union_t __maybe_d = " ++ maybeDStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just && __maybe_c.tag == TAG_Just && __maybe_d.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* Maybe.map4 wrong arity */ 0"
+
+
+generateMaybeMap5 : GenExpr -> List Src.Expr -> String
+generateMaybeMap5 genExpr args =
+    case args of
+        [ fnExpr, maybeA, maybeB, maybeC, maybeD, maybeE ] ->
+            let
+                maybeAStr = genExpr maybeA
+                maybeBStr = genExpr maybeB
+                maybeCStr = genExpr maybeC
+                maybeDStr = genExpr maybeD
+                maybeEStr = genExpr maybeE
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar p1), Src.At _ (Src.PVar p2), Src.At _ (Src.PVar p3), Src.At _ (Src.PVar p4), Src.At _ (Src.PVar p5) ] lambdaBody) ->
+                            "({ double elm_" ++ p1 ++ " = __maybe_a.data; double elm_" ++ p2 ++ " = __maybe_b.data; double elm_" ++ p3 ++ " = __maybe_c.data; double elm_" ++ p4 ++ " = __maybe_d.data; double elm_" ++ p5 ++ " = __maybe_e.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_a.data, __maybe_b.data, __maybe_c.data, __maybe_d.data, __maybe_e.data)"
+            in
+            "({ elm_union_t __maybe_a = " ++ maybeAStr ++ "; elm_union_t __maybe_b = " ++ maybeBStr ++ "; elm_union_t __maybe_c = " ++ maybeCStr ++ "; elm_union_t __maybe_d = " ++ maybeDStr ++ "; elm_union_t __maybe_e = " ++ maybeEStr ++ "; (__maybe_a.tag == TAG_Just && __maybe_b.tag == TAG_Just && __maybe_c.tag == TAG_Just && __maybe_d.tag == TAG_Just && __maybe_e.tag == TAG_Just) ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* Maybe.map5 wrong arity */ 0"
+
+
 
 -- RESULT MODULE HANDLERS
 
@@ -1477,6 +1800,63 @@ generateResultFromMaybe genExpr args =
 
         _ ->
             "/* Result.fromMaybe wrong arity */ 0"
+
+
+generateResultMap : GenExpr -> List Src.Expr -> String
+generateResultMap genExpr args =
+    case args of
+        [ fnExpr, resultExpr ] ->
+            let
+                resultStr = genExpr resultExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __result_val.data; " ++ genExpr lambdaBody ++ "; })"
+                        _ ->
+                            genExpr fnExpr ++ "(__result_val.data)"
+            in
+            "({ elm_union_t __result_val = " ++ resultStr ++ "; __result_val.tag == TAG_Ok ? ((elm_union_t){TAG_Ok, " ++ fnAppStr ++ "}) : __result_val; })"
+
+        _ ->
+            "/* Result.map wrong arity */ 0"
+
+
+generateResultMapError : GenExpr -> List Src.Expr -> String
+generateResultMapError genExpr args =
+    case args of
+        [ fnExpr, resultExpr ] ->
+            let
+                resultStr = genExpr resultExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __result_val.data; " ++ genExpr lambdaBody ++ "; })"
+                        _ ->
+                            genExpr fnExpr ++ "(__result_val.data)"
+            in
+            "({ elm_union_t __result_val = " ++ resultStr ++ "; __result_val.tag == TAG_Err ? ((elm_union_t){TAG_Err, " ++ fnAppStr ++ "}) : __result_val; })"
+
+        _ ->
+            "/* Result.mapError wrong arity */ 0"
+
+
+generateResultAndThen : GenExpr -> List Src.Expr -> String
+generateResultAndThen genExpr args =
+    case args of
+        [ fnExpr, resultExpr ] ->
+            let
+                resultStr = genExpr resultExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __result_val.data; " ++ genExpr lambdaBody ++ "; })"
+                        _ ->
+                            genExpr fnExpr ++ "(__result_val.data)"
+            in
+            "({ elm_union_t __result_val = " ++ resultStr ++ "; __result_val.tag == TAG_Ok ? " ++ fnAppStr ++ " : __result_val; })"
+
+        _ ->
+            "/* Result.andThen wrong arity */ 0"
 
 
 
@@ -1837,6 +2217,106 @@ generateListSort genExpr args =
             "/* List.sort wrong arity */ 0"
 
 
+generateListFoldl : GenExpr -> List Src.Expr -> String
+generateListFoldl genExpr args =
+    case args of
+        [ fnExpr, initExpr, listExpr ] ->
+            let
+                initStr =
+                    genExpr initExpr
+
+                listStr =
+                    genExpr listExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i], __acc)"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; int __acc = " ++ initStr ++ "; for (int __i = 0; __i < __lst.length; __i++) __acc = " ++ fnAppStr ++ "; __acc; })"
+
+        _ ->
+            "/* List.foldl wrong arity */ 0"
+
+
+generateListFoldr : GenExpr -> List Src.Expr -> String
+generateListFoldr genExpr args =
+    case args of
+        [ fnExpr, initExpr, listExpr ] ->
+            let
+                initStr =
+                    genExpr initExpr
+
+                listStr =
+                    genExpr listExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i], __acc)"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; int __acc = " ++ initStr ++ "; for (int __i = __lst.length - 1; __i >= 0; __i--) __acc = " ++ fnAppStr ++ "; __acc; })"
+
+        _ ->
+            "/* List.foldr wrong arity */ 0"
+
+
+generateListAll : GenExpr -> List Src.Expr -> String
+generateListAll genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                            "({ elm_tuple2_t __elem = __lst.data[__i].t2; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i].d)"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; int __result = 1; for (int __i = 0; __i < __lst.length && __result; __i++) if (!(" ++ fnAppStr ++ ")) __result = 0; __result; })"
+
+        _ ->
+            "/* List.all wrong arity */ 0"
+
+
+generateListAny : GenExpr -> List Src.Expr -> String
+generateListAny genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                            "({ elm_tuple2_t __elem = __lst.data[__i].t2; elm_elem_t elm_" ++ pname1 ++ " = __elem._0; elm_elem_t elm_" ++ pname2 ++ " = __elem._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i].d)"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; int __result = 0; for (int __i = 0; __i < __lst.length && !__result; __i++) if (" ++ fnAppStr ++ ") __result = 1; __result; })"
+
+        _ ->
+            "/* List.any wrong arity */ 0"
+
+
 
 -- TRIG FUNCTIONS
 
@@ -1909,3 +2389,782 @@ generateAtan2 genExpr args =
 
         _ ->
             "/* atan2 wrong arity */ 0"
+
+
+
+-- MORE LIST FUNCTIONS
+
+
+generateListLength : GenExpr -> List Src.Expr -> String
+generateListLength genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr = genExpr listExpr
+            in
+            "(" ++ listStr ++ ").length"
+
+        _ ->
+            "/* List.length wrong arity */ 0"
+
+
+generateListIsEmpty : GenExpr -> List Src.Expr -> String
+generateListIsEmpty genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr = genExpr listExpr
+            in
+            "((" ++ listStr ++ ").length == 0)"
+
+        _ ->
+            "/* List.isEmpty wrong arity */ 0"
+
+
+generateListSingleton : GenExpr -> List Src.Expr -> String
+generateListSingleton genExpr args =
+    case args of
+        [ elemExpr ] ->
+            let
+                elemStr = genExpr elemExpr
+                isUnionExpr =
+                    case elemExpr of
+                        Src.At _ (Src.Var Src.CapVar _) -> True
+                        Src.At _ (Src.VarQual Src.CapVar _ _) -> True
+                        Src.At _ (Src.Call (Src.At _ (Src.Var Src.CapVar _)) _) -> True
+                        Src.At _ (Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) _) -> True
+                        Src.At _ (Src.Var Src.LowVar name) ->
+                            String.contains "Expr" name ||
+                            String.contains "expr" name ||
+                            String.contains "Pat" name ||
+                            String.contains "pat" name ||
+                            String.contains "Type" name
+                        _ -> False
+                isUnion = isUnionExpr ||
+                          String.startsWith "((elm_union_t)" elemStr ||
+                          String.contains "elm_union_t" elemStr
+                wrapElem =
+                    if isUnion then
+                        "{.u = " ++ elemStr ++ "}"
+                    else if String.startsWith "\"" elemStr then
+                        "{.str = " ++ elemStr ++ "}"
+                    else
+                        elemStr
+            in
+            "((elm_list_t){ .length = 1, .data = { " ++ wrapElem ++ " } })"
+
+        _ ->
+            "/* List.singleton wrong arity */ 0"
+
+
+generateListMap : GenExpr -> List Src.Expr -> String
+generateListMap genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i].u).data.num; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i].u).data.num; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                            "({ elm_tuple2_t __elem = __lst.data[__i].t2; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Accessor fieldName) ->
+                            "(__lst.data[__i]." ++ fieldName ++ ")"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i].d)"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i].d = " ++ fnAppStr ++ "; __result; })"
+
+        _ ->
+            "/* List.map wrong arity */ 0"
+
+
+generateListMap2 : GenExpr -> List Src.Expr -> String
+generateListMap2 genExpr args =
+    case args of
+        [ fnExpr, listAExpr, listBExpr ] ->
+            let
+                listAStr = genExpr listAExpr
+                listBStr = genExpr listBExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar pname1) ]), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ elm_union_t __elem1 = (elm_union_t)__lstA.data[__i].d; typeof(__elem1.data) elm_" ++ pname1 ++ " = __elem1.data; typeof(__lstB.data[__i].d) elm_" ++ pname2 ++ " = __lstB.data[__i].d; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar pname1) ]), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ elm_union_t __elem1 = (elm_union_t)__lstA.data[__i].d; typeof(__elem1.data) elm_" ++ pname1 ++ " = __elem1.data; typeof(__lstB.data[__i].d) elm_" ++ pname2 ++ " = __lstB.data[__i].d; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i])"
+            in
+            "({ elm_list_t __lstA = " ++ listAStr ++ ", __lstB = " ++ listBStr ++ "; elm_list_t __result; __result.length = __lstA.length < __lstB.length ? __lstA.length : __lstB.length; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+        _ ->
+            "/* List.map2 wrong arity */ 0"
+
+
+generateListMap3 : GenExpr -> List Src.Expr -> String
+generateListMap3 genExpr args =
+    case args of
+        [ fnExpr, listAExpr, listBExpr, listCExpr ] ->
+            let
+                listAStr = genExpr listAExpr
+                listBStr = genExpr listBExpr
+                listCStr = genExpr listCExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2), Src.At _ (Src.PVar pname3) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i], elm_" ++ pname3 ++ " = __lstC.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i], __lstC.data[__i])"
+            in
+            "({ elm_list_t __lstA = " ++ listAStr ++ ", __lstB = " ++ listBStr ++ ", __lstC = " ++ listCStr ++ "; elm_list_t __result; int __minLen = __lstA.length; if (__lstB.length < __minLen) __minLen = __lstB.length; if (__lstC.length < __minLen) __minLen = __lstC.length; __result.length = __minLen; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+        _ ->
+            "/* List.map3 wrong arity */ 0"
+
+
+generateListFilter : GenExpr -> List Src.Expr -> String
+generateListFilter genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ typeof(__lst.data[0]) elm_" ++ pname ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Binops [ ( Src.At _ (Src.Var _ "not"), Src.At _ "<<" ) ] (Src.At _ (Src.VarQual _ "String" "isEmpty"))) ->
+                            "(*(const char *)(long)__lst.data[__i] != '\\0')"
+
+                        Src.At _ (Src.Binops [ ( Src.At _ (Src.Var _ "not"), Src.At _ "<<" ) ] innerFn) ->
+                            "!(" ++ genExpr innerFn ++ "((const char *)(long)__lst.data[__i]))"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i])"
+            in
+            "({ typeof(" ++ listStr ++ ") __lst = " ++ listStr ++ "; typeof(__lst) __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; __result; })"
+
+        _ ->
+            "/* List.filter wrong arity */ 0"
+
+
+generateListPartition : GenExpr -> List Src.Expr -> String
+generateListPartition genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i])"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; struct { elm_list_t _0; elm_list_t _1; } __result; __result._0.length = 0; __result._1.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result._0.data[__result._0.length++] = __lst.data[__i]; else __result._1.data[__result._1.length++] = __lst.data[__i]; } __result; })"
+
+        _ ->
+            "/* List.partition wrong arity */ 0"
+
+
+generateListSortBy : GenExpr -> List Src.Expr -> String
+generateListSortBy genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr elemVar =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = " ++ elemVar ++ "; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                            let
+                                elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                bindOne idx pat =
+                                    case pat of
+                                        Src.PVar vn ->
+                                            "double elm_" ++ vn ++ " = __sort_telem._" ++ String.fromInt idx ++ ".d;"
+                                        Src.PAnything -> ""
+                                        _ -> ""
+                                bindings = [ bindOne 0 first, bindOne 1 second ]
+                                    ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                    |> List.filter (\s -> s /= "")
+                                    |> String.join " "
+                            in
+                            "({ " ++ elemType ++ " __sort_telem = *(" ++ elemType ++ "*)&(" ++ elemVar ++ "); " ++ bindings ++ " " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(" ++ elemVar ++ ")"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __sorted; __sorted.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __sorted.data[__i] = __lst.data[__i]; for (int __i = 1; __i < __sorted.length; __i++) { elm_data_t __key = __sorted.data[__i]; typeof(" ++ fnAppStr "__sorted.data[__i].d" ++ ") __key_val = " ++ fnAppStr "__key.d" ++ "; int __j = __i - 1; while (__j >= 0 && strcmp(" ++ fnAppStr "__sorted.data[__j].d" ++ ", __key_val) > 0) { __sorted.data[__j + 1] = __sorted.data[__j]; __j--; } __sorted.data[__j + 1] = __key; } __sorted; })"
+
+        _ ->
+            "/* List.sortBy wrong arity */ 0"
+
+
+generateListIndexedMap : GenExpr -> List Src.Expr -> String
+generateListIndexedMap genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i, elm_" ++ pname2 ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname2)) (Src.At _ (Src.PVar pname3)) []) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; elm_tuple2_t __elem = __lst.data[__i]; double elm_" ++ pname2 ++ " = __elem._0; double elm_" ++ pname3 ++ " = __elem._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PTuple (Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ])) (Src.At _ (Src.PVar pname3)) []) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; elm_tuple2_t __elem = __lst.data[__i]; elm_union_t __loc = __elem._0; double elm_" ++ innerName ++ " = __loc.data; double elm_" ++ pname3 ++ " = __elem._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ Src.PAnything, Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ Src.PAnything, Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__i, __lst.data[__i])"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+        _ ->
+            "/* List.indexedMap wrong arity */ 0"
+
+
+generateListConcat : GenExpr -> List Src.Expr -> String
+generateListConcat _ args =
+    case args of
+        [ _ ] ->
+            "/* List.concat not fully supported */ ((elm_list_t){ .length = 0 })"
+
+        _ ->
+            "/* List.concat wrong arity */ 0"
+
+
+generateListFilterMap : GenExpr -> List Src.Expr -> String
+generateListFilterMap genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = __lst.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = __lst.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i])"
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { elm_union_t __maybe = " ++ fnAppStr ++ "; if (__maybe.tag == TAG_Just) __result.data[__result.length++] = __maybe.data; } __result; })"
+
+        _ ->
+            "/* List.filterMap wrong arity */ 0"
+
+
+generateListConcatMap : GenExpr -> List Src.Expr -> String
+generateListConcatMap genExpr args =
+    case args of
+        [ fnExpr, listExpr ] ->
+            let
+                listStr = genExpr listExpr
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __src.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = __src.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = __src.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__src.data[__i])"
+            in
+            "({ elm_list_t __src = " ++ listStr ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __src.length; __i++) { elm_list_t __sub = " ++ fnAppStr ++ "; for (int __j = 0; __j < __sub.length; __j++) __result.data[__result.length++] = __sub.data[__j]; } __result; })"
+
+        _ ->
+            "/* List.concatMap wrong arity */ 0"
+
+
+generateListUnzip : GenExpr -> List Src.Expr -> String
+generateListUnzip _ args =
+    case args of
+        [ _ ] ->
+            "/* List.unzip not fully supported */ 0"
+
+        _ ->
+            "/* List.unzip wrong arity */ 0"
+
+
+
+-- PIPE ARGUMENT HANDLERS
+-- These handle the case where a builtin function is used with |> pipe operator
+
+
+generateListMapPipe : GenExpr -> List Src.Expr -> String -> String
+generateListMapPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Accessor fieldName) ->
+                            "(__lst.data[__i]." ++ fieldName ++ ")"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i].d)"
+            in
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i].d = " ++ fnAppStr ++ "; __result; })"
+
+        _ ->
+            "/* List.map partial wrong arity */ 0"
+
+
+generateListFilterPipe : GenExpr -> List Src.Expr -> String -> String
+generateListFilterPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ typeof(__lst.data[0]) elm_" ++ pname ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i])"
+            in
+            "({ typeof(" ++ pipeArg ++ ") __lst = " ++ pipeArg ++ "; typeof(__lst) __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; } __result; })"
+
+        _ ->
+            "/* List.filter partial wrong arity */ 0"
+
+
+generateListTakePipe : GenExpr -> List Src.Expr -> String -> String
+generateListTakePipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ nExpr ] ->
+            let
+                nStr = genExpr nExpr
+            in
+            "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __n < __lst.length ? __n : __lst.length; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__i]; __result; })"
+
+        _ ->
+            "/* List.take partial wrong arity */ 0"
+
+
+generateListIndexedMapPipe : GenExpr -> List Src.Expr -> String -> String
+generateListIndexedMapPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ pname2 ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__i, __lst.data[__i])"
+            in
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+        _ ->
+            "/* List.indexedMap partial wrong arity */ 0"
+
+
+generateListFilterMapPipe : GenExpr -> List Src.Expr -> String -> String
+generateListFilterMapPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Var _ "identity") ->
+                            "__lst.data[__i]"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i])"
+            in
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { elm_union_t __maybe = " ++ fnAppStr ++ "; if (__maybe.tag == TAG_Just) __result.data[__result.length++] = __maybe.data; } __result; })"
+
+        _ ->
+            "/* List.filterMap partial wrong arity */ 0"
+
+
+generateListConcatMapPipe : GenExpr -> List Src.Expr -> String -> String
+generateListConcatMapPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __src.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__src.data[__i])"
+            in
+            "({ elm_list_t __src = " ++ pipeArg ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __src.length; __i++) { elm_list_t __sub = " ++ fnAppStr ++ "; for (int __j = 0; __j < __sub.length; __j++) __result.data[__result.length++] = __sub.data[__j]; } __result; })"
+
+        _ ->
+            "/* List.concatMap partial wrong arity */ 0"
+
+
+generateListSortByPipe : GenExpr -> List Src.Expr -> String -> String
+generateListSortByPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr elemVar =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = " ++ elemVar ++ "; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                            let
+                                elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                bindOne idx pat =
+                                    case pat of
+                                        Src.PVar vn ->
+                                            "double elm_" ++ vn ++ " = __sort_telem._" ++ String.fromInt idx ++ ".d;"
+                                        Src.PAnything -> ""
+                                        _ -> ""
+                                bindings = [ bindOne 0 first, bindOne 1 second ]
+                                    ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                    |> List.filter (\s -> s /= "")
+                                    |> String.join " "
+                            in
+                            "({ " ++ elemType ++ " __sort_telem = *(" ++ elemType ++ "*)&(" ++ elemVar ++ "); " ++ bindings ++ " " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(" ++ elemVar ++ ")"
+            in
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __sorted; __sorted.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __sorted.data[__i] = __lst.data[__i]; for (int __i = 1; __i < __sorted.length; __i++) { elm_data_t __key = __sorted.data[__i]; typeof(" ++ fnAppStr "__sorted.data[__i].d" ++ ") __key_val = " ++ fnAppStr "__key.d" ++ "; int __j = __i - 1; while (__j >= 0 && strcmp(" ++ fnAppStr "__sorted.data[__j].d" ++ ", __key_val) > 0) { __sorted.data[__j + 1] = __sorted.data[__j]; __j--; } __sorted.data[__j + 1] = __key; } __sorted; })"
+
+        _ ->
+            "/* List.sortBy partial wrong arity */ 0"
+
+
+generateListPartitionPipe : GenExpr -> List Src.Expr -> String -> String
+generateListPartitionPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = (elm_union_t)__lst.data[__i]; typeof(__elem.data) elm_" ++ innerName ++ " = __elem.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = (elm_union_t)__lst.data[__i]; typeof(__elem.data) elm_" ++ innerName ++ " = __elem.data; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                            let
+                                elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                bindOne idx pat =
+                                    case pat of
+                                        Src.PVar vn ->
+                                            "typeof(__part_telem._" ++ String.fromInt idx ++ ".d) elm_" ++ vn ++ " = __part_telem._" ++ String.fromInt idx ++ ".d;"
+                                        Src.PAnything -> ""
+                                        _ -> ""
+                                bindings = [ bindOne 0 first, bindOne 1 second ]
+                                    ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                    |> List.filter (\s -> s /= "")
+                                    |> String.join " "
+                            in
+                            "({ " ++ elemType ++ " __part_telem = *(" ++ elemType ++ "*)&(__lst.data[__i]); " ++ bindings ++ " " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__lst.data[__i])"
+            in
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; struct { elm_list_t _0; elm_list_t _1; } __result; __result._0.length = 0; __result._1.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result._0.data[__result._0.length++] = __lst.data[__i]; else __result._1.data[__result._1.length++] = __lst.data[__i]; } __result; })"
+
+        _ ->
+            "/* List.partition partial wrong arity */ 0"
+
+
+generateMaybeMapPipe : GenExpr -> List Src.Expr -> String -> String
+generateMaybeMapPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Accessor fieldName) ->
+                            "((struct { const char *" ++ fieldName ++ "; } *)__maybe_val.data.ptr)->" ++ fieldName
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar varName) ] body) ->
+                            "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
+                            "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
+                            "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Call (Src.At _ (Src.Op opName)) [ Src.At _ (Src.Int n) ]) ->
+                            if opName == "-" then
+                                "((" ++ String.fromInt n ++ ") - (__maybe_val.data.num))"
+                            else
+                                let
+                                    cOp = case opName of
+                                        "+" -> "+"
+                                        "*" -> "*"
+                                        "/" -> "/"
+                                        _ -> opName
+                                in
+                                "((__maybe_val.data.num) " ++ cOp ++ " (" ++ String.fromInt n ++ "))"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_val.data.num)"
+
+                isStringResult =
+                    case fnExpr of
+                        Src.At _ (Src.Accessor _) -> True
+                        _ -> False
+            in
+            if isStringResult then
+                "({ elm_union_t __maybe_val = " ++ pipeArg ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { elm_union_t __inner = {0}; __inner.data.str = " ++ fnAppStr ++ "; __result = elm_Just(__inner); } else { __result = elm_Nothing(); } __result; })"
+            else
+                "({ elm_union_t __maybe_val = " ++ pipeArg ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { elm_union_t __inner = {0}; __inner.data.num = " ++ fnAppStr ++ "; __result = elm_Just(__inner); } else { __result = elm_Nothing(); } __result; })"
+
+        _ ->
+            "/* Maybe.map partial wrong arity */ 0"
+
+
+generateMaybeAndThenPipe : GenExpr -> List Src.Expr -> String -> String
+generateMaybeAndThenPipe genExpr partialArgs pipeArg =
+    case partialArgs of
+        [ fnExpr ] ->
+            let
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar varName) ] body) ->
+                            "({ double elm_" ++ varName ++ " = __maybe_val.data.child->data.num; " ++ genExpr body ++ "; })"
+
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] body) ->
+                            let
+                                extractBinding idx pat =
+                                    case pat of
+                                        Src.PVar vn -> "double elm_" ++ vn ++ " = __tuple._" ++ String.fromInt idx ++ ".d;"
+                                        Src.PAnything -> ""
+                                        _ -> "/* unsupported nested pattern */"
+                                firstBinding = extractBinding 0 first
+                                secondBinding = extractBinding 1 second
+                                restBindings = rest |> List.indexedMap (\i (Src.At _ p) -> extractBinding (i + 2) p)
+                                allBindings = [ firstBinding, secondBinding ] ++ restBindings
+                                    |> List.filter (\s -> s /= "")
+                                    |> String.join " "
+                                tupleType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                            in
+                            "({ " ++ tupleType ++ " __tuple = *(" ++ tupleType ++ "*)&(__maybe_val.data.child->data.num); " ++ allBindings ++ " " ++ genExpr body ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__maybe_val.data.child->data.num)"
+            in
+            "({ elm_union_t __maybe_val = " ++ pipeArg ++ "; __maybe_val.tag == TAG_Just ? " ++ fnAppStr ++ " : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* Maybe.andThen partial wrong arity */ 0"
+
+
+
+-- HELPER FUNCTIONS FOR UNION CONSTRUCTION
+
+
+{-| Check if an expression generates a union value
+-}
+isUnionValue : String -> Bool
+isUnionValue exprStr =
+    String.startsWith "((elm_union_t)" exprStr
+        || String.startsWith "elm_alloc_union" exprStr
+        || String.contains "elm_union_t" exprStr
+
+
+{-| Check if an expression generates a string value
+-}
+isStringValue : String -> Bool
+isStringValue exprStr =
+    String.startsWith "\"" exprStr
+        || String.startsWith "elm_str_" exprStr
+        || String.startsWith "elm_from_int" exprStr
+        || String.startsWith "elm_from_float" exprStr
+        || String.contains "elm_str_append" exprStr
+
+
+{-| Check if an expression generates a record/struct value
+-}
+isRecordValue : String -> Bool
+isRecordValue exprStr =
+    String.startsWith "((struct " exprStr
+        || String.startsWith "{." exprStr
+        || String.startsWith "elm_" exprStr && String.contains "struct" exprStr
+
+
+{-| Wrap a value for use in elm_union_t constructor
+-}
+wrapUnionData : String -> String
+wrapUnionData valueStr =
+    if isUnionValue valueStr then
+        "{.child = elm_alloc_union(" ++ valueStr ++ ")}"
+    else if isStringValue valueStr then
+        "{.str = " ++ valueStr ++ "}"
+    else if isRecordValue valueStr then
+        "{.child = (elm_union_t*)malloc(sizeof(elm_union_t))}"
+    else
+        "{.num = " ++ valueStr ++ "}"
+
+
+{-| Generate a union constructor expression
+-}
+makeUnionCtor : String -> String -> String
+makeUnionCtor tag dataValue =
+    if dataValue == "0" || dataValue == "" then
+        "((elm_union_t){" ++ tag ++ ", {.num = 0}})"
+    else
+        "((elm_union_t){" ++ tag ++ ", " ++ wrapUnionData dataValue ++ "})"
+
+
+{-| Generate Just constructor call
+-}
+generateJustCtor : GenExpr -> List Src.Expr -> String
+generateJustCtor genExpr args =
+    case args of
+        [ value ] ->
+            let
+                valueStr = genExpr value
+                wrappedValue =
+                    if isUnionValue valueStr then
+                        valueStr
+                    else if isStringValue valueStr then
+                        "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                    else if isRecordValue valueStr then
+                        let
+                            startIdx = String.indexes "((struct {" valueStr |> List.head |> Maybe.withDefault 0
+                            typeStart = startIdx + 2
+                            typeEndMarker = "})"
+                            afterStart = String.dropLeft typeStart valueStr
+                            typeEndIdx = String.indexes typeEndMarker afterStart |> List.head |> Maybe.withDefault 0
+                            structType = String.left (typeEndIdx + 1) afterStart
+                        in
+                        "({ void *__ptr = malloc(sizeof(" ++ structType ++ ")); memcpy(__ptr, &" ++ valueStr ++ ", sizeof(" ++ structType ++ ")); ((elm_union_t){TAG_Just, {.ptr = __ptr}, 0}); })"
+                    else
+                        "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
+            in
+            if isRecordValue valueStr then
+                wrappedValue
+            else
+                "elm_Just(" ++ wrappedValue ++ ")"
+
+        _ ->
+            "/* Just wrong arity */ 0"
+
+
+{-| Generate Ok constructor call
+-}
+generateOkCtor : GenExpr -> List Src.Expr -> String
+generateOkCtor genExpr args =
+    case args of
+        [ value ] ->
+            let
+                valueStr = genExpr value
+                wrappedValue =
+                    if isUnionValue valueStr then
+                        valueStr
+                    else if isStringValue valueStr then
+                        "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                    else
+                        "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
+            in
+            "elm_Ok(" ++ wrappedValue ++ ")"
+
+        _ ->
+            "/* Ok wrong arity */ 0"
+
+
+{-| Generate Err constructor call
+-}
+generateErrCtor : GenExpr -> List Src.Expr -> String
+generateErrCtor genExpr args =
+    case args of
+        [ value ] ->
+            let
+                valueStr = genExpr value
+                wrappedValue =
+                    if isUnionValue valueStr then
+                        valueStr
+                    else if isStringValue valueStr then
+                        "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                    else
+                        "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
+            in
+            "elm_Err(" ++ wrappedValue ++ ")"
+
+        _ ->
+            "/* Err wrong arity */ 0"

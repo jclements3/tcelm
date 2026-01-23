@@ -6,6 +6,7 @@ module Codegen.Shared exposing
     , escapeC
     , extractCtorName
     , generateCharPredCall
+    , isSimpleLiteral
     , mainTypeIsString
     , mangle
     , mangleLocal
@@ -272,3 +273,15 @@ sanitizeForCIdent s =
                     "_"
             )
         |> String.concat
+
+
+{-| Check if an expression is a simple literal (can be used as static initializer)
+-}
+isSimpleLiteral : Src.Expr -> Bool
+isSimpleLiteral (Src.At _ e) =
+    case e of
+        Src.Str _ -> True
+        Src.Int _ -> True
+        Src.Float _ -> True
+        Src.Chr _ -> True
+        _ -> False

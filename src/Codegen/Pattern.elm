@@ -14,7 +14,7 @@ module take a `genExpr` callback parameter for generating sub-expressions.
 -}
 
 import AST.Source as Src
-import Codegen.Shared as Shared exposing (ExprCtx)
+import Codegen.Shared as Shared exposing (ExprCtx, escapeC)
 
 
 {-| Type alias for the expression generator callback.
@@ -41,6 +41,12 @@ generateCaseExpr genExpr scrutinee branches =
         IntLiteralCase ->
             Just (generateIntLiteralCase genExpr scrutinee branches)
 
+        StringLiteralCase ->
+            Just (generateStringLiteralCase genExpr scrutinee branches)
+
+        CharLiteralCase ->
+            Just (generateCharLiteralCase genExpr scrutinee branches)
+
         _ ->
             -- Complex patterns handled by fallback in Cli.elm
             Nothing
@@ -52,6 +58,7 @@ type PatternType
     = BoolCase -- True/False patterns
     | IntLiteralCase -- Integer literal patterns
     | StringLiteralCase -- String literal patterns
+    | CharLiteralCase -- Character literal patterns
     | CtorCase -- Custom type constructor patterns
     | ListCase -- List patterns (empty, cons)
     | TupleCase -- Tuple patterns
@@ -71,6 +78,12 @@ detectPatternType branches =
 
     else if List.all isIntLiteralPattern patterns then
         IntLiteralCase
+
+    else if List.all isStringLiteralPattern patterns then
+        StringLiteralCase
+
+    else if List.all isCharLiteralPattern patterns then
+        CharLiteralCase
 
     else
         MixedCase
@@ -99,6 +112,38 @@ isIntLiteralPattern : Src.Pattern -> Bool
 isIntLiteralPattern (Src.At _ pat) =
     case pat of
         Src.PInt _ ->
+            True
+
+        Src.PAnything ->
+            True
+
+        Src.PVar _ ->
+            True
+
+        _ ->
+            False
+
+
+isStringLiteralPattern : Src.Pattern -> Bool
+isStringLiteralPattern (Src.At _ pat) =
+    case pat of
+        Src.PStr _ ->
+            True
+
+        Src.PAnything ->
+            True
+
+        Src.PVar _ ->
+            True
+
+        _ ->
+            False
+
+
+isCharLiteralPattern : Src.Pattern -> Bool
+isCharLiteralPattern (Src.At _ pat) =
+    case pat of
+        Src.PChr _ ->
             True
 
         Src.PAnything ->
@@ -249,6 +294,110 @@ generateIntLiteralCase genExpr scrutinee branches =
                             let
                                 binding =
                                     "double elm_" ++ varName ++ " = " ++ scrutineeStr ++ ";"
+
+                                resultStr =
+                                    applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
+                            in
+                            "({ " ++ binding ++ " " ++ resultStr ++ "; })"
+
+                        Src.PAnything ->
+                            applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
+
+                        _ ->
+                            generateBranches rest
+    in
+    generateBranches branches
+
+
+
+-- STRING LITERAL CASE GENERATION
+
+
+generateStringLiteralCase : GenExpr -> Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+generateStringLiteralCase genExpr scrutinee branches =
+    let
+        scrutineeStr =
+            genExpr scrutinee
+
+        generateBranches : List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+        generateBranches bs =
+            case bs of
+                [] ->
+                    "\"\" /* no match */"
+
+                ( Src.At _ pat, maybeGuard, result ) :: rest ->
+                    case pat of
+                        Src.PStr s ->
+                            let
+                                resultStr =
+                                    applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
+                            in
+                            "(strcmp("
+                                ++ scrutineeStr
+                                ++ ", \""
+                                ++ escapeC s
+                                ++ "\") == 0 ? "
+                                ++ resultStr
+                                ++ " : "
+                                ++ generateBranches rest
+                                ++ ")"
+
+                        Src.PVar varName ->
+                            let
+                                binding =
+                                    "const char *elm_" ++ varName ++ " = " ++ scrutineeStr ++ ";"
+
+                                resultStr =
+                                    applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
+                            in
+                            "({ " ++ binding ++ " " ++ resultStr ++ "; })"
+
+                        Src.PAnything ->
+                            applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
+
+                        _ ->
+                            generateBranches rest
+    in
+    generateBranches branches
+
+
+
+-- CHAR LITERAL CASE GENERATION
+
+
+generateCharLiteralCase : GenExpr -> Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+generateCharLiteralCase genExpr scrutinee branches =
+    let
+        scrutineeStr =
+            genExpr scrutinee
+
+        generateBranches : List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+        generateBranches bs =
+            case bs of
+                [] ->
+                    "'\\0' /* no match */"
+
+                ( Src.At _ pat, maybeGuard, result ) :: rest ->
+                    case pat of
+                        Src.PChr c ->
+                            let
+                                resultStr =
+                                    applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
+                            in
+                            "("
+                                ++ scrutineeStr
+                                ++ " == '"
+                                ++ escapeC c
+                                ++ "' ? "
+                                ++ resultStr
+                                ++ " : "
+                                ++ generateBranches rest
+                                ++ ")"
+
+                        Src.PVar varName ->
+                            let
+                                binding =
+                                    "char elm_" ++ varName ++ " = " ++ scrutineeStr ++ ";"
 
                                 resultStr =
                                     applyGuard genExpr maybeGuard (genExpr result) (generateBranches rest)
