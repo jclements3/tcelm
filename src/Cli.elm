@@ -1425,11 +1425,13 @@ generateTccCode ast =
                     (\( name, body, _ ) ->
                         let
                             cExpr = generateStandaloneExpr body
+                            -- Check for list type first (before record, since list of records contains struct)
+                            isList = String.contains "elm_list_t" cExpr || String.startsWith "((elm_list_t)" cExpr
                             -- Check for union type (Maybe, Result, etc.) - contains TAG_ usage or elm_union_t
-                            isUnion = String.contains "TAG_" cExpr || String.contains "elm_union_t" cExpr || String.contains "elm_Just" cExpr || String.contains "elm_Nothing" cExpr
+                            isUnion = not isList && (String.contains "TAG_" cExpr || String.contains "elm_union_t" cExpr || String.contains "elm_Just" cExpr || String.contains "elm_Nothing" cExpr)
                             -- String detection - only if it's a string expression, not just contains a string literal argument
-                            isString = not isUnion && (String.contains "elm_str_" cExpr || (String.startsWith "\"" cExpr && String.endsWith "\"" cExpr))
-                            isRecord = String.contains "((struct {" cExpr
+                            isString = not isUnion && not isList && (String.contains "elm_str_" cExpr || (String.startsWith "\"" cExpr && String.endsWith "\"" cExpr))
+                            isRecord = not isList && String.contains "((struct {" cExpr
                             -- Extract record type from the expression
                             recordType =
                                 if isRecord then
@@ -1445,14 +1447,26 @@ generateTccCode ast =
                                 else
                                     ""
                             cType =
-                                if isUnion then "elm_union_t"
+                                if isList then "elm_list_t"
+                                else if isUnion then "elm_union_t"
                                 else if isString then "const char *"
                                 else if isRecord then recordType
                                 else "double"
                         in
+                        -- For lists, generate static constants
+                        if isList then
+                            let
+                                -- Extract initializer from ((elm_list_t){...})
+                                initStartMarker = "((elm_list_t){"
+                                initStartIdx = String.indexes initStartMarker cExpr |> List.head |> Maybe.withDefault 0
+                                afterInitStart = String.dropLeft (initStartIdx + String.length initStartMarker) cExpr
+                                initEndIdx = String.length afterInitStart - 2
+                                initializer = String.left initEndIdx afterInitStart
+                            in
+                            "static elm_list_t elm_" ++ name ++ " = {" ++ initializer ++ "};"
                         -- For records, generate static constants instead of functions
                         -- This allows `model = init` to work correctly
-                        if isRecord then
+                        else if isRecord then
                             let
                                 -- Extract initializer from ((struct {...}){...})
                                 initStartMarker = "){"
@@ -1808,28 +1822,6 @@ generateTccCode ast =
             , "    return result;"
             , "}"
             , ""
-            , "/* Built-in List functions */"
-            , "static elm_union_t elm_List_head(elm_list_t lst) {"
-            , "    if (lst.length > 0) {"
-            , "        elm_union_t inner = { .tag = 0, .data = lst.data[0], .data2 = 0 };"
-            , "        return elm_Just(inner);"
-            , "    }"
-            , "    return elm_Nothing();"
-            , "}"
-            , "static elm_union_t elm_List_tail(elm_list_t lst) {"
-            , "    if (lst.length > 1) {"
-            , "        elm_list_t tail = { .length = lst.length - 1 };"
-            , "        for (int i = 1; i < lst.length; i++) tail.data[i-1] = lst.data[i];"
-            , "        elm_union_t inner = { .tag = 0, .data = {.lst = tail}, .data2 = 0 };"
-            , "        return elm_Just(inner);"
-            , "    } else if (lst.length == 1) {"
-            , "        elm_list_t empty = { .length = 0 };"
-            , "        elm_union_t inner = { .tag = 0, .data = {.lst = empty}, .data2 = 0 };"
-            , "        return elm_Just(inner);"
-            , "    }"
-            , "    return elm_Nothing();"
-            , "}"
-            , ""
             , "/* Built-in Order type tags */"
             , "#define TAG_LT 0"
             , "#define TAG_EQ 1"
@@ -1880,6 +1872,30 @@ generateTccCode ast =
             , "#define ELM_LIST_MAX 64"
             , "typedef union { double d; elm_tuple2_t t2; elm_tuple3_t t3; void *ptr; struct elm_list_s *lst; elm_union_t u; const char *str; } elm_data_t;"
             , "typedef struct elm_list_s { int length; elm_data_t data[ELM_LIST_MAX]; } elm_list_t;"
+            , ""
+            , "/* Built-in List functions */"
+            , "static elm_union_t elm_List_head(elm_list_t lst) {"
+            , "    if (lst.length > 0) {"
+            , "        elm_union_t inner = { .tag = 0, .data = lst.data[0], .data2 = 0 };"
+            , "        return elm_Just(inner);"
+            , "    }"
+            , "    return elm_Nothing();"
+            , "}"
+            , "static elm_union_t elm_List_tail(elm_list_t lst) {"
+            , "    if (lst.length > 1) {"
+            , "        elm_list_t *tail = (elm_list_t*)malloc(sizeof(elm_list_t));"
+            , "        tail->length = lst.length - 1;"
+            , "        for (int i = 1; i < lst.length; i++) tail->data[i-1] = lst.data[i];"
+            , "        elm_union_t inner = { .tag = 0, .data = {.ptr = tail}, .data2 = 0 };"
+            , "        return elm_Just(inner);"
+            , "    } else if (lst.length == 1) {"
+            , "        elm_list_t *empty = (elm_list_t*)malloc(sizeof(elm_list_t));"
+            , "        empty->length = 0;"
+            , "        elm_union_t inner = { .tag = 0, .data = {.ptr = empty}, .data2 = 0 };"
+            , "        return elm_Just(inner);"
+            , "    }"
+            , "    return elm_Nothing();"
+            , "}"
             , ""
             , "/* String.replace - replace all occurrences */"
             , "static char __elm_replace_buf[4096];"
