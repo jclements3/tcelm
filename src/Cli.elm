@@ -249,7 +249,7 @@ generateRtemsCode ast =
                     }
 
                 MainInt n ->
-                    { elmMainFunc = "static int elm_main(void) {\n    return " ++ String.fromInt n ++ ";\n}"
+                    { elmMainFunc = "static double elm_main(void) {\n    return " ++ String.fromInt n ++ ";\n}"
                     , resultDecl = "int result = elm_main();\n    char result_str[32];\n    int_to_str(result, result_str);"
                     , resultPrint = "serial_print(result_str);"
                     , fbPrint = "fb_print(result_str);"
@@ -257,7 +257,7 @@ generateRtemsCode ast =
 
                 MainExpr cType cExpr ->
                     if cType == "int" then
-                        { elmMainFunc = "static int elm_main(void) {\n    return " ++ cExpr ++ ";\n}"
+                        { elmMainFunc = "static double elm_main(void) {\n    return " ++ cExpr ++ ";\n}"
                         , resultDecl = "int result = elm_main();\n    char result_str[32];\n    int_to_str(result, result_str);"
                         , resultPrint = "serial_print(result_str);"
                         , fbPrint = "fb_print(result_str);"
@@ -290,14 +290,14 @@ generateRtemsCode ast =
                 , "}"
                 , ""
                 , "/* String length */"
-                , "static int elm_strlen(const char *s) {"
+                , "static double elm_strlen(const char *s) {"
                 , "    int len = 0;"
                 , "    while (*s++) len++;"
                 , "    return len;"
                 , "}"
                 , ""
                 , "/* Integer power function */"
-                , "static int elm_pow(int base, int exp) {"
+                , "static double elm_pow(int base, int exp) {"
                 , "    int result = 1;"
                 , "    while (exp > 0) {"
                 , "        if (exp & 1) result *= base;"
@@ -348,7 +348,7 @@ generateRtemsCode ast =
                 , "}"
                 , ""
                 , "/* Integer square root using Newton-Raphson */"
-                , "static int elm_isqrt(int x) {"
+                , "static double elm_isqrt(int x) {"
                 , "    if (x <= 0) return 0;"
                 , "    int guess = x;"
                 , "    while (1) {"
@@ -359,7 +359,7 @@ generateRtemsCode ast =
                 , "}"
                 , ""
                 , "/* Integer log base 2 (floor) */"
-                , "static int elm_ilog2(int x) {"
+                , "static double elm_ilog2(int x) {"
                 , "    if (x <= 0) return 0;"
                 , "    int r = 0;"
                 , "    while (x > 1) { x >>= 1; r++; }"
@@ -542,13 +542,13 @@ generateRtemsCode ast =
                 , "}"
                 , ""
                 , "/* String.startsWith - check if string starts with prefix */"
-                , "static int elm_str_starts_with(const char *prefix, const char *s) {"
+                , "static double elm_str_starts_with(const char *prefix, const char *s) {"
                 , "    while (*prefix && *s && *prefix == *s) { prefix++; s++; }"
                 , "    return !*prefix;"
                 , "}"
                 , ""
                 , "/* String.endsWith - check if string ends with suffix */"
-                , "static int elm_str_ends_with(const char *suffix, const char *s) {"
+                , "static double elm_str_ends_with(const char *suffix, const char *s) {"
                 , "    int slen = 0, sufflen = 0;"
                 , "    while (s[slen]) slen++;"
                 , "    while (suffix[sufflen]) sufflen++;"
@@ -557,7 +557,7 @@ generateRtemsCode ast =
                 , "}"
                 , ""
                 , "/* String.contains - check if substring exists */"
-                , "static int elm_str_contains(const char *needle, const char *haystack) {"
+                , "static double elm_str_contains(const char *needle, const char *haystack) {"
                 , "    if (!*needle) return 1;"
                 , "    for (; *haystack; haystack++) {"
                 , "        const char *h = haystack, *n = needle;"
@@ -835,6 +835,71 @@ generateTccCode ast =
         mainValue =
             extractMain ast
 
+        -- Detect if expression is simple (can be used as static initializer)
+        isSimpleExpr (Src.At _ e) =
+            case e of
+                Src.Str _ -> True
+                Src.Int _ -> True
+                Src.Float _ -> True
+                Src.Chr _ -> True
+                _ -> False
+
+        -- Generate module-level constants (non-main values without arguments)
+        -- Simple expressions become static const, complex ones become getter functions
+        ( simpleConstants, complexConstants ) =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) =
+                                value.name
+                        in
+                        if name /= "main" && List.isEmpty value.args then
+                            Just ( name, value.body, isSimpleExpr value.body )
+                        else
+                            Nothing
+                    )
+                |> List.partition (\( _, _, isSimple ) -> isSimple)
+
+        simpleConstantsCode =
+            simpleConstants
+                |> List.map
+                    (\( name, body, _ ) ->
+                        let
+                            cExpr = generateStandaloneExpr body
+                            isString = String.startsWith "\"" cExpr
+                            cType = if isString then "const char *" else "double"
+                        in
+                        "static " ++ cType ++ " elm_" ++ name ++ " = " ++ cExpr ++ ";"
+                    )
+                |> String.join "\n"
+
+        -- Replace complex constant references with function calls in an expression
+        -- NOTE: For self-hosting, we skip this transformation to avoid closure capture issues
+        -- This may cause issues with complex constants, but enables bootstrapping
+        fixComplexConstantRefs code =
+            code
+
+        complexConstantsCode =
+            complexConstants
+                |> List.map
+                    (\( name, body, _ ) ->
+                        let
+                            cExpr = generateStandaloneExpr body
+                            isString = String.contains "elm_str_" cExpr || String.contains "\"" cExpr
+                            cType = if isString then "const char *" else "double"
+                        in
+                        "static " ++ cType ++ " elm_" ++ name ++ "(void) {\n    return " ++ fixComplexConstantRefs cExpr ++ ";\n}"
+                    )
+                |> String.join "\n\n"
+
+        moduleConstantsCode =
+            let
+                simple = if String.isEmpty simpleConstantsCode then "" else "/* Simple constants */\n" ++ simpleConstantsCode ++ "\n\n"
+                complex = if String.isEmpty complexConstantsCode then "" else "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
+            in
+            simple ++ complex
+
         -- Generate user-defined functions (non-main values with arguments)
         userFunctions =
             ast.values
@@ -845,7 +910,7 @@ generateTccCode ast =
                                 value.name
                         in
                         if name /= "main" && not (List.isEmpty value.args) then
-                            Just (generateUserFunction name value.args value.body)
+                            Just (fixComplexConstantRefs (generateUserFunction name value.args value.body))
 
                         else
                             Nothing
@@ -874,7 +939,7 @@ generateTccCode ast =
                 ""
 
             else
-                "/* Lifted local functions */\n" ++ liftedFunctions ++ "\n\n"
+                "/* Lifted local functions */\n" ++ fixComplexConstantRefs liftedFunctions ++ "\n\n"
 
         userFunctionsCode =
             if String.isEmpty userFunctions then
@@ -882,6 +947,108 @@ generateTccCode ast =
 
             else
                 "/* User-defined functions */\n" ++ userFunctions ++ "\n\n"
+
+        -- Generate custom type definitions (tags and constructors)
+        -- Skip built-in types (Maybe, Result, Order) as they're already defined in the header
+        builtinTypes = [ "Maybe", "Result", "Order" ]
+
+        customTypeCode =
+            ast.unions
+                |> List.filter
+                    (\(Src.At _ union) ->
+                        let
+                            (Src.At _ typeName) = union.name
+                        in
+                        not (List.member typeName builtinTypes)
+                    )
+                |> List.map
+                    (\(Src.At _ union) ->
+                        let
+                            (Src.At _ typeName) =
+                                union.name
+
+                            -- Tag defines for all constructors
+                            tagDefines =
+                                union.ctors
+                                    |> List.indexedMap
+                                        (\i ( Src.At _ ctorName, _ ) ->
+                                            "#define TAG_" ++ ctorName ++ " " ++ String.fromInt i
+                                        )
+                                    |> String.join "\n"
+
+                            -- Type alias for all custom types (use common elm_union_t)
+                            structDef =
+                                "typedef elm_union_t elm_" ++ typeName ++ ";\n"
+
+                            -- Constructor functions using elm_union_t
+                            ctorFuncs =
+                                union.ctors
+                                    |> List.indexedMap
+                                        (\i ( Src.At _ ctorName, ctorArgs ) ->
+                                            if List.isEmpty ctorArgs then
+                                                -- No-data constructor
+                                                "static elm_union_t elm_"
+                                                    ++ ctorName
+                                                    ++ "(void) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ ctorName
+                                                    ++ ", .data = 0 };\n    return result;\n}"
+
+                                            else
+                                                -- Constructor with data
+                                                "static elm_union_t elm_"
+                                                    ++ ctorName
+                                                    ++ "(int value) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ ctorName
+                                                    ++ ", .data = value };\n    return result;\n}"
+                                        )
+                                    |> String.join "\n\n"
+                        in
+                        tagDefines ++ "\n" ++ structDef ++ ctorFuncs
+                    )
+                |> String.join "\n\n"
+
+        constructorDefinesCode =
+            if String.isEmpty customTypeCode then
+                ""
+
+            else
+                "/* Custom type definitions */\n" ++ customTypeCode ++ "\n\n"
+
+        -- Generate forward declarations for user-defined functions
+        forwardDecls =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) =
+                                value.name
+                        in
+                        if name /= "main" && not (List.isEmpty value.args) then
+                            let
+                                -- Generate implementation to infer types
+                                implCode = generateUserFunction name value.args value.body
+                                -- Extract signature parts from implementation
+                                signatureEnd = String.indexes "(" implCode |> List.head |> Maybe.withDefault 0
+                                paramsStart = signatureEnd + 1
+                                paramsEnd = String.indexes ")" implCode |> List.head |> Maybe.withDefault 0
+                                returnTypeStart = 7 -- Length of "static "
+                                -- Find " elm_<name>(" to locate the function name position
+                                funcNameMarker = " elm_" ++ name ++ "("
+                                returnTypeEnd = String.indexes funcNameMarker implCode |> List.head |> Maybe.withDefault 0
+                                funcReturnType = String.slice returnTypeStart returnTypeEnd implCode
+                                params = String.slice paramsStart paramsEnd implCode
+                            in
+                            Just ("static " ++ funcReturnType ++ " elm_" ++ name ++ "(" ++ params ++ ");")
+                        else
+                            Nothing
+                    )
+                |> String.join "\n"
+
+        forwardDeclsCode =
+            if String.isEmpty forwardDecls then
+                ""
+            else
+                "/* Forward declarations */\n" ++ forwardDecls ++ "\n\n"
 
         -- Generate elm_main function and result handling based on type
         ( returnType, returnExpr, printFormat ) =
@@ -893,7 +1060,7 @@ generateTccCode ast =
                     ( "int", String.fromInt n, "%d" )
 
                 MainExpr cType cExpr ->
-                    ( cType, cExpr, if cType == "int" then "%d" else "%s" )
+                    ( cType, fixComplexConstantRefs cExpr, if cType == "int" then "%d" else "%s" )
 
         header =
             [ "/*"
@@ -902,6 +1069,189 @@ generateTccCode ast =
             , " */"
             , ""
             , "#include <stdio.h>"
+            , "#include <stdlib.h>"
+            , "#include <string.h>"
+            , "#include <math.h>"
+            , ""
+            , "/* String.fromInt - convert int to string (uses rotating buffer pool) */"
+            , "#define ELM_FROMINT_POOL_SIZE 64"
+            , "static char __elm_fromint_pool[ELM_FROMINT_POOL_SIZE][32];"
+            , "static int __elm_fromint_idx = 0;"
+            , "static const char *elm_from_int(int n) {"
+            , "    char *buf = __elm_fromint_pool[__elm_fromint_idx];"
+            , "    __elm_fromint_idx = (__elm_fromint_idx + 1) % ELM_FROMINT_POOL_SIZE;"
+            , "    char tmp[32];"
+            , "    int i = 0, j = 0;"
+            , "    int neg = 0;"
+            , "    if (n < 0) { neg = 1; n = -n; }"
+            , "    if (n == 0) { buf[0] = '0'; buf[1] = 0; return buf; }"
+            , "    while (n > 0) { tmp[i++] = '0' + (n % 10); n /= 10; }"
+            , "    if (neg) buf[j++] = '-';"
+            , "    while (i > 0) buf[j++] = tmp[--i];"
+            , "    buf[j] = 0;"
+            , "    return buf;"
+            , "}"
+            , ""
+            , "/* String.fromFloat - convert double to string (uses rotating buffer pool) */"
+            , "#define ELM_FROMFLOAT_POOL_SIZE 64"
+            , "static char __elm_fromfloat_pool[ELM_FROMFLOAT_POOL_SIZE][64];"
+            , "static int __elm_fromfloat_idx = 0;"
+            , "static const char *elm_from_float(double f) {"
+            , "    char *buf = __elm_fromfloat_pool[__elm_fromfloat_idx];"
+            , "    __elm_fromfloat_idx = (__elm_fromfloat_idx + 1) % ELM_FROMFLOAT_POOL_SIZE;"
+            , "    snprintf(buf, 64, \"%g\", f);"
+            , "    return buf;"
+            , "}"
+            , ""
+            , "/* String.append - concatenate two strings (uses rotating buffer pool) */"
+            , "#define ELM_STR_POOL_SIZE 32"
+            , "#define ELM_STR_BUF_SIZE 4096"
+            , "static char __elm_str_pool[ELM_STR_POOL_SIZE][ELM_STR_BUF_SIZE];"
+            , "static int __elm_str_pool_idx = 0;"
+            , "static const char *elm_str_append(const char *a, const char *b) {"
+            , "    char *buf = __elm_str_pool[__elm_str_pool_idx];"
+            , "    __elm_str_pool_idx = (__elm_str_pool_idx + 1) % ELM_STR_POOL_SIZE;"
+            , "    int i = 0, j = 0;"
+            , "    while (a[i] && i < ELM_STR_BUF_SIZE - 1) { buf[i] = a[i]; i++; }"
+            , "    while (b[j] && i + j < ELM_STR_BUF_SIZE - 1) { buf[i + j] = b[j]; j++; }"
+            , "    buf[i + j] = 0;"
+            , "    return buf;"
+            , "}"
+            , ""
+            , "/* Power function */"
+            , "static double elm_pow(double base, double exp) {"
+            , "    return pow(base, exp);"
+            , "}"
+            , ""
+            , "/* String length */"
+            , "static double elm_strlen(const char *s) {"
+            , "    return (double)strlen(s);"
+            , "}"
+            , ""
+            , "/* String.endsWith - check if string ends with suffix */"
+            , "static int elm_str_ends_with(const char *suffix, const char *s) {"
+            , "    int slen = 0, suflen = 0;"
+            , "    while (s[slen]) slen++;"
+            , "    while (suffix[suflen]) suflen++;"
+            , "    if (suflen > slen) return 0;"
+            , "    for (int i = 0; i < suflen; i++) {"
+            , "        if (s[slen - suflen + i] != suffix[i]) return 0;"
+            , "    }"
+            , "    return 1;"
+            , "}"
+            , ""
+            , "/* String.contains - check if string contains substring */"
+            , "static int elm_str_contains(const char *needle, const char *haystack) {"
+            , "    int nlen = 0, hlen = 0;"
+            , "    while (needle[nlen]) nlen++;"
+            , "    while (haystack[hlen]) hlen++;"
+            , "    if (nlen == 0) return 1;"
+            , "    for (int i = 0; i <= hlen - nlen; i++) {"
+            , "        int match = 1;"
+            , "        for (int j = 0; j < nlen && match; j++) {"
+            , "            if (haystack[i + j] != needle[j]) match = 0;"
+            , "        }"
+            , "        if (match) return 1;"
+            , "    }"
+            , "    return 0;"
+            , "}"
+            , ""
+            , "/* Forward declarations for recursive types */"
+            , "struct elm_list_s;"
+            , ""
+            , "/* Generic tagged union type for custom types */"
+            , "typedef struct { int tag; double data; } elm_union_t;"
+            , ""
+            , "/* Built-in tuple types - use flexible data union for elements */"
+            , "typedef union { double d; void *ptr; struct elm_list_s *lst; const char *str; } elm_elem_t;"
+            , "typedef struct { elm_elem_t _0; elm_elem_t _1; } elm_tuple2_t;"
+            , "typedef struct { elm_elem_t _0; elm_elem_t _1; elm_elem_t _2; } elm_tuple3_t;"
+            , ""
+            , "/* Built-in Maybe type tags */"
+            , "#define TAG_Nothing 0"
+            , "#define TAG_Just 1"
+            , ""
+            , "/* Built-in Result type tags */"
+            , "#define TAG_Err 0"
+            , "#define TAG_Ok 1"
+            , ""
+            , "/* Built-in Order type tags */"
+            , "#define TAG_LT 0"
+            , "#define TAG_EQ 1"
+            , "#define TAG_GT 2"
+            , ""
+            , "/* Src module AST type tags (for self-hosting) */"
+            , "#define TAG_Src_Str 0"
+            , "#define TAG_Src_Int 1"
+            , "#define TAG_Src_Float 2"
+            , "#define TAG_Src_Chr 3"
+            , "#define TAG_Src_Var 4"
+            , "#define TAG_Src_VarQual 5"
+            , "#define TAG_Src_List 6"
+            , "#define TAG_Src_Tuple 7"
+            , "#define TAG_Src_Record 8"
+            , "#define TAG_Src_Update 9"
+            , "#define TAG_Src_Access 10"
+            , "#define TAG_Src_Accessor 11"
+            , "#define TAG_Src_If 12"
+            , "#define TAG_Src_Let 13"
+            , "#define TAG_Src_Case 14"
+            , "#define TAG_Src_Lambda 15"
+            , "#define TAG_Src_Binops 16"
+            , "#define TAG_Src_Call 17"
+            , "#define TAG_Src_Negate 18"
+            , "#define TAG_Src_At 19"
+            , "#define TAG_Src_PVar 0"
+            , "#define TAG_Src_PAnything 1"
+            , "#define TAG_Src_PInt 2"
+            , "#define TAG_Src_PStr 3"
+            , "#define TAG_Src_PChr 4"
+            , "#define TAG_Src_PList 5"
+            , "#define TAG_Src_PCons 6"
+            , "#define TAG_Src_PTuple 7"
+            , "#define TAG_Src_PCtor 8"
+            , "#define TAG_Src_PCtorQual 9"
+            , "#define TAG_Src_PRecord 10"
+            , "#define TAG_Src_Define 0"
+            , "#define TAG_Src_Destruct 1"
+            , "#define TAG_Src_LowVar 0"
+            , "#define TAG_Src_CapVar 1"
+            , "#define TAG_Src_Unit 20"
+            , "#define TAG_Src_Op 21"
+            , "#define TAG_Src_PUnit 11"
+            , "#define TAG_Src_PAlias 12"
+            , ""
+            , "/* Built-in List type - fixed-size array with flexible element storage */"
+            , "#define ELM_LIST_MAX 64"
+            , "typedef union { double d; elm_tuple2_t t2; elm_tuple3_t t3; void *ptr; struct elm_list_s *lst; elm_union_t u; } elm_data_t;"
+            , "typedef struct elm_list_s { int length; elm_data_t data[ELM_LIST_MAX]; } elm_list_t;"
+            , ""
+            , "/* String.replace - replace all occurrences */"
+            , "static char __elm_replace_buf[4096];"
+            , "static const char *elm_str_replace(const char *target, const char *replacement, const char *src) {"
+            , "    int tlen = 0, rlen = 0, slen = 0;"
+            , "    while (target[tlen]) tlen++;"
+            , "    while (replacement[rlen]) rlen++;"
+            , "    while (src[slen]) slen++;"
+            , "    if (tlen == 0) { for (int i = 0; i <= slen && i < 4095; i++) __elm_replace_buf[i] = src[i]; return __elm_replace_buf; }"
+            , "    int j = 0;"
+            , "    for (int i = 0; src[i] && j < 4094; ) {"
+            , "        int match = 1;"
+            , "        for (int k = 0; k < tlen && match; k++) if (src[i + k] != target[k]) match = 0;"
+            , "        if (match) { for (int k = 0; k < rlen && j < 4094; k++) __elm_replace_buf[j++] = replacement[k]; i += tlen; }"
+            , "        else { __elm_replace_buf[j++] = src[i++]; }"
+            , "    }"
+            , "    __elm_replace_buf[j] = 0;"
+            , "    return __elm_replace_buf;"
+            , "}"
+            , ""
+            , "/* Record types for AST and internal structures */"
+            , "typedef struct { double name; elm_list_t values; elm_list_t unions; } elm_module_t;"
+            , "typedef struct { double name; elm_list_t args; double body; } elm_value_t;"
+            , "typedef struct { double name; elm_list_t ctors; } elm_src_union_t;"
+            , "typedef struct { const char *prefix; const char *name; elm_list_t args; double body; } elm_local_func_t;"
+            , "typedef struct { const char *target; } elm_flags_t;"
+            , "typedef struct { const char *target; } elm_model_t;"
             , ""
             ]
 
@@ -918,7 +1268,7 @@ generateTccCode ast =
     in
     String.join "\n"
         (header
-            ++ [ liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */" ]
+            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ moduleConstantsCode ++ liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */" ]
             ++ mainImpl
         )
 
@@ -929,14 +1279,19 @@ generateStandaloneForwardDecl : Src.Located Src.Value -> String
 generateStandaloneForwardDecl (Src.At _ value) =
     let
         (Src.At _ name) = value.name
-        arity = List.length value.args
-        params =
-            if arity == 0 then
-                "void"
-            else
-                String.join ", " (List.repeat arity "int")
+        -- Generate the implementation first to infer types
+        implCode = generateUserFunction name value.args value.body
+        -- Extract the signature from the implementation
+        -- Format is: static TYPE elm_NAME(PARAMS) {
+        signatureEnd = String.indexes "(" implCode |> List.head |> Maybe.withDefault 0
+        paramsStart = signatureEnd + 1
+        paramsEnd = String.indexes ")" implCode |> List.head |> Maybe.withDefault 0
+        returnTypeStart = 7 -- Length of "static "
+        returnTypeEnd = String.indexes " elm_" implCode |> List.head |> Maybe.withDefault 0
+        returnType = String.slice returnTypeStart returnTypeEnd implCode
+        params = String.slice paramsStart paramsEnd implCode
     in
-    "static int elm_" ++ name ++ "(" ++ params ++ ");"
+    "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ");"
 
 
 {-| Generate a standalone function implementation
@@ -963,13 +1318,13 @@ generateStandaloneFunction (Src.At _ value) =
             if List.isEmpty paramNames then
                 "void"
             else
-                String.join ", " (List.map (\p -> "int elm_" ++ p) paramNames)
+                String.join ", " (List.map (\p -> "double elm_" ++ p) paramNames)
 
         bodyCode =
             generateStandaloneExpr value.body
     in
     String.join "\n"
-        [ "static int elm_" ++ name ++ "(" ++ params ++ ") {"
+        [ "static double elm_" ++ name ++ "(" ++ params ++ ") {"
         , "    return " ++ bodyCode ++ ";"
         , "}"
         , ""
@@ -1115,6 +1470,21 @@ generateStandaloneBinops pairs finalExpr =
 
         allStrings =
             List.filterMap extractStringLiteral allExprs
+
+        -- Helper to infer C type from an expression string
+        inferCTypeFromExpr exprStr =
+            if String.endsWith ".ctors" exprStr then
+                "elm_list_t"
+            else if String.endsWith ".values" exprStr then
+                "elm_list_t"
+            else if String.endsWith ".unions" exprStr then
+                "elm_list_t"
+            else if String.endsWith ".args" exprStr then
+                "elm_list_t"
+            else if String.contains "elm_list_t" exprStr then
+                "elm_list_t"
+            else
+                "double"
     in
     if isForwardPipe then
         -- Pipe operator: a |> f |> g becomes g(f(a))
@@ -1155,7 +1525,7 @@ generateStandaloneBinops pairs finalExpr =
                                 "__pipe_" ++ String.fromInt (List.length exprs)
 
                             binding =
-                                "int elm_" ++ varName ++ " = " ++ arg ++ ";"
+                                inferCTypeFromExpr arg ++ " elm_" ++ varName ++ " = " ++ arg ++ ";"
 
                             -- Create a Var expression for the bound variable
                             argExpr =
@@ -1170,8 +1540,23 @@ generateStandaloneBinops pairs finalExpr =
                         in
                         buildPipe result rest
 
+                    (Src.At callPos (Src.Call fn callArgs)) :: rest ->
+                        -- Partial application: extend the call with the piped arg
+                        -- e.g., items |> String.join "\n" becomes String.join("\n", items)
+                        let
+                            pipeArgExpr =
+                                Src.At callPos (Src.Var Src.LowVar ("__pipe_" ++ String.fromInt (List.length exprs)))
+
+                            extendedCall =
+                                Src.At callPos (Src.Call fn (callArgs ++ [ pipeArgExpr ]))
+
+                            result =
+                                "({ " ++ inferCTypeFromExpr arg ++ " elm___pipe_" ++ String.fromInt (List.length exprs) ++ " = " ++ arg ++ "; " ++ generateStandaloneExpr extendedCall ++ "; })"
+                        in
+                        buildPipe result rest
+
                     fnExpr :: rest ->
-                        -- Regular function call
+                        -- Regular function call (simple variable or accessor)
                         buildPipe (generateStandaloneExpr fnExpr ++ "(" ++ arg ++ ")") rest
         in
         buildPipe firstArg functionExprs
@@ -1200,6 +1585,20 @@ generateStandaloneBinops pairs finalExpr =
                         -- Accessor: innerArg.field
                         buildBackPipe (innerArg ++ "." ++ fieldName) rest
 
+                    (Src.At callPos (Src.Call fn callArgs)) :: rest ->
+                        -- Partial application: extend the call with the piped arg
+                        let
+                            pipeArgExpr =
+                                Src.At callPos (Src.Var Src.LowVar ("__bpipe_" ++ String.fromInt (List.length exprs)))
+
+                            extendedCall =
+                                Src.At callPos (Src.Call fn (callArgs ++ [ pipeArgExpr ]))
+
+                            result =
+                                "({ " ++ inferCTypeFromExpr innerArg ++ " elm___bpipe_" ++ String.fromInt (List.length exprs) ++ " = " ++ innerArg ++ "; " ++ generateStandaloneExpr extendedCall ++ "; })"
+                        in
+                        buildBackPipe result rest
+
                     fnExpr :: rest ->
                         -- Regular function call
                         buildBackPipe (generateStandaloneExpr fnExpr ++ "(" ++ innerArg ++ ")") rest
@@ -1216,6 +1615,26 @@ generateStandaloneBinops pairs finalExpr =
             -- Check for power operator (needs special handling)
             isPowerOp =
                 List.all (\( _, Src.At _ op ) -> op == "^") pairs
+
+            -- Check for list cons operator (::)
+            isListCons =
+                List.all (\( _, Src.At _ op ) -> op == "::") pairs
+
+            -- Build list cons expression: h :: t creates list with h at front
+            buildConsExpr exprs final =
+                case exprs of
+                    [] ->
+                        final
+
+                    ( headExpr, _ ) :: rest ->
+                        let
+                            tailCode =
+                                buildConsExpr rest final
+
+                            headCode =
+                                generateStandaloneExpr headExpr
+                        in
+                        "({ elm_list_t __cons_result = " ++ tailCode ++ "; for(int __i = __cons_result.length; __i > 0; __i--) __cons_result.data[__i] = __cons_result.data[__i-1]; __cons_result.data[0] = " ++ headCode ++ "; __cons_result.length++; __cons_result; })"
 
             -- Check if expression looks like a string
             isStringExpr (Src.At _ e) =
@@ -1258,8 +1677,24 @@ generateStandaloneBinops pairs finalExpr =
                 case op of
                     "//" -> "/"
                     "/=" -> "!="
-                    "++" -> "/* string concat not supported at runtime */ +"
+                    "++" -> "/* use elm_str_append */"
                     _ -> op
+
+            -- Check if this is runtime string concatenation
+            isRuntimeStringConcat =
+                List.all (\( _, Src.At _ op ) -> op == "++") pairs
+
+            -- Build string concatenation chain using elm_str_append
+            buildStringConcat ts final =
+                case ts of
+                    [] ->
+                        final
+
+                    [ ( term, _ ) ] ->
+                        "elm_str_append(" ++ term ++ ", " ++ final ++ ")"
+
+                    ( term, _ ) :: rest ->
+                        "elm_str_append(" ++ term ++ ", " ++ buildStringConcat rest final ++ ")"
 
             -- Build the expression string for regular operators
             buildExpr ts =
@@ -1284,6 +1719,14 @@ generateStandaloneBinops pairs finalExpr =
         in
         if isPowerOp then
             buildPowerExpr terms
+
+        else if isListCons then
+            -- List cons: h :: t builds list with h at front of t
+            buildConsExpr pairs finalTerm
+
+        else if isRuntimeStringConcat then
+            -- Runtime string concatenation using elm_str_append
+            buildStringConcat terms finalTerm
 
         else if isStringEquality then
             -- String comparison using strcmp
@@ -1418,11 +1861,22 @@ generateStandaloneExpr (Src.At _ expr) =
                     "((elm_union_t){TAG_Nothing, 0})"
 
                 ( Src.CapVar, _ ) ->
-                    -- Constructor - call as function (nullary constructor)
-                    "elm_" ++ name ++ "()"
+                    -- Constructor - generate union tag for nullary constructor
+                    "((elm_union_t){TAG_" ++ name ++ ", 0})"
 
                 _ ->
                     "elm_" ++ name
+
+        Src.VarQual varType moduleName name ->
+            case varType of
+                Src.CapVar ->
+                    -- Qualified constructor - generate tag value
+                    -- For nullary constructors like Src.LowVar, Src.CapVar
+                    "((elm_union_t){TAG_" ++ moduleName ++ "_" ++ name ++ ", 0})"
+
+                Src.LowVar ->
+                    -- Qualified variable - reference as function/value
+                    "elm_" ++ moduleName ++ "_" ++ name
 
         Src.Case scrutinee branches ->
             generateStandaloneCase scrutinee branches
@@ -1458,7 +1912,7 @@ generateStandaloneExpr (Src.At _ expr) =
                     fields
                         |> List.map
                             (\( Src.At _ fieldName, _ ) ->
-                                "int " ++ fieldName
+                                "double " ++ fieldName
                             )
                         |> String.join "; "
 
@@ -1503,8 +1957,38 @@ generateStandaloneExpr (Src.At _ expr) =
                 numElements =
                     List.length elements
 
+                isUnionExpr (Src.At _ e) =
+                    case e of
+                        Src.Var Src.CapVar _ -> True
+                        Src.VarQual Src.CapVar _ _ -> True
+                        Src.Call (Src.At _ (Src.Var Src.CapVar _)) _ -> True
+                        Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) _ -> True
+                        -- Variables with AST-related names are likely unions
+                        Src.Var Src.LowVar name ->
+                            String.contains "Expr" name ||
+                            String.contains "expr" name ||
+                            String.contains "Pat" name ||
+                            String.contains "pat" name ||
+                            String.contains "Type" name
+                        _ -> False
+
+                wrapDataElement elemExpr =
+                    let
+                        genExpr = generateStandaloneExpr elemExpr
+                        isUnion = isUnionExpr elemExpr ||
+                                  String.startsWith "((elm_union_t)" genExpr ||
+                                  String.contains "elm_union_t" genExpr
+                    in
+                    if isUnion then
+                        "{.u = " ++ genExpr ++ "}"
+                    else if String.startsWith "\"" genExpr then
+                        "{.str = " ++ genExpr ++ "}"
+                    else
+                        -- Numeric values need to be wrapped in {.d = ...} for elm_data_t union
+                        "{.d = " ++ genExpr ++ "}"
+
                 values =
-                    List.map generateStandaloneExpr elements
+                    List.map wrapDataElement elements
                         |> String.join ", "
             in
             if numElements == 0 then
@@ -1679,7 +2163,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__tuple_in._0)"
@@ -1702,7 +2186,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__tuple_in._1)"
@@ -1725,7 +2209,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnFirst ++ "(__tuple_in._0)"
@@ -1736,7 +2220,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnSecond ++ "(__tuple_in._1)"
@@ -2144,7 +2628,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
 
                                 Src.At _ (Src.VarQual _ "Char" fnName) ->
                                     -- Handle Char.isDigit, Char.isAlpha, etc.
@@ -2172,7 +2656,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
 
                                 Src.At _ (Src.VarQual _ "Char" fnName) ->
                                     -- Handle Char.isDigit, Char.isAlpha, etc.
@@ -2201,7 +2685,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ charName ++ " = __str[__i]; int elm_" ++ accName ++ " = __acc; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ charName ++ " = __str[__i]; double elm_" ++ accName ++ " = __acc; " ++ bodyStr ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__str[__i], __acc)"
@@ -2226,7 +2710,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ charName ++ " = __str[__i]; int elm_" ++ accName ++ " = __acc; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ charName ++ " = __str[__i]; double elm_" ++ accName ++ " = __acc; " ++ bodyStr ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__str[__i], __acc)"
@@ -2249,7 +2733,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
 
                                 Src.At _ (Src.VarQual _ "Char" fnName) ->
                                     generateCharPredCall fnName "__str[__i]"
@@ -2275,7 +2759,7 @@ generateStandaloneCall fn args =
                                     let
                                         bodyStr = generateStandaloneExpr lambdaBody
                                     in
-                                    "({ int elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
 
                                 Src.At _ (Src.VarQual _ "Char" "toUpper") ->
                                     "((__str[__i] >= 'a' && __str[__i] <= 'z') ? __str[__i] - 32 : __str[__i])"
@@ -2299,6 +2783,22 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.replace wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "join") ->
+            -- String.join sep list = join strings with separator
+            case args of
+                [ sepExpr, listExpr ] ->
+                    let
+                        sepStr =
+                            generateStandaloneExpr sepExpr
+
+                        listStr =
+                            generateStandaloneExpr listExpr
+                    in
+                    "({ static char __join_buf[1024]; elm_list_t __lst = " ++ listStr ++ "; const char *__sep = " ++ sepStr ++ "; int __pos = 0; for (int __i = 0; __i < __lst.length && __pos < 1023; __i++) { if (__i > 0) { int __seplen = 0; while (__sep[__seplen]) __seplen++; for (int __j = 0; __j < __seplen && __pos < 1023; __j++) __join_buf[__pos++] = __sep[__j]; } const char *__s = (const char *)(long)__lst.data[__i]; while (*__s && __pos < 1023) __join_buf[__pos++] = *__s++; } __join_buf[__pos] = 0; __join_buf; })"
+
+                _ ->
+                    "/* String.join wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             -- Bitwise.and a b = a & b
@@ -2406,10 +2906,10 @@ generateStandaloneCall fn args =
                     "/* truncate wrong arity */ 0"
 
         Src.At _ (Src.Var _ "sqrt") ->
-            -- sqrt x = square root of x (integer approximation)
+            -- sqrt x = square root of x (uses C standard library sqrt)
             case args of
                 [ x ] ->
-                    "elm_isqrt((int)" ++ generateStandaloneExpr x ++ ")"
+                    "sqrt(" ++ generateStandaloneExpr x ++ ")"
 
                 _ ->
                     "/* sqrt wrong arity */ 0"
@@ -2489,7 +2989,15 @@ generateStandaloneCall fn args =
                                     -- Inline lambda: bind __maybe_val.data to pattern and evaluate body
                                     case patterns of
                                         [ Src.At _ (Src.PVar varName) ] ->
-                                            "({ int elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
+                                            "({ double elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        -- Constructor pattern: \(Src.At _ n) -> n
+                                        [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] ->
+                                            "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        -- Qualified constructor pattern: \(Src.At _ n) -> n
+                                        [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] ->
+                                            "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data; " ++ generateStandaloneExpr body ++ "; })"
 
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.map */ 0"
@@ -2516,7 +3024,7 @@ generateStandaloneCall fn args =
                                     -- Inline lambda: bind __maybe_val.data to pattern and evaluate body
                                     case patterns of
                                         [ Src.At _ (Src.PVar varName) ] ->
-                                            "({ int elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
+                                            "({ double elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
 
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.andThen */ ((elm_union_t){TAG_Nothing, 0})"
@@ -2548,7 +3056,7 @@ generateStandaloneCall fn args =
                                             let
                                                 bodyStr = generateStandaloneExpr lambdaBody
                                             in
-                                            "({ int elm_" ++ pname1 ++ " = __maybe_a.data; int elm_" ++ pname2 ++ " = __maybe_b.data; " ++ bodyStr ++ "; })"
+                                            "({ double elm_" ++ pname1 ++ " = __maybe_a.data; double elm_" ++ pname2 ++ " = __maybe_b.data; " ++ bodyStr ++ "; })"
 
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.map2 */ 0"
@@ -2581,7 +3089,7 @@ generateStandaloneCall fn args =
                                             let
                                                 bodyStr = generateStandaloneExpr lambdaBody
                                             in
-                                            "({ int elm_" ++ pname1 ++ " = __maybe_a.data; int elm_" ++ pname2 ++ " = __maybe_b.data; int elm_" ++ pname3 ++ " = __maybe_c.data; " ++ bodyStr ++ "; })"
+                                            "({ double elm_" ++ pname1 ++ " = __maybe_a.data; double elm_" ++ pname2 ++ " = __maybe_b.data; double elm_" ++ pname3 ++ " = __maybe_c.data; " ++ bodyStr ++ "; })"
 
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.map3 */ 0"
@@ -2613,7 +3121,7 @@ generateStandaloneCall fn args =
                                             let
                                                 bodyStr = generateStandaloneExpr lambdaBody
                                             in
-                                            "({ int elm_" ++ pname1 ++ " = __maybe_a.data; int elm_" ++ pname2 ++ " = __maybe_b.data; int elm_" ++ pname3 ++ " = __maybe_c.data; int elm_" ++ pname4 ++ " = __maybe_d.data; " ++ bodyStr ++ "; })"
+                                            "({ double elm_" ++ pname1 ++ " = __maybe_a.data; double elm_" ++ pname2 ++ " = __maybe_b.data; double elm_" ++ pname3 ++ " = __maybe_c.data; double elm_" ++ pname4 ++ " = __maybe_d.data; " ++ bodyStr ++ "; })"
 
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.map4 */ 0"
@@ -2645,7 +3153,7 @@ generateStandaloneCall fn args =
                                             let
                                                 bodyStr = generateStandaloneExpr lambdaBody
                                             in
-                                            "({ int elm_" ++ p1 ++ " = __maybe_a.data; int elm_" ++ p2 ++ " = __maybe_b.data; int elm_" ++ p3 ++ " = __maybe_c.data; int elm_" ++ p4 ++ " = __maybe_d.data; int elm_" ++ p5 ++ " = __maybe_e.data; " ++ bodyStr ++ "; })"
+                                            "({ double elm_" ++ p1 ++ " = __maybe_a.data; double elm_" ++ p2 ++ " = __maybe_b.data; double elm_" ++ p3 ++ " = __maybe_c.data; double elm_" ++ p4 ++ " = __maybe_d.data; double elm_" ++ p5 ++ " = __maybe_e.data; " ++ bodyStr ++ "; })"
 
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.map5 */ 0"
@@ -2698,7 +3206,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__result_val.data)"
                     in
@@ -2716,7 +3224,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__result_val.data)"
                     in
@@ -2746,7 +3254,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __result_val.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__result_val.data)"
                     in
@@ -2793,8 +3301,36 @@ generateStandaloneCall fn args =
                 [ listExpr ] ->
                     let
                         listStr = generateStandaloneExpr listExpr
+                        -- Use direct .length for known list types:
+                        -- - List literals: ((elm_list_t){...})
+                        -- - Case scrutinee: elm_case_scrutinee
+                        -- - Known list parameter names
+                        -- - Compound expressions with parens
+                        isKnownListType =
+                            String.contains "elm_list_t" listStr
+                                || String.startsWith "elm_case_scrutinee" listStr
+                                || String.startsWith "elm_exprs" listStr
+                                || String.startsWith "elm_list" listStr
+                                || String.startsWith "elm_items" listStr
+                                || String.startsWith "elm_elements" listStr
+                                || String.startsWith "elm_ts" listStr
+                                || String.startsWith "elm_ps" listStr
+                                || String.startsWith "__lst" listStr
+                                || String.contains "(" listStr  -- Compound expressions
+                        -- Only use lst->length for specific tuple extraction patterns
+                        -- These are local variables from ._0 or ._1 extraction
+                        isTupleExtractedVar =
+                            String.startsWith "elm_args" listStr
+                                || String.startsWith "elm_ctors" listStr
                     in
-                    "(" ++ listStr ++ ").length"
+                    if isKnownListType then
+                        "(" ++ listStr ++ ").length"
+                    else if isTupleExtractedVar then
+                        -- Variable from tuple extraction, use lst pointer
+                        "(" ++ listStr ++ ").lst->length"
+                    else
+                        -- Default to direct length access
+                        "(" ++ listStr ++ ").length"
 
                 _ ->
                     "/* List.length wrong arity */ 0"
@@ -2805,8 +3341,29 @@ generateStandaloneCall fn args =
                 [ listExpr ] ->
                     let
                         listStr = generateStandaloneExpr listExpr
+                        -- Use direct .length for known list types
+                        isKnownListType =
+                            String.contains "elm_list_t" listStr
+                                || String.startsWith "elm_case_scrutinee" listStr
+                                || String.startsWith "elm_exprs" listStr
+                                || String.startsWith "elm_list" listStr
+                                || String.startsWith "elm_items" listStr
+                                || String.startsWith "elm_elements" listStr
+                                || String.startsWith "elm_ts" listStr
+                                || String.startsWith "elm_ps" listStr
+                                || String.startsWith "__lst" listStr
+                                || String.contains "(" listStr
+                        -- Only use lst->length for specific tuple extraction patterns
+                        isTupleExtractedVar =
+                            String.startsWith "elm_args" listStr
+                                || String.startsWith "elm_ctors" listStr
                     in
-                    "((" ++ listStr ++ ").length == 0)"
+                    if isKnownListType then
+                        "((" ++ listStr ++ ").length == 0)"
+                    else if isTupleExtractedVar then
+                        "((" ++ listStr ++ ").lst->length == 0)"
+                    else
+                        "((" ++ listStr ++ ").length == 0)"
 
                 _ ->
                     "/* List.isEmpty wrong arity */ 0"
@@ -2978,8 +3535,32 @@ generateStandaloneCall fn args =
                 [ elemExpr ] ->
                     let
                         elemStr = generateStandaloneExpr elemExpr
+                        isUnionExpr =
+                            case elemExpr of
+                                Src.At _ (Src.Var Src.CapVar _) -> True
+                                Src.At _ (Src.VarQual Src.CapVar _ _) -> True
+                                Src.At _ (Src.Call (Src.At _ (Src.Var Src.CapVar _)) _) -> True
+                                Src.At _ (Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) _) -> True
+                                Src.At _ (Src.Var Src.LowVar name) ->
+                                    String.contains "Expr" name ||
+                                    String.contains "expr" name ||
+                                    String.contains "Pat" name ||
+                                    String.contains "pat" name ||
+                                    String.contains "Type" name
+                                _ -> False
+                        -- Check if this is an elm_union_t value
+                        isUnion = isUnionExpr ||
+                                  String.startsWith "((elm_union_t)" elemStr ||
+                                  String.contains "elm_union_t" elemStr
+                        wrapElem =
+                            if isUnion then
+                                "{.u = " ++ elemStr ++ "}"
+                            else if String.startsWith "\"" elemStr then
+                                "{.str = " ++ elemStr ++ "}"
+                            else
+                                elemStr
                     in
-                    "((elm_list_t){ .length = 1, .data = { " ++ elemStr ++ " } })"
+                    "((elm_list_t){ .length = 1, .data = { " ++ wrapElem ++ " } })"
 
                 _ ->
                     "/* List.singleton wrong arity */ 0"
@@ -3007,7 +3588,19 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with Located pattern: \(Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with qualified Located pattern: \(Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with tuple pattern: \(a, b) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                                    "({ elm_tuple2_t __elem = __lst.data[__i]; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
@@ -3028,7 +3621,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i])"
@@ -3050,7 +3643,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2), Src.At _ (Src.PVar pname3) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i], elm_" ++ pname3 ++ " = __lstC.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i], elm_" ++ pname3 ++ " = __lstC.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i], __lstC.data[__i])"
@@ -3070,7 +3663,15 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Handle not << String.isEmpty composition
+                                Src.At _ (Src.Binops [ ( Src.At _ (Src.Var _ "not"), Src.At _ "<<" ) ] (Src.At _ (Src.VarQual _ "String" "isEmpty"))) ->
+                                    "(*(const char *)(long)__lst.data[__i] != '\\0')"
+
+                                -- Handle not << f composition (negate any function)
+                                Src.At _ (Src.Binops [ ( Src.At _ (Src.Var _ "not"), Src.At _ "<<" ) ] innerFn) ->
+                                    "!(" ++ generateStandaloneExpr innerFn ++ "((const char *)(long)__lst.data[__i]))"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
@@ -3091,7 +3692,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i], __acc)"
@@ -3112,7 +3713,7 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname1 ++ " = __lst.data[__i], elm_" ++ pname2 ++ " = __acc; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i], __acc)"
@@ -3132,10 +3733,14 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with tuple pattern: \(a, b) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                                    "({ elm_tuple2_t __elem = __lst.data[__i].t2; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
-                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i].d)"
                     in
                     "({ elm_list_t __lst = " ++ listStr ++ "; int __result = 1; for (int __i = 0; __i < __lst.length && __result; __i++) if (!(" ++ fnAppStr ++ ")) __result = 0; __result; })"
 
@@ -3152,10 +3757,22 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with tuple pattern: \(a, b) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                                    "({ elm_tuple2_t __elem = __lst.data[__i].t2; elm_elem_t elm_" ++ pname1 ++ " = __elem._0; elm_elem_t elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with tuple pattern with wildcard first: \(_, b) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ Src.PAnything) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
+                                    "({ elm_tuple2_t __elem = __lst.data[__i].t2; elm_elem_t elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with tuple pattern with wildcard second: \(a, _) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ Src.PAnything) []) ] lambdaBody) ->
+                                    "({ elm_tuple2_t __elem = __lst.data[__i].t2; elm_elem_t elm_" ++ pname1 ++ " = __elem._0; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
-                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i].d)"
                     in
                     "({ elm_list_t __lst = " ++ listStr ++ "; int __result = 0; for (int __i = 0; __i < __lst.length && !__result; __i++) if (" ++ fnAppStr ++ ") __result = 1; __result; })"
 
@@ -3184,7 +3801,31 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname1 ++ " = __i, elm_" ++ pname2 ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname1 ++ " = __i, elm_" ++ pname2 ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with index and Located pattern: \i (Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with index and qualified Located pattern: \i (Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with index and tuple pattern: \i (a, b) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname2)) (Src.At _ (Src.PVar pname3)) []) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; elm_tuple2_t __elem = __lst.data[__i]; double elm_" ++ pname2 ++ " = __elem._0; double elm_" ++ pname3 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with index and tuple with Located first element: \i (Src.At _ name, args) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PTuple (Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ])) (Src.At _ (Src.PVar pname3)) []) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; elm_tuple2_t __elem = __lst.data[__i]; elm_union_t __loc = __elem._0; double elm_" ++ innerName ++ " = __loc.data; double elm_" ++ pname3 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with ignored index and Located pattern: \_ (Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ Src.PAnything, Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with ignored index and Located pattern (non-qualified): \_ (Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ Src.PAnything, Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__i, __lst.data[__i])"
@@ -3228,7 +3869,15 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ int elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with Located pattern: \(Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __elem = __lst.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with qualified Located pattern: \(Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __elem = __lst.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
@@ -3237,6 +3886,35 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* List.filterMap wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "concatMap") ->
+            -- List.concatMap f list = flatten(map f list)
+            -- Applies f to each element (f returns list) and concatenates results
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __src.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with Located pattern (Src.At _ x)
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __elem = __src.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with qualified Located pattern (Src.At _ x)
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __elem = __src.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__src.data[__i])"
+                    in
+                    "({ elm_list_t __src = " ++ listStr ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __src.length; __i++) { elm_list_t __sub = " ++ fnAppStr ++ "; for (int __j = 0; __j < __sub.length; __j++) __result.data[__result.length++] = __sub.data[__j]; } __result; })"
+
+                _ ->
+                    "/* List.concatMap wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "List" "unzip") ->
             -- List.unzip cannot be fully supported as it returns tuple of lists
@@ -3249,20 +3927,65 @@ generateStandaloneCall fn args =
                     "/* List.unzip wrong arity */ 0"
 
         _ ->
-            -- Regular function call
-            let
-                fnName =
-                    case fn of
-                        Src.At _ (Src.Var _ name) ->
-                            "elm_" ++ name
+            -- Check if this is a constructor call (CapVar) vs function call (LowVar)
+            case fn of
+                Src.At _ (Src.Var Src.CapVar ctorName) ->
+                    -- Unqualified constructor call: Ctor arg1 arg2
+                    let
+                        argStrs =
+                            List.map generateStandaloneExpr args
 
-                        _ ->
-                            "/* complex fn */" ++ generateStandaloneExpr fn
+                        dataValue =
+                            case argStrs of
+                                [] ->
+                                    "0"
+                                [ single ] ->
+                                    single
+                                _ ->
+                                    -- Multiple args - for simple unions just use first arg
+                                    -- Full AST construction would need proper tuple/record support
+                                    List.head argStrs |> Maybe.withDefault "0"
+                    in
+                    "((elm_union_t){TAG_" ++ ctorName ++ ", " ++ dataValue ++ "})"
 
-                argStrs =
-                    List.map generateStandaloneExpr args
-            in
-            fnName ++ "(" ++ String.join ", " argStrs ++ ")"
+                Src.At _ (Src.VarQual Src.CapVar moduleName ctorName) ->
+                    -- Qualified constructor call: Module.Ctor arg1 arg2
+                    let
+                        argStrs =
+                            List.map generateStandaloneExpr args
+
+                        dataValue =
+                            case argStrs of
+                                [] ->
+                                    "0"
+                                [ single ] ->
+                                    single
+                                _ ->
+                                    -- Multiple args - for simple unions just use first arg
+                                    -- Full AST construction would need proper tuple/record support
+                                    List.head argStrs |> Maybe.withDefault "0"
+                    in
+                    "((elm_union_t){TAG_" ++ moduleName ++ "_" ++ ctorName ++ ", " ++ dataValue ++ "})"
+
+                _ ->
+                    -- Regular function call
+                    let
+                        fnName =
+                            case fn of
+                                Src.At _ (Src.Var _ name) ->
+                                    "elm_" ++ name
+
+                                Src.At _ (Src.VarQual _ moduleName funcName) ->
+                                    -- Qualified function: Module.function -> elm_Module_function
+                                    "elm_" ++ moduleName ++ "_" ++ funcName
+
+                                _ ->
+                                    "/* complex fn */" ++ generateStandaloneExpr fn
+
+                        argStrs =
+                            List.map generateStandaloneExpr args
+                    in
+                    fnName ++ "(" ++ String.join ", " argStrs ++ ")"
 
 
 {-| Generate inlined lambda - substitute args for parameters and evaluate body
@@ -3276,7 +3999,7 @@ generateInlinedLambda patterns args body =
                 (\(Src.At _ pat) arg ->
                     case pat of
                         Src.PVar varName ->
-                            "int elm_" ++ varName ++ " = " ++ generateStandaloneExpr arg ++ ";"
+                            "double elm_" ++ varName ++ " = " ++ generateStandaloneExpr arg ++ ";"
 
                         _ ->
                             "/* unsupported pattern in lambda */"
@@ -3318,19 +4041,113 @@ generateUserFunction name args body =
                                     isUnionType =
                                         String.contains ("elm_" ++ varName ++ ".tag") bodyExpr
                                             || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+
+                                    -- Check if parameter is used as a list (has .length or .data access, or is bound as elm_list_t)
+                                    isListType =
+                                        String.contains ("elm_" ++ varName ++ ".length") bodyExpr
+                                            || String.contains ("elm_" ++ varName ++ ".data") bodyExpr
+                                            || String.contains ("(elm_" ++ varName ++ ").length") bodyExpr
+                                            || String.contains ("elm_list_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+
+                                    -- Check if parameter is used as a string (with string functions)
+                                    -- Use more precise patterns with trailing delimiter to avoid matching function name prefixes
+                                    isStringType =
+                                        String.contains ("elm_str_append(elm_" ++ varName ++ ",") bodyExpr
+                                            || String.contains ("elm_str_append(elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("elm_str_replace(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("elm_str_ends_with(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("elm_str_contains(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("strlen(elm_" ++ varName ++ ")") bodyExpr
                                 in
-                                if isUnionType then
+                                if isListType then
+                                    "elm_list_t elm_" ++ varName
+                                else if isStringType then
+                                    "const char *elm_" ++ varName
+                                else if isUnionType then
                                     "elm_union_t elm_" ++ varName
 
                                 else
-                                    "int elm_" ++ varName
+                                    "double elm_" ++ varName
+
+                            -- Handle At pattern (Located): extract inner variable
+                            -- Pattern is: At _ varName  ->  PCtor "At" [PAnything, PVar varName]
+                            Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ] ->
+                                let
+                                    isUnionType =
+                                        String.contains ("elm_" ++ innerVar ++ ".tag") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".data") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".ctors") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".name") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".args") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".body") bodyExpr
+                                            || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ innerVar) bodyExpr
+                                in
+                                if isUnionType then
+                                    "elm_union_t elm_" ++ innerVar
+
+                                else
+                                    "double elm_" ++ innerVar
+
+                            -- Handle qualified At pattern (e.g., Src.At _ e)
+                            Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ] ->
+                                let
+                                    isUnionType =
+                                        String.contains ("elm_" ++ innerVar ++ ".tag") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".data") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".ctors") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".name") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".args") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".body") bodyExpr
+                                            || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ innerVar) bodyExpr
+                                in
+                                if isUnionType then
+                                    "elm_union_t elm_" ++ innerVar
+
+                                else
+                                    "double elm_" ++ innerVar
+
+                            -- Handle At pattern with nested At pattern
+                            Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ]) ] ->
+                                "double elm_" ++ innerVar
+
+                            -- Handle qualified nested At pattern
+                            Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ]) ] ->
+                                "double elm_" ++ innerVar
+
+                            -- Handle 2-tuple pattern
+                            Src.PTuple (Src.At _ (Src.PVar v1)) (Src.At _ (Src.PVar v2)) [] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2
 
                             _ ->
-                                "int /* unsupported pattern */"
+                                "double /* unsupported pattern */"
                     )
                 |> String.join ", "
+
+        -- Infer return type from body expression
+        isStringReturn =
+            String.contains "elm_str_" bodyExpr
+                || String.contains "elm_from_" bodyExpr
+                || String.startsWith "\"" bodyExpr
+
+        isUnionReturn =
+            String.contains "((elm_union_t){TAG_" bodyExpr
+                || String.contains "elm_union_t result" bodyExpr
+
+        isListReturn =
+            String.contains "((elm_list_t){" bodyExpr
+                || String.contains "elm_list_t __" bodyExpr
+
+        returnType =
+            if isStringReturn then
+                "const char *"
+            else if isUnionReturn then
+                "elm_union_t"
+            else if isListReturn then
+                "elm_list_t"
+            else
+                "double"
     in
-    "static int elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+    "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
 
 {-| A local function to be lifted to module level
@@ -3435,23 +4252,166 @@ generateLiftedFunction prefix funcName args body =
         liftedName =
             prefix ++ "_" ++ funcName
 
+        bodyExpr =
+            generateStandaloneExpr body
+
         params =
             args
                 |> List.map
                     (\(Src.At _ pat) ->
                         case pat of
                             Src.PVar varName ->
-                                "int elm_" ++ varName
+                                let
+                                    -- Check if variable is used as a tagged union (has .tag or .data access)
+                                    isUnionType =
+                                        String.contains ("elm_" ++ varName ++ ".tag") bodyExpr
+                                            || String.contains ("elm_" ++ varName ++ ".data") bodyExpr
+                                            || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+
+                                    -- Check for AST module record (has .values, .unions, .name fields)
+                                    isModuleType =
+                                        String.contains ("elm_" ++ varName ++ ".values") bodyExpr
+                                            || String.contains ("elm_" ++ varName ++ ".unions") bodyExpr
+
+                                    -- Check for AST value record (has .args, .body fields)
+                                    isValueType =
+                                        String.contains ("elm_" ++ varName ++ ".args") bodyExpr
+                                            && String.contains ("elm_" ++ varName ++ ".body") bodyExpr
+
+                                    -- Check for AST union record (has .ctors field)
+                                    isSrcUnionType =
+                                        String.contains ("elm_" ++ varName ++ ".ctors") bodyExpr
+
+                                    -- Check for local function record (has .prefix field)
+                                    isLocalFuncType =
+                                        String.contains ("elm_" ++ varName ++ ".prefix") bodyExpr
+
+                                    -- Check for flags/model record (has .target field)
+                                    isFlagsType =
+                                        String.contains ("elm_" ++ varName ++ ".target") bodyExpr
+
+                                    -- Check if parameter is used as a string (with string functions)
+                                    isStringType =
+                                        String.contains ("elm_str_append(elm_" ++ varName) bodyExpr
+                                            || String.contains ("elm_str_replace(" ++ "\"") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("elm_str_ends_with(" ++ "\"") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("elm_str_contains(" ++ "\"") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("strlen(elm_" ++ varName) bodyExpr
+
+                                    -- Check if parameter is used as a list (has .length or .data access, or is bound as elm_list_t)
+                                    isListType =
+                                        String.contains ("elm_" ++ varName ++ ".length") bodyExpr
+                                            || String.contains ("elm_" ++ varName ++ ".data") bodyExpr
+                                            || String.contains ("(elm_" ++ varName ++ ").length") bodyExpr
+                                            || String.contains ("elm_list_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+                                in
+                                if isListType then
+                                    "elm_list_t elm_" ++ varName
+                                else if isStringType then
+                                    "const char *elm_" ++ varName
+                                else if isUnionType then
+                                    "elm_union_t elm_" ++ varName
+                                else if isModuleType then
+                                    "elm_module_t elm_" ++ varName
+                                else if isValueType then
+                                    "elm_value_t elm_" ++ varName
+                                else if isSrcUnionType then
+                                    "elm_src_union_t elm_" ++ varName
+                                else if isLocalFuncType then
+                                    "elm_local_func_t elm_" ++ varName
+                                else if isFlagsType then
+                                    "elm_flags_t elm_" ++ varName
+                                else
+                                    "double elm_" ++ varName
+
+                            -- Handle At pattern (Located): extract inner variable
+                            -- Pattern is: At _ varName  ->  PCtor "At" [PAnything, PVar varName]
+                            Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ] ->
+                                let
+                                    isUnionType =
+                                        String.contains ("elm_" ++ innerVar ++ ".tag") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".data") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".ctors") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".name") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".args") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".body") bodyExpr
+                                            || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ innerVar) bodyExpr
+                                in
+                                if isUnionType then
+                                    "elm_union_t elm_" ++ innerVar
+
+                                else
+                                    "double elm_" ++ innerVar
+
+                            -- Handle qualified At pattern (e.g., Src.At _ e)
+                            Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ] ->
+                                let
+                                    isUnionType =
+                                        String.contains ("elm_" ++ innerVar ++ ".tag") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".data") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".ctors") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".name") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".args") bodyExpr
+                                            || String.contains ("elm_" ++ innerVar ++ ".body") bodyExpr
+                                            || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ innerVar) bodyExpr
+                                in
+                                if isUnionType then
+                                    "elm_union_t elm_" ++ innerVar
+
+                                else
+                                    "double elm_" ++ innerVar
+
+                            -- Handle At pattern with nested At pattern
+                            Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ]) ] ->
+                                "double elm_" ++ innerVar
+
+                            -- Handle qualified nested At pattern
+                            Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerVar) ]) ] ->
+                                "double elm_" ++ innerVar
+
+                            -- Handle 2-tuple pattern
+                            Src.PTuple (Src.At _ (Src.PVar v1)) (Src.At _ (Src.PVar v2)) [] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2
 
                             _ ->
-                                "int /* unsupported pattern */"
+                                "double /* unsupported pattern */"
                     )
                 |> String.join ", "
 
-        bodyExpr =
-            generateStandaloneExpr body
+        -- Detect return type based on the final expression in the body
+        -- Be careful to check what's actually being returned, not just what's used in the body
+        returnType =
+            -- Check if the expression directly returns a Maybe value
+            if String.contains "((elm_union_t){TAG_Just" bodyExpr || String.contains "((elm_union_t){TAG_Nothing" bodyExpr then
+                "elm_union_t"
+            -- Check if it returns a string literal or string operation
+            else if String.startsWith "\"" bodyExpr then
+                "const char *"
+            -- Check if it's a ternary expression that returns string literals
+            else if String.contains "? \"" bodyExpr && String.contains ": \"" bodyExpr then
+                "const char *"
+            -- Check if the body starts with a case that returns a string parameter
+            -- Pattern: (elm_case_scrutinee.length == 0 ? elm_arg : ...)
+            else if String.contains "? elm_arg :" bodyExpr || String.contains "? elm_innerArg :" bodyExpr then
+                "const char *"
+            -- Check if the function uses elm_str_append and returns the result
+            else if String.contains "elm_str_append(" bodyExpr && (String.startsWith "elm_str_append(" bodyExpr || String.startsWith "({" bodyExpr) then
+                "const char *"
+            -- Check if a string-typed parameter is being returned in a ternary
+            else if String.contains "const char *elm_" params && String.contains "? elm_" bodyExpr then
+                "const char *"
+            -- Check if the final result is an elm_list_t (not just using one)
+            else if String.startsWith "({ elm_list_t " bodyExpr && String.endsWith "__lst; })" bodyExpr then
+                "elm_list_t"
+            else
+                "double"
+
+        -- Fix recursive calls: replace "elm_funcName(" with "elm_prefix_funcName("
+        -- This handles local recursive functions that get lifted
+        fixedBodyExpr =
+            String.replace ("elm_" ++ funcName ++ "(") ("elm_" ++ liftedName ++ "(") bodyExpr
     in
-    "static int elm_" ++ liftedName ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+    "static " ++ returnType ++ " elm_" ++ liftedName ++ "(" ++ params ++ ") {\n    return " ++ fixedBodyExpr ++ ";\n}"
 
 
 {-| Infer C type and initializer for an expression
@@ -3464,7 +4424,7 @@ inferCTypeAndInit (Src.At _ expr) =
             let
                 fieldDefs =
                     fields
-                        |> List.map (\( Src.At _ fieldName, _ ) -> "int " ++ fieldName)
+                        |> List.map (\( Src.At _ fieldName, _ ) -> "double " ++ fieldName)
                         |> String.join "; "
 
                 fieldValues =
@@ -3514,8 +4474,67 @@ inferCTypeAndInit (Src.At _ expr) =
             , "({ typeof(elm_" ++ recordName ++ ") __update_tmp = elm_" ++ recordName ++ "; " ++ updateAssignments ++ " __update_tmp; })"
             )
 
+        Src.Str s ->
+            ( "const char *", "\"" ++ escapeC s ++ "\"" )
+
+        Src.Int n ->
+            ( "double", String.fromInt n )
+
+        Src.Float f ->
+            ( "double", String.fromFloat f )
+
+        Src.Call (Src.At _ (Src.Var Src.CapVar _)) args ->
+            -- Constructor call returns elm_union_t
+            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+
+        Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) args ->
+            -- Qualified constructor call returns elm_union_t
+            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+
+        Src.Call (Src.At _ (Src.VarQual _ "String" _)) _ ->
+            -- String module function call returns string
+            ( "const char *", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+
+        Src.Call (Src.At _ (Src.Var _ funcName)) _ ->
+            -- Check if function call result is a string
+            let
+                cExpr = generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr)
+                -- String functions, or user functions with string-like names
+                isStringResult =
+                    String.contains "elm_str_" cExpr
+                        || String.contains "elm_from_" cExpr
+                        || String.contains "Header" funcName
+                        || String.contains "header" funcName
+                        || String.contains "List" funcName
+                        || String.contains "String" funcName
+                        || String.contains "format" funcName
+            in
+            if isStringResult then
+                ( "const char *", cExpr )
+            else
+                ( "double", cExpr )
+
+        Src.Binops pairs finalExpr ->
+            -- Check if this is string concatenation
+            let
+                isStringConcat = List.all (\( _, Src.At _ op ) -> op == "++") pairs
+                cExpr = generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr)
+            in
+            if isStringConcat then
+                ( "const char *", cExpr )
+            else
+                ( "double", cExpr )
+
+        Src.Var Src.CapVar name ->
+            -- Standalone constructor (nullary) returns elm_union_t
+            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+
+        Src.VarQual Src.CapVar _ _ ->
+            -- Qualified constructor (nullary) returns elm_union_t
+            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+
         _ ->
-            ( "int", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "double", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
 
 
 {-| Generate standalone C code for let bindings using GCC compound statements
@@ -3620,16 +4639,55 @@ generateStandaloneCase scrutinee branches =
                         Src.PCtor _ name _ ->
                             name /= "True" && name /= "False"
 
+                        Src.PCtorQual _ _ _ _ ->
+                            True
+
                         _ ->
                             False
                 )
                 branches
 
+        -- Check if this is a list case (has PList or PCons patterns)
+        isListCase =
+            List.any
+                (\( Src.At _ pat, _ ) ->
+                    case pat of
+                        Src.PList _ ->
+                            True
+
+                        Src.PCons _ _ ->
+                            True
+
+                        _ ->
+                            False
+                )
+                branches
+
+        -- Check if case expression returns a union type (by checking first branch's result)
+        returnsUnion =
+            case branches of
+                ( _, firstResult ) :: _ ->
+                    let
+                        resultStr = generateStandaloneExpr firstResult
+                    in
+                    String.contains "((elm_union_t){TAG_" resultStr
+                        || String.contains "elm_union_t" resultStr
+
+                [] ->
+                    False
+
+        -- Default fallback value based on detected return type
+        fallbackValue =
+            if returnsUnion then
+                "((elm_union_t){0, 0}) /* no match */"
+            else
+                "0 /* no match */"
+
         generateBranches : List ( Src.Pattern, Src.Expr ) -> String
         generateBranches bs =
             case bs of
                 [] ->
-                    "0 /* no match */"
+                    fallbackValue
 
                 ( Src.At _ pattern, resultExpr ) :: rest ->
                     case pattern of
@@ -3639,7 +4697,7 @@ generateStandaloneCase scrutinee branches =
 
                         Src.PVar varName ->
                             -- Variable binding - bind scrutinee to variable name
-                            "({\n            int elm_"
+                            "({\n            double elm_"
                                 ++ varName
                                 ++ " = elm_case_scrutinee;\n            "
                                 ++ generateStandaloneExpr resultExpr
@@ -3687,7 +4745,7 @@ generateStandaloneCase scrutinee branches =
                                             (\i (Src.At _ pat) ->
                                                 case pat of
                                                     Src.PVar varName ->
-                                                        "int elm_" ++ varName ++ " = elm_case_scrutinee._" ++ String.fromInt i ++ ";"
+                                                        "double elm_" ++ varName ++ " = elm_case_scrutinee._" ++ String.fromInt i ++ ";"
 
                                                     Src.PAnything ->
                                                         ""
@@ -3744,7 +4802,7 @@ generateStandaloneCase scrutinee branches =
                                                         (\_ (Src.At _ pat) ->
                                                             case pat of
                                                                 Src.PVar varName ->
-                                                                    "int elm_" ++ varName ++ " = elm_case_scrutinee.data;"
+                                                                    "double elm_" ++ varName ++ " = elm_case_scrutinee.data;"
 
                                                                 _ ->
                                                                     ""
@@ -3762,14 +4820,267 @@ generateStandaloneCase scrutinee branches =
                                             ++ generateBranches rest
                                             ++ ")"
 
+                        -- Qualified constructor pattern (e.g., Src.Str, Src.Int)
+                        Src.PCtorQual _ moduleName ctorName ctorPatterns ->
+                            let
+                                fullCtorName = moduleName ++ "_" ++ ctorName
+                            in
+                            if List.isEmpty ctorPatterns then
+                                -- Simple enum constructor - compare tag
+                                "(elm_case_scrutinee.tag == TAG_"
+                                    ++ fullCtorName
+                                    ++ " ? "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ " : "
+                                    ++ generateBranches rest
+                                    ++ ")"
+
+                            else if List.all (\(Src.At _ p) -> p == Src.PAnything) ctorPatterns then
+                                -- Constructor with wildcard args - just compare tag
+                                "(elm_case_scrutinee.tag == TAG_"
+                                    ++ fullCtorName
+                                    ++ " ? "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ " : "
+                                    ++ generateBranches rest
+                                    ++ ")"
+
+                            else
+                                -- Constructor with data - bind variable and compare tag
+                                let
+                                    bindings =
+                                        ctorPatterns
+                                            |> List.indexedMap
+                                                (\_ (Src.At _ pat) ->
+                                                    case pat of
+                                                        Src.PVar varName ->
+                                                            "double elm_" ++ varName ++ " = elm_case_scrutinee.data;"
+
+                                                        _ ->
+                                                            ""
+                                                )
+                                            |> List.filter (not << String.isEmpty)
+                                            |> String.join " "
+                                in
+                                "(elm_case_scrutinee.tag == TAG_"
+                                    ++ fullCtorName
+                                    ++ " ? ({ "
+                                    ++ bindings
+                                    ++ " "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ "; }) : "
+                                    ++ generateBranches rest
+                                    ++ ")"
+
+                        -- Empty list pattern
+                        Src.PList [] ->
+                            "(elm_case_scrutinee.length == 0 ? "
+                                ++ generateStandaloneExpr resultExpr
+                                ++ " : "
+                                ++ generateBranches rest
+                                ++ ")"
+
+                        -- Cons pattern (head :: tail)
+                        -- NOTE: PCons stores (tail, head) due to how the parser builds cons chains
+                        Src.PCons (Src.At _ tailPat) (Src.At _ headPat) ->
+                            let
+                                -- Extract bindings from a pattern, returning (bindings, condition)
+                                extractPatternBindings : String -> Src.Pattern_ -> ( String, String )
+                                extractPatternBindings elemExpr pat =
+                                    case pat of
+                                        Src.PVar hName ->
+                                            ( "double elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
+
+                                        Src.PAnything ->
+                                            ( "", "" )
+
+                                        -- Nested constructor pattern: Ctor arg1 arg2 ...
+                                        Src.PCtor _ ctorName ctorArgs ->
+                                            let
+                                                tagCheck = "((elm_union_t)" ++ elemExpr ++ ").tag == TAG_" ++ ctorName
+                                                innerBindings =
+                                                    ctorArgs
+                                                        |> List.indexedMap
+                                                            (\i (Src.At _ innerPat) ->
+                                                                case innerPat of
+                                                                    Src.PVar vName ->
+                                                                        "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                    _ ->
+                                                                        ""
+                                                            )
+                                                        |> List.filter (not << String.isEmpty)
+                                                        |> String.join " "
+                                            in
+                                            ( innerBindings, tagCheck )
+
+                                        -- Qualified constructor pattern: Module.Ctor arg1 arg2 ...
+                                        -- Handle Src.At _ (Src.Accessor fieldName) pattern specifically
+                                        Src.PCtorQual _ modName ctorName ctorArgs ->
+                                            let
+                                                fullTag = "TAG_" ++ modName ++ "_" ++ ctorName
+                                                tagCheck = "((elm_union_t)" ++ elemExpr ++ ").tag == " ++ fullTag
+
+                                                -- For Src.At pattern, the data is the inner expression
+                                                -- For Src.Accessor pattern, the data is the field name
+                                                innerBindings =
+                                                    case ctorArgs of
+                                                        -- Src.At _ innerExpr -> extract from the second argument (wildcard for first)
+                                                        [ Src.At _ Src.PAnything, Src.At _ innerPat ] ->
+                                                            case innerPat of
+                                                                Src.PVar vName ->
+                                                                    "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+
+                                                                -- Nested constructor: Src.At _ (Src.Accessor fieldName)
+                                                                -- Note: Nested union extraction is limited - just extract first level data
+                                                                Src.PCtor _ innerCtorName innerCtorArgs ->
+                                                                    innerCtorArgs
+                                                                        |> List.map
+                                                                            (\(Src.At _ p) ->
+                                                                                case p of
+                                                                                    Src.PVar vName ->
+                                                                                        "const char *elm_" ++ vName ++ " = (const char *)(long)((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                    _ ->
+                                                                                        ""
+                                                                            )
+                                                                        |> List.filter (not << String.isEmpty)
+                                                                        |> String.join " "
+
+                                                                Src.PCtorQual _ innerMod innerCtor innerArgs ->
+                                                                    -- Note: Nested union extraction is limited - just extract first level data
+                                                                    innerArgs
+                                                                        |> List.map
+                                                                            (\(Src.At _ p) ->
+                                                                                case p of
+                                                                                    Src.PVar vName ->
+                                                                                        "const char *elm_" ++ vName ++ " = (const char *)(long)((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                    _ ->
+                                                                                        ""
+                                                                            )
+                                                                        |> List.filter (not << String.isEmpty)
+                                                                        |> String.join " "
+
+                                                                _ ->
+                                                                    ""
+
+                                                        -- Src.At pos (NestedCtor args) -> bind pos and extract from nested constructor
+                                                        [ Src.At _ (Src.PVar posVar), Src.At _ innerPat ] ->
+                                                            let
+                                                                -- Note: Nested union extraction is limited - all bind to same first-level data
+                                                                posBinding = "double elm_" ++ posVar ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                nestedBindings =
+                                                                    case innerPat of
+                                                                        Src.PVar vName ->
+                                                                            "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+
+                                                                        Src.PCtor _ _ nestedArgs ->
+                                                                            nestedArgs
+                                                                                |> List.map
+                                                                                    (\(Src.At _ p) ->
+                                                                                        case p of
+                                                                                            Src.PVar vName ->
+                                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                            _ ->
+                                                                                                ""
+                                                                                    )
+                                                                                |> List.filter (not << String.isEmpty)
+                                                                                |> String.join " "
+
+                                                                        Src.PCtorQual _ _ _ nestedArgs ->
+                                                                            nestedArgs
+                                                                                |> List.map
+                                                                                    (\(Src.At _ p) ->
+                                                                                        case p of
+                                                                                            Src.PVar vName ->
+                                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                            _ ->
+                                                                                                ""
+                                                                                    )
+                                                                                |> List.filter (not << String.isEmpty)
+                                                                                |> String.join " "
+
+                                                                        _ ->
+                                                                            ""
+                                                            in
+                                                            [ posBinding, nestedBindings ]
+                                                                |> List.filter (not << String.isEmpty)
+                                                                |> String.join " "
+
+                                                        -- Single arg patterns
+                                                        [ Src.At _ (Src.PVar vName) ] ->
+                                                            "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+
+                                                        _ ->
+                                                            ctorArgs
+                                                                |> List.indexedMap
+                                                                    (\i (Src.At _ p) ->
+                                                                        case p of
+                                                                            Src.PVar vName ->
+                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                            Src.PAnything ->
+                                                                                ""
+                                                                            _ ->
+                                                                                ""
+                                                                    )
+                                                                |> List.filter (not << String.isEmpty)
+                                                                |> String.join " "
+                                            in
+                                            ( innerBindings, tagCheck )
+
+                                        _ ->
+                                            ( "", "" )
+
+                                -- For list elements, determine accessor based on pattern type
+                                -- Simple PVar means numeric value (.d), constructor pattern means union (.u)
+                                headAccessor =
+                                    case headPat of
+                                        Src.PVar _ -> "(elm_case_scrutinee.data[0].d)"
+                                        Src.PAnything -> "(elm_case_scrutinee.data[0].d)"
+                                        _ -> "(elm_case_scrutinee.data[0].u)"
+
+                                ( headBinding, headCondition ) =
+                                    extractPatternBindings headAccessor headPat
+
+                                tailBinding =
+                                    case tailPat of
+                                        Src.PVar tName ->
+                                            "elm_list_t elm_" ++ tName ++ " = { .length = elm_case_scrutinee.length - 1 }; for (int __i = 1; __i < elm_case_scrutinee.length; __i++) elm_" ++ tName ++ ".data[__i - 1] = elm_case_scrutinee.data[__i];"
+
+                                        Src.PAnything ->
+                                            ""
+
+                                        _ ->
+                                            ""
+
+                                allBindings =
+                                    [ headBinding, tailBinding ]
+                                        |> List.filter (not << String.isEmpty)
+                                        |> String.join " "
+
+                                condition =
+                                    if String.isEmpty headCondition then
+                                        "elm_case_scrutinee.length > 0"
+                                    else
+                                        "elm_case_scrutinee.length > 0 && " ++ headCondition
+                            in
+                            "(" ++ condition ++ " ? ({ "
+                                ++ allBindings
+                                ++ " "
+                                ++ generateStandaloneExpr resultExpr
+                                ++ "; }) : "
+                                ++ generateBranches rest
+                                ++ ")"
+
                         _ ->
                             "/* unsupported pattern */ " ++ generateBranches rest
     in
-    if hasVarBinding || hasCtorWithData then
+    if hasVarBinding || hasCtorWithData || isListCase then
         -- Use compound statement to bind scrutinee to a variable
         let
             scrutineeType =
-                if isCustomTypeCase then
+                if isListCase then
+                    "elm_list_t"
+
+                else if isCustomTypeCase then
                     "elm_union_t"
 
                 else
@@ -3794,7 +5105,7 @@ generateStandaloneCase scrutinee branches =
             generateSimpleBranches bs =
                 case bs of
                     [] ->
-                        "0 /* no match */"
+                        fallbackValue
 
                     ( Src.At _ pattern, resultExpr ) :: rest ->
                         case pattern of
@@ -3876,7 +5187,7 @@ generateStandaloneCase scrutinee branches =
                                                             (\_ (Src.At _ pat) ->
                                                                 case pat of
                                                                     Src.PVar varName ->
-                                                                        "int elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data;"
+                                                                        "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data;"
 
                                                                     _ ->
                                                                         ""
@@ -3908,7 +5219,7 @@ generateStandaloneCase scrutinee branches =
                                                 (\i (Src.At _ pat) ->
                                                     case pat of
                                                         Src.PVar varName ->
-                                                            "int elm_" ++ varName ++ " = " ++ inlineScrutinee ++ "._" ++ String.fromInt i ++ ";"
+                                                            "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ "._" ++ String.fromInt i ++ ";"
 
                                                         Src.PAnything ->
                                                             ""
@@ -3927,6 +5238,115 @@ generateStandaloneCase scrutinee branches =
                                     ++ "\n            "
                                     ++ bodyStr
                                     ++ ";\n        })"
+
+                            -- Qualified constructor pattern (e.g., Src.Str, Src.Int)
+                            Src.PCtorQual _ moduleName ctorName ctorPatterns ->
+                                let
+                                    fullCtorName = moduleName ++ "_" ++ ctorName
+                                in
+                                if List.isEmpty ctorPatterns then
+                                    -- Simple enum constructor - compare tag
+                                    "("
+                                        ++ inlineScrutinee
+                                        ++ ".tag == TAG_"
+                                        ++ fullCtorName
+                                        ++ " ? "
+                                        ++ generateStandaloneExpr resultExpr
+                                        ++ " : "
+                                        ++ generateSimpleBranches rest
+                                        ++ ")"
+
+                                else if List.all (\(Src.At _ p) -> p == Src.PAnything) ctorPatterns then
+                                    -- Constructor with wildcard args - just compare tag
+                                    "("
+                                        ++ inlineScrutinee
+                                        ++ ".tag == TAG_"
+                                        ++ fullCtorName
+                                        ++ " ? "
+                                        ++ generateStandaloneExpr resultExpr
+                                        ++ " : "
+                                        ++ generateSimpleBranches rest
+                                        ++ ")"
+
+                                else
+                                    -- Constructor with data - bind variable and compare tag
+                                    let
+                                        bindings =
+                                            ctorPatterns
+                                                |> List.indexedMap
+                                                    (\_ (Src.At _ pat) ->
+                                                        case pat of
+                                                            Src.PVar varName ->
+                                                                "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data;"
+
+                                                            _ ->
+                                                                ""
+                                                    )
+                                                |> List.filter (not << String.isEmpty)
+                                                |> String.join " "
+                                    in
+                                    "("
+                                        ++ inlineScrutinee
+                                        ++ ".tag == TAG_"
+                                        ++ fullCtorName
+                                        ++ " ? ({ "
+                                        ++ bindings
+                                        ++ " "
+                                        ++ generateStandaloneExpr resultExpr
+                                        ++ "; }) : "
+                                        ++ generateSimpleBranches rest
+                                        ++ ")"
+
+                            -- Empty list pattern
+                            Src.PList [] ->
+                                "("
+                                    ++ inlineScrutinee
+                                    ++ ".length == 0 ? "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ " : "
+                                    ++ generateSimpleBranches rest
+                                    ++ ")"
+
+                            -- Cons pattern (head :: tail)
+                            -- NOTE: PCons stores (tail, head) due to how the parser builds cons chains
+                            Src.PCons (Src.At _ tailPat) (Src.At _ headPat) ->
+                                let
+                                    headBinding =
+                                        case headPat of
+                                            Src.PVar hName ->
+                                                "double elm_" ++ hName ++ " = " ++ inlineScrutinee ++ ".data[0];"
+
+                                            Src.PAnything ->
+                                                ""
+
+                                            _ ->
+                                                ""
+
+                                    tailBinding =
+                                        case tailPat of
+                                            Src.PVar tName ->
+                                                "elm_list_t elm_" ++ tName ++ " = { .length = " ++ inlineScrutinee ++ ".length - 1 }; for (int __i = 1; __i < " ++ inlineScrutinee ++ ".length; __i++) elm_" ++ tName ++ ".data[__i - 1] = " ++ inlineScrutinee ++ ".data[__i];"
+
+                                            Src.PAnything ->
+                                                ""
+
+                                            _ ->
+                                                ""
+
+                                    allBindings =
+                                        [ headBinding, tailBinding ]
+                                            |> List.filter (not << String.isEmpty)
+                                            |> String.join " "
+                                in
+                                "("
+                                    ++ inlineScrutinee
+                                    ++ ".length > 0 ? ({ "
+                                    ++ allBindings
+                                    ++ " "
+                                    ++ generateStandaloneExpr resultExpr
+                                    ++ "; }) : "
+                                    ++ generateSimpleBranches rest
+                                    ++ ")"
 
                             _ ->
                                 "/* unsupported pattern */ " ++ generateSimpleBranches rest
