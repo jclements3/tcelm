@@ -1278,9 +1278,40 @@ generateTccCode ast =
                         let
                             cExpr = generateStandaloneExpr body
                             isString = String.contains "elm_str_" cExpr || String.contains "\"" cExpr
-                            cType = if isString then "const char *" else "double"
+                            isRecord = String.contains "((struct {" cExpr
+                            -- Extract record type from the expression
+                            recordType =
+                                if isRecord then
+                                    let
+                                        startMarker = "((struct {"
+                                        startIdx = String.indexes startMarker cExpr |> List.head |> Maybe.withDefault 0
+                                        searchStart = startIdx + String.length startMarker
+                                        afterStart = String.dropLeft searchStart cExpr
+                                        endIdx = String.indexes "})" afterStart |> List.head |> Maybe.withDefault 0
+                                        fieldDefs = String.left endIdx afterStart
+                                    in
+                                    "struct {" ++ fieldDefs ++ "}"
+                                else
+                                    ""
+                            cType =
+                                if isString then "const char *"
+                                else if isRecord then recordType
+                                else "double"
                         in
-                        "static " ++ cType ++ " elm_" ++ name ++ "(void) {\n    return " ++ fixComplexConstantRefs cExpr ++ ";\n}"
+                        -- For records, generate static constants instead of functions
+                        -- This allows `model = init` to work correctly
+                        if isRecord then
+                            let
+                                -- Extract initializer from ((struct {...}){...})
+                                initStartMarker = "){"
+                                initStartIdx = String.indexes initStartMarker cExpr |> List.head |> Maybe.withDefault 0
+                                afterInitStart = String.dropLeft (initStartIdx + String.length initStartMarker) cExpr
+                                initEndIdx = String.length afterInitStart - 2
+                                initializer = String.left initEndIdx afterInitStart
+                            in
+                            "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ initializer ++ "};"
+                        else
+                            "static " ++ cType ++ " elm_" ++ name ++ "(void) {\n    return " ++ fixComplexConstantRefs cExpr ++ ";\n}"
                     )
                 |> String.join "\n\n"
 
@@ -1419,6 +1450,7 @@ generateTccCode ast =
                 "/* Custom type definitions */\n" ++ customTypeCode ++ "\n\n"
 
         -- Generate forward declarations for user-defined functions
+        -- Skip functions that return anonymous structs (they cause redefinition errors)
         forwardDecls =
             ast.values
                 |> List.filterMap
@@ -1441,8 +1473,14 @@ generateTccCode ast =
                                 returnTypeEnd = String.indexes funcNameMarker implCode |> List.head |> Maybe.withDefault 0
                                 funcReturnType = String.slice returnTypeStart returnTypeEnd implCode
                                 params = String.slice paramsStart paramsEnd implCode
+                                -- Skip forward declarations for functions returning anonymous structs
+                                -- In C, anonymous structs are always different types
+                                isStructReturn = String.contains "struct {" funcReturnType
                             in
-                            Just ("static " ++ funcReturnType ++ " elm_" ++ name ++ "(" ++ params ++ ");")
+                            if isStructReturn then
+                                Nothing
+                            else
+                                Just ("static " ++ funcReturnType ++ " elm_" ++ name ++ "(" ++ params ++ ");")
                         else
                             Nothing
                     )
@@ -2452,11 +2490,24 @@ generateStandaloneExpr (Src.At _ expr) =
         Src.Record fields ->
             -- Generate record as compound struct literal with named fields
             let
+                -- Infer field type from the value expression
+                inferFieldType : Src.Expr -> String
+                inferFieldType fieldValue =
+                    let
+                        valueStr = generateStandaloneExpr fieldValue
+                    in
+                    if String.startsWith "\"" valueStr then
+                        "const char *"
+                    else if String.contains "elm_str_" valueStr || String.contains "elm_from_" valueStr then
+                        "const char *"
+                    else
+                        "double"
+
                 fieldDefs =
                     fields
                         |> List.map
-                            (\( Src.At _ fieldName, _ ) ->
-                                "double " ++ fieldName
+                            (\( Src.At _ fieldName, fieldValue ) ->
+                                inferFieldType fieldValue ++ " " ++ fieldName
                             )
                         |> String.join "; "
 
@@ -4744,6 +4795,31 @@ generateUserFunction name args body =
             String.contains "((elm_list_t){" bodyExpr
                 || String.contains "elm_list_t __" bodyExpr
 
+        -- Check for record returns - generates ((struct { ... }){...})
+        isRecordReturn =
+            String.contains "((struct {" bodyExpr
+
+        -- Extract the record type definition for proper return type
+        recordType =
+            if isRecordReturn then
+                -- Extract the struct type from the body: ((struct { ... }){...})
+                -- Find the struct definition between "((struct {" and "})"
+                let
+                    -- Find first occurrence of struct definition
+                    startMarker = "((struct {"
+                    endMarker = "})"
+                    startIdx = String.indexes startMarker bodyExpr |> List.head |> Maybe.withDefault 0
+                    -- Find the matching close brace - the struct def ends at first "})"
+                    searchStart = startIdx + String.length startMarker
+                    afterStart = String.dropLeft searchStart bodyExpr
+                    -- Find the end of the field definitions (first "})" after opening)
+                    endIdx = String.indexes "})" afterStart |> List.head |> Maybe.withDefault 0
+                    fieldDefs = String.left endIdx afterStart
+                in
+                "struct {" ++ fieldDefs ++ "}"
+            else
+                ""
+
         returnType =
             if isStringReturn then
                 "const char *"
@@ -4751,10 +4827,49 @@ generateUserFunction name args body =
                 "elm_union_t"
             else if isListReturn then
                 "elm_list_t"
+            else if isRecordReturn then
+                recordType
             else
                 "double"
+
+        -- Check if this is a zero-arg value definition (not a function)
+        -- For records, generate static constants instead of functions
+        isZeroArgValue =
+            List.isEmpty args
+
+        -- For zero-arg record definitions, generate static constants
+        -- This allows `model = init` to work correctly without needing ()
+        isRecordConstant =
+            isZeroArgValue && isRecordReturn
     in
-    "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+    if isRecordConstant then
+        -- Generate static constant instead of function
+        -- Extract the initializer from ((struct {...}){...})
+        let
+            -- Find the initializer part: starts after "){"
+            initStartMarker = "){"
+            initStartIdx = String.indexes initStartMarker bodyExpr |> List.head |> Maybe.withDefault 0
+            afterInitStart = String.dropLeft (initStartIdx + String.length initStartMarker) bodyExpr
+            -- Remove the trailing }); - find the last })
+            initEndIdx = String.length afterInitStart - 2
+            initializer = String.left initEndIdx afterInitStart
+        in
+        "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ initializer ++ "};"
+    else if isRecordReturn then
+        -- For functions returning records, use a typedef to ensure type consistency
+        -- TCC and standard C treat each anonymous struct as a distinct type
+        let
+            typedefName = "elm_" ++ name ++ "_return_t"
+            initStartMarker = "){"
+            initStartIdx = String.indexes initStartMarker bodyExpr |> List.head |> Maybe.withDefault 0
+            afterInitStart = String.dropLeft (initStartIdx + String.length initStartMarker) bodyExpr
+            initEndIdx = String.length afterInitStart - 2
+            initializer = String.left initEndIdx afterInitStart
+        in
+        "typedef " ++ recordType ++ " " ++ typedefName ++ ";\n" ++
+        "static " ++ typedefName ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return (" ++ typedefName ++ "){" ++ initializer ++ "};\n}"
+    else
+        "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
 
 {-| A local function to be lifted to module level
@@ -4987,6 +5102,25 @@ generateLiftedFunction prefix funcName args body =
 
         -- Detect return type based on the final expression in the body
         -- Be careful to check what's actually being returned, not just what's used in the body
+        -- Check for record returns - generates ((struct { ... }){...})
+        isRecordReturn =
+            String.contains "((struct {" bodyExpr
+
+        -- Extract the record type definition for proper return type
+        recordType =
+            if isRecordReturn then
+                let
+                    startMarker = "((struct {"
+                    startIdx = String.indexes startMarker bodyExpr |> List.head |> Maybe.withDefault 0
+                    searchStart = startIdx + String.length startMarker
+                    afterStart = String.dropLeft searchStart bodyExpr
+                    endIdx = String.indexes "})" afterStart |> List.head |> Maybe.withDefault 0
+                    fieldDefs = String.left endIdx afterStart
+                in
+                "struct {" ++ fieldDefs ++ "}"
+            else
+                ""
+
         returnType =
             -- Check if the expression directly returns a Maybe value
             if String.contains "((elm_union_t){TAG_Just" bodyExpr || String.contains "((elm_union_t){TAG_Nothing" bodyExpr then
@@ -5010,6 +5144,9 @@ generateLiftedFunction prefix funcName args body =
             -- Check if the final result is an elm_list_t (not just using one)
             else if String.startsWith "({ elm_list_t " bodyExpr && String.endsWith "__lst; })" bodyExpr then
                 "elm_list_t"
+            -- Check for record returns
+            else if isRecordReturn then
+                recordType
             else
                 "double"
 
@@ -5033,9 +5170,22 @@ inferCTypeAndInit locatedExpr =
     case expr of
         Src.Record fields ->
             let
+                -- Infer field type from the value expression
+                inferFieldType : Src.Expr -> String
+                inferFieldType fieldValue =
+                    let
+                        valueStr = generateStandaloneExpr fieldValue
+                    in
+                    if String.startsWith "\"" valueStr then
+                        "const char *"
+                    else if String.contains "elm_str_" valueStr || String.contains "elm_from_" valueStr then
+                        "const char *"
+                    else
+                        "double"
+
                 fieldDefs =
                     fields
-                        |> List.map (\( Src.At _ fieldName, _ ) -> "double " ++ fieldName)
+                        |> List.map (\( Src.At _ fieldName, fieldValue ) -> inferFieldType fieldValue ++ " " ++ fieldName)
                         |> String.join "; "
 
                 fieldValues =
@@ -5107,7 +5257,7 @@ inferCTypeAndInit locatedExpr =
             ( "const char *", generateStandaloneExpr locatedExpr )
 
         Src.Call (Src.At _ (Src.Var _ funcName)) _ ->
-            -- Check if function call result is a string
+            -- Check if function call result is a string or record
             let
                 cExpr = generateStandaloneExpr locatedExpr
                 -- String functions, or user functions with string-like names
@@ -5123,7 +5273,8 @@ inferCTypeAndInit locatedExpr =
             if isStringResult then
                 ( "const char *", cExpr )
             else
-                ( "double", cExpr )
+                -- Use typeof to infer the return type (works for records, etc.)
+                ( "typeof(" ++ cExpr ++ ")", cExpr )
 
         Src.Binops pairs finalExpr ->
             -- Check if this is string concatenation
@@ -5143,6 +5294,11 @@ inferCTypeAndInit locatedExpr =
         Src.VarQual Src.CapVar _ _ ->
             -- Qualified constructor (nullary) returns elm_union_t
             ( "elm_union_t", generateStandaloneExpr locatedExpr )
+
+        Src.Var Src.LowVar name ->
+            -- Reference to a variable - could be a local binding or module-level constant
+            -- Use typeof to infer the correct type (works for records, etc.)
+            ( "typeof(elm_" ++ name ++ ")", "elm_" ++ name )
 
         _ ->
             ( "double", generateStandaloneExpr locatedExpr )
