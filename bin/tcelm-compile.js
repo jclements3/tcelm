@@ -1,61 +1,40 @@
 #!/usr/bin/env node
-/**
- * tcelm-compile.js - Node.js wrapper for tcelm Elm compiler
- *
- * Usage: tcelm-compile.js <input.elm> [--target <target>]
- *
- * Reads Elm source, compiles to C code, outputs to stdout.
- */
+// tcelm compiler wrapper - runs compiled Elm code
 
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
-// Load the compiled Elm app
-const elmPath = path.join(__dirname, 'tcelm-compiler.js');
-const elmCode = fs.readFileSync(elmPath, 'utf8');
+// Load the compiled Elm app - it exports to this/global
+const elmModule = require('./tcelm-compiler.js');
+const Elm = elmModule.Elm || global.Elm || this.Elm;
 
-// Create a context with a global scope for Elm (needs browser-like globals)
-const context = {
-    Elm: null,
-    console: console,
-    setTimeout: setTimeout,
-    setInterval: setInterval,
-    clearTimeout: clearTimeout,
-    clearInterval: clearInterval,
-    requestAnimationFrame: (cb) => setTimeout(cb, 16),
-    cancelAnimationFrame: clearTimeout,
-};
-vm.createContext(context);
-vm.runInContext(elmCode, context);
-const Elm = context.Elm;
-
-// Parse arguments
-const args = process.argv.slice(2);
-let inputFile = null;
-let target = 'i386-rtems-nuc';
-
-for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--target' && args[i + 1]) {
-        target = args[i + 1];
-        i++;
-    } else if (!args[i].startsWith('-')) {
-        inputFile = args[i];
-    }
-}
-
-if (!inputFile) {
-    console.error('Usage: tcelm-compile.js <input.elm> [--target <target>]');
+if (!Elm || !Elm.Cli) {
+    console.error('Failed to load Elm.Cli module');
     process.exit(1);
 }
 
-// Read input file
+// Get command line args
+const args = process.argv.slice(2);
+if (args.length < 1) {
+    console.error('Usage: tcelm-compile <source.elm> [--target <target>]');
+    process.exit(1);
+}
+
+const sourceFile = args[0];
+let target = 'tcc';
+
+// Parse --target argument
+const targetIdx = args.indexOf('--target');
+if (targetIdx !== -1 && args[targetIdx + 1]) {
+    target = args[targetIdx + 1];
+}
+
+// Read source file
 let source;
 try {
-    source = fs.readFileSync(inputFile, 'utf8');
-} catch (err) {
-    console.error(`Error reading file: ${inputFile}`);
-    console.error(err.message);
+    source = fs.readFileSync(sourceFile, 'utf8');
+} catch (e) {
+    console.error('Error reading file:', sourceFile);
     process.exit(1);
 }
 
@@ -64,18 +43,15 @@ const app = Elm.Cli.init({
     flags: { target: target }
 });
 
-// Handle output from Elm
+// Handle output
 app.ports.sendOutput.subscribe(function(result) {
     if (result.success) {
-        // Output C code to stdout
         console.log(result.code);
-        process.exit(0);
     } else {
-        // Output error to stderr
         console.error('Compilation error:', result.error);
         process.exit(1);
     }
 });
 
-// Send source to Elm
+// Send source to compiler
 app.ports.receiveSource.send(source);

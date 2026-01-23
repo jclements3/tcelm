@@ -218,14 +218,41 @@ chompQualified startOffset offset src s =
                 }
 
     else
-        P.Good True
-            (Var CapVar (String.slice startOffset newOffset src))
-            { src = s.src
-            , offset = newOffset
-            , indent = s.indent
-            , row = s.row
-            , col = s.col + (newOffset - s.offset)
-            }
+        -- No dot following - this could be a simple constructor or a qualified constructor
+        -- Check if there's a dot in the name (indicating Module.Constructor)
+        let
+            fullName =
+                String.slice startOffset newOffset src
+        in
+        case findLastDot fullName of
+            Just dotIdx ->
+                -- Split into module.Constructor
+                let
+                    modulePart =
+                        String.left dotIdx fullName
+
+                    ctorName =
+                        String.dropLeft (dotIdx + 1) fullName
+                in
+                P.Good True
+                    (VarQual CapVar modulePart ctorName)
+                    { src = s.src
+                    , offset = newOffset
+                    , indent = s.indent
+                    , row = s.row
+                    , col = s.col + (newOffset - s.offset)
+                    }
+
+            Nothing ->
+                -- Simple constructor without module prefix
+                P.Good True
+                    (Var CapVar fullName)
+                    { src = s.src
+                    , offset = newOffset
+                    , indent = s.indent
+                    , row = s.row
+                    , col = s.col + (newOffset - s.offset)
+                    }
 
 
 foreignUpper : x -> Parser x Upper

@@ -384,7 +384,7 @@ generateRtemsCode ast =
                 , ""
                 , "/* Generic tagged union type for custom types */"
                 , "/* Supports both primitive values (.num) and nested unions (.child) */"
-                , "typedef struct elm_union_s { int tag; union { double num; struct elm_union_s *child; } data; } elm_union_t;"
+                , "typedef struct elm_union_s { int tag; union { double num; struct elm_union_s *child; const char *str; } data; } elm_union_t;"
                 , ""
                 , "/* Helper to allocate a nested union on the heap */"
                 , "static elm_union_t *elm_alloc_union(elm_union_t val) {"
@@ -1200,7 +1200,7 @@ generateTccCode ast =
             , "/* Generic tagged union type for custom types */"
             , "/* Supports both primitive values (.num) and nested unions (.child) */"
             , "/* data2 is optional second argument for binary constructors like Add Expr Expr */"
-            , "typedef struct elm_union_s { int tag; union { double num; struct elm_union_s *child; } data; struct elm_union_s *data2; } elm_union_t;"
+            , "typedef struct elm_union_s { int tag; union { double num; struct elm_union_s *child; const char *str; } data; struct elm_union_s *data2; } elm_union_t;"
             , ""
             , "/* Helper to allocate a nested union on the heap */"
             , "static elm_union_t *elm_alloc_union(elm_union_t val) {"
@@ -1446,7 +1446,11 @@ exprToMainValueWithType maybeType expr =
 {-| Convert an expression to a MainValue
 -}
 exprToMainValue : Src.Expr -> MainValue
-exprToMainValue (Src.At region expr) =
+exprToMainValue locatedExpr =
+    let
+        (Src.At region expr) =
+            locatedExpr
+    in
     case expr of
         Src.Str s ->
             MainString s
@@ -1513,8 +1517,9 @@ exprToMainValue (Src.At region expr) =
 
         _ ->
             -- Fallback: try to generate as expression and infer type
+            -- Pass the original located expression directly to avoid reconstructing AST nodes
             let
-                cCode = generateStandaloneExpr (Src.At region expr)
+                cCode = generateStandaloneExpr locatedExpr
                 -- Infer type from generated code patterns
                 inferredType =
                     if String.contains "elm_str_" cCode
@@ -1607,42 +1612,40 @@ generateStandaloneBinops pairs finalExpr =
                         buildPipe (arg ++ "." ++ fieldName) rest
 
                     (Src.At pos (Src.Lambda patterns lambdaBody)) :: rest ->
-                        -- Lambda: create a Call expression and generate it
+                        -- Lambda: inline the lambda with the piped argument
                         let
-                            -- Create a temporary expression representing the piped argument
-                            -- We need to wrap the current arg string in a way that generateInlinedLambda can use
-                            -- The simplest approach: bind to a variable and use that variable
-                            varName =
-                                "__pipe_" ++ String.fromInt (List.length exprs)
-
-                            binding =
-                                inferCTypeFromExpr arg ++ " elm_" ++ varName ++ " = " ++ arg ++ ";"
-
-                            -- Create a Var expression for the bound variable
-                            argExpr =
-                                Src.At pos (Src.Var Src.LowVar varName)
-
-                            -- Generate the inlined lambda call
+                            -- Generate the inlined lambda call directly with the argument string
+                            -- This avoids constructing AST nodes which would require constructor functions
                             inlined =
-                                generateInlinedLambda patterns [ argExpr ] lambdaBody
-
-                            result =
-                                "({ " ++ binding ++ " " ++ inlined ++ "; })"
+                                generateInlinedLambdaWithStringArgs patterns [ arg ] lambdaBody
                         in
-                        buildPipe result rest
+                        buildPipe inlined rest
 
                     (Src.At callPos (Src.Call fn callArgs)) :: rest ->
                         -- Partial application: extend the call with the piped arg
                         -- e.g., items |> String.join "\n" becomes String.join("\n", items)
+                        -- Generate the call directly as a string to avoid constructing AST nodes
                         let
-                            pipeArgExpr =
-                                Src.At callPos (Src.Var Src.LowVar ("__pipe_" ++ String.fromInt (List.length exprs)))
+                            varName =
+                                "__pipe_" ++ String.fromInt (List.length exprs)
 
-                            extendedCall =
-                                Src.At callPos (Src.Call fn (callArgs ++ [ pipeArgExpr ]))
+                            fnStr =
+                                generateStandaloneExpr fn
+
+                            existingArgsStr =
+                                callArgs
+                                    |> List.map generateStandaloneExpr
+                                    |> String.join ", "
+
+                            allArgsStr =
+                                if String.isEmpty existingArgsStr then
+                                    "elm_" ++ varName
+
+                                else
+                                    existingArgsStr ++ ", elm_" ++ varName
 
                             result =
-                                "({ " ++ inferCTypeFromExpr arg ++ " elm___pipe_" ++ String.fromInt (List.length exprs) ++ " = " ++ arg ++ "; " ++ generateStandaloneExpr extendedCall ++ "; })"
+                                "({ " ++ inferCTypeFromExpr arg ++ " elm_" ++ varName ++ " = " ++ arg ++ "; " ++ fnStr ++ "(" ++ allArgsStr ++ "); })"
                         in
                         buildPipe result rest
 
@@ -1678,15 +1681,28 @@ generateStandaloneBinops pairs finalExpr =
 
                     (Src.At callPos (Src.Call fn callArgs)) :: rest ->
                         -- Partial application: extend the call with the piped arg
+                        -- Generate the call directly as a string to avoid constructing AST nodes
                         let
-                            pipeArgExpr =
-                                Src.At callPos (Src.Var Src.LowVar ("__bpipe_" ++ String.fromInt (List.length exprs)))
+                            varName =
+                                "__bpipe_" ++ String.fromInt (List.length exprs)
 
-                            extendedCall =
-                                Src.At callPos (Src.Call fn (callArgs ++ [ pipeArgExpr ]))
+                            fnStr =
+                                generateStandaloneExpr fn
+
+                            existingArgsStr =
+                                callArgs
+                                    |> List.map generateStandaloneExpr
+                                    |> String.join ", "
+
+                            allArgsStr =
+                                if String.isEmpty existingArgsStr then
+                                    "elm_" ++ varName
+
+                                else
+                                    existingArgsStr ++ ", elm_" ++ varName
 
                             result =
-                                "({ " ++ inferCTypeFromExpr innerArg ++ " elm___bpipe_" ++ String.fromInt (List.length exprs) ++ " = " ++ innerArg ++ "; " ++ generateStandaloneExpr extendedCall ++ "; })"
+                                "({ " ++ inferCTypeFromExpr innerArg ++ " elm_" ++ varName ++ " = " ++ innerArg ++ "; " ++ fnStr ++ "(" ++ allArgsStr ++ "); })"
                         in
                         buildBackPipe result rest
 
@@ -1844,14 +1860,28 @@ isUnionValue exprStr =
         || String.contains "elm_union_t" exprStr
 
 
+{-| Check if an expression generates a string value
+-}
+isStringValue : String -> Bool
+isStringValue exprStr =
+    String.startsWith "\"" exprStr
+        || String.startsWith "elm_str_" exprStr
+        || String.startsWith "elm_from_int" exprStr
+        || String.startsWith "elm_from_float" exprStr
+        || String.contains "elm_str_append" exprStr
+
+
 {-| Wrap a value for use in elm_union_t constructor
     - Union values use .child with elm_alloc_union
+    - String values use .str
     - Primitive values use .num
 -}
 wrapUnionData : String -> String
 wrapUnionData valueStr =
     if isUnionValue valueStr then
         "{.child = elm_alloc_union(" ++ valueStr ++ ")}"
+    else if isStringValue valueStr then
+        "{.str = " ++ valueStr ++ "}"
     else
         "{.num = " ++ valueStr ++ "}"
 
@@ -4054,13 +4084,16 @@ generateStandaloneCall fn args =
                 Src.At _ (Src.Var Src.CapVar ctorName) ->
                     -- Unqualified constructor call: Ctor arg1 arg2
                     let
-                        -- Wrap each argument as elm_union_t if it's a primitive
+                        -- Wrap each argument as elm_union_t if it's a primitive or string
                         wrapAsUnion argExpr =
                             let
                                 argStr = generateStandaloneExpr argExpr
                             in
                             if isUnionValue argStr then
                                 argStr
+                            else if isStringValue argStr then
+                                -- Wrap string as union with tag 0 (generic)
+                                "((elm_union_t){0, {.str = " ++ argStr ++ "}, 0})"
                             else
                                 -- Wrap primitive as union with tag 0 (generic)
                                 "((elm_union_t){0, {.num = " ++ argStr ++ "}, 0})"
@@ -4085,13 +4118,16 @@ generateStandaloneCall fn args =
                 Src.At _ (Src.VarQual Src.CapVar moduleName ctorName) ->
                     -- Qualified constructor call: Module.Ctor arg1 arg2
                     let
-                        -- Wrap each argument as elm_union_t if it's a primitive
+                        -- Wrap each argument as elm_union_t if it's a primitive or string
                         wrapAsUnion argExpr =
                             let
                                 argStr = generateStandaloneExpr argExpr
                             in
                             if isUnionValue argStr then
                                 argStr
+                            else if isStringValue argStr then
+                                -- Wrap string as union with tag 0 (generic)
+                                "((elm_union_t){0, {.str = " ++ argStr ++ "}, 0})"
                             else
                                 -- Wrap primitive as union with tag 0 (generic)
                                 "((elm_union_t){0, {.num = " ++ argStr ++ "}, 0})"
@@ -4152,6 +4188,36 @@ generateInlinedLambda patterns args body =
                 )
                 patterns
                 args
+
+        bodyExpr =
+            generateStandaloneExpr body
+    in
+    if List.isEmpty bindings then
+        bodyExpr
+
+    else
+        "({\n        " ++ String.join "\n        " bindings ++ "\n        " ++ bodyExpr ++ ";\n    })"
+
+
+{-| Generate inlined lambda with string arguments (for pipe handling)
+    This avoids needing to construct AST nodes dynamically.
+-}
+generateInlinedLambdaWithStringArgs : List Src.Pattern -> List String -> Src.Expr -> String
+generateInlinedLambdaWithStringArgs patterns argStrings body =
+    let
+        -- Create bindings for each pattern/arg string pair
+        bindings =
+            List.map2
+                (\(Src.At _ pat) argStr ->
+                    case pat of
+                        Src.PVar varName ->
+                            "double elm_" ++ varName ++ " = " ++ argStr ++ ";"
+
+                        _ ->
+                            "/* unsupported pattern in lambda */"
+                )
+                patterns
+                argStrings
 
         bodyExpr =
             generateStandaloneExpr body
@@ -4951,13 +5017,26 @@ generateStandaloneCase scrutinee branches =
                                                         (\patIdx (Src.At _ pat) ->
                                                             case pat of
                                                                 Src.PVar varName ->
-                                                                    -- Check if variable is used as union in result expression
-                                                                    -- Exclude known primitive functions that take numbers
+                                                                    -- Check if variable is used as union, string, or number in result expression
                                                                     let
+                                                                        -- Check if used as string (string append, concatenation)
+                                                                        isUsedAsString =
+                                                                            String.contains ("elm_str_append(elm_" ++ varName ++ ",") resultStr
+                                                                                || String.contains ("elm_str_append(elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains (", elm_" ++ varName ++ ")") resultStr
+                                                                                    && String.contains "elm_str_" resultStr
+                                                                                || String.contains ("\".\", elm_" ++ varName) resultStr
+                                                                                || String.endsWith ("elm_" ++ varName ++ ")") resultStr
+                                                                                    && String.contains "elm_str_append" resultStr
+                                                                                -- Common string variable names
+                                                                                || String.contains "Name" varName
+                                                                                || String.contains "name" varName
+                                                                                || varName == "s"
+                                                                                || varName == "str"
+
                                                                         isPassedToPrimitive =
                                                                             String.contains ("elm_from_int(elm_" ++ varName ++ ")") resultStr
                                                                                 || String.contains ("elm_from_float(elm_" ++ varName ++ ")") resultStr
-                                                                                || String.contains ("elm_str_" ++ "append(elm_" ++ varName ++ ",") resultStr
                                                                                 || String.contains ("+ elm_" ++ varName ++ ")") resultStr
                                                                                 || String.contains ("+ elm_" ++ varName ++ ";") resultStr
                                                                                 || String.contains ("- elm_" ++ varName ++ ")") resultStr
@@ -4969,6 +5048,7 @@ generateStandaloneCase scrutinee branches =
 
                                                                         isUsedAsUnion =
                                                                             not isPassedToPrimitive
+                                                                                && not isUsedAsString
                                                                                 && (String.contains ("(elm_" ++ varName ++ ")") resultStr
                                                                                     || String.contains ("(elm_" ++ varName ++ ",") resultStr
                                                                                     || String.contains (", elm_" ++ varName ++ ")") resultStr
@@ -4983,6 +5063,8 @@ generateStandaloneCase scrutinee branches =
                                                                     in
                                                                     if isUsedAsUnion then
                                                                         "elm_union_t elm_" ++ varName ++ " = *" ++ accessor ++ ";"
+                                                                    else if isUsedAsString then
+                                                                        "const char *elm_" ++ varName ++ " = " ++ accessor ++ "->data.str;"
                                                                     else
                                                                         "double elm_" ++ varName ++ " = " ++ accessor ++ "->data.num;"
 
@@ -5038,13 +5120,26 @@ generateStandaloneCase scrutinee branches =
                                                 (\patIdx (Src.At _ pat) ->
                                                     case pat of
                                                         Src.PVar varName ->
-                                                            -- Check if variable is used as union in result expression
-                                                            -- Exclude known primitive functions that take numbers
+                                                            -- Check if variable is used as union, string, or number in result expression
                                                             let
+                                                                -- Check if used as string (string append, concatenation)
+                                                                isUsedAsString =
+                                                                    String.contains ("elm_str_append(elm_" ++ varName ++ ",") resultStr
+                                                                        || String.contains ("elm_str_append(elm_" ++ varName ++ ")") resultStr
+                                                                        || String.contains (", elm_" ++ varName ++ ")") resultStr
+                                                                            && String.contains "elm_str_" resultStr
+                                                                        || String.contains ("\".\", elm_" ++ varName) resultStr
+                                                                        || String.endsWith ("elm_" ++ varName ++ ")") resultStr
+                                                                            && String.contains "elm_str_append" resultStr
+                                                                        -- Common string variable names
+                                                                        || String.contains "Name" varName
+                                                                        || String.contains "name" varName
+                                                                        || varName == "s"
+                                                                        || varName == "str"
+
                                                                 isPassedToPrimitive =
                                                                     String.contains ("elm_from_int(elm_" ++ varName) resultStr
                                                                         || String.contains ("elm_from_float(elm_" ++ varName) resultStr
-                                                                        || String.contains ("elm_str_" ++ "append(elm_" ++ varName) resultStr
                                                                         || String.contains ("+ elm_" ++ varName) resultStr
                                                                         || String.contains ("- elm_" ++ varName) resultStr
                                                                         || String.contains ("* elm_" ++ varName) resultStr
@@ -5052,6 +5147,7 @@ generateStandaloneCase scrutinee branches =
 
                                                                 isUsedAsUnion =
                                                                     not isPassedToPrimitive
+                                                                        && not isUsedAsString
                                                                         && (String.contains ("(elm_" ++ varName ++ ")") resultStr
                                                                             || String.contains ("(elm_" ++ varName ++ ",") resultStr
                                                                             || String.contains (", elm_" ++ varName ++ ")") resultStr
@@ -5066,6 +5162,8 @@ generateStandaloneCase scrutinee branches =
                                                             in
                                                             if isUsedAsUnion then
                                                                 "elm_union_t elm_" ++ varName ++ " = *" ++ accessor ++ ";"
+                                                            else if isUsedAsString then
+                                                                "const char *elm_" ++ varName ++ " = " ++ accessor ++ "->data.str;"
                                                             else
                                                                 "double elm_" ++ varName ++ " = " ++ accessor ++ "->data.num;"
 
@@ -5097,6 +5195,15 @@ generateStandaloneCase scrutinee branches =
                         -- NOTE: PCons stores (tail, head) due to how the parser builds cons chains
                         Src.PCons (Src.At _ tailPat) (Src.At _ headPat) ->
                             let
+                                -- Helper to infer type and accessor based on variable name
+                                inferVarTypeAndAccessor : String -> String -> ( String, String )
+                                inferVarTypeAndAccessor vName elemExpr =
+                                    if String.contains "Name" vName || String.contains "name" vName
+                                        || vName == "s" || vName == "str" || String.contains "Str" vName then
+                                        ( "const char *", "((elm_union_t)" ++ elemExpr ++ ").data.str" )
+                                    else
+                                        ( "double", "((elm_union_t)" ++ elemExpr ++ ").data.num" )
+
                                 -- Extract bindings from a pattern, returning (bindings, condition)
                                 extractPatternBindings : String -> Src.Pattern_ -> ( String, String )
                                 extractPatternBindings elemExpr pat =
@@ -5117,7 +5224,10 @@ generateStandaloneCase scrutinee branches =
                                                             (\i (Src.At _ innerPat) ->
                                                                 case innerPat of
                                                                     Src.PVar vName ->
-                                                                        "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                        let
+                                                                            ( cType, accessor ) = inferVarTypeAndAccessor vName elemExpr
+                                                                        in
+                                                                        cType ++ " elm_" ++ vName ++ " = " ++ accessor ++ ";"
                                                                     _ ->
                                                                         ""
                                                             )
@@ -5141,7 +5251,7 @@ generateStandaloneCase scrutinee branches =
                                                         [ Src.At _ Src.PAnything, Src.At _ innerPat ] ->
                                                             case innerPat of
                                                                 Src.PVar vName ->
-                                                                    "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                    "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
 
                                                                 -- Nested constructor: Src.At _ (Src.Accessor fieldName)
                                                                 -- Note: Nested union extraction is limited - just extract first level data
@@ -5151,7 +5261,7 @@ generateStandaloneCase scrutinee branches =
                                                                             (\(Src.At _ p) ->
                                                                                 case p of
                                                                                     Src.PVar vName ->
-                                                                                        "const char *elm_" ++ vName ++ " = (const char *)(long)((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                        "const char *elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.str;"
                                                                                     _ ->
                                                                                         ""
                                                                             )
@@ -5165,7 +5275,7 @@ generateStandaloneCase scrutinee branches =
                                                                             (\(Src.At _ p) ->
                                                                                 case p of
                                                                                     Src.PVar vName ->
-                                                                                        "const char *elm_" ++ vName ++ " = (const char *)(long)((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                        "const char *elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.str;"
                                                                                     _ ->
                                                                                         ""
                                                                             )
@@ -5179,11 +5289,11 @@ generateStandaloneCase scrutinee branches =
                                                         [ Src.At _ (Src.PVar posVar), Src.At _ innerPat ] ->
                                                             let
                                                                 -- Note: Nested union extraction is limited - all bind to same first-level data
-                                                                posBinding = "double elm_" ++ posVar ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                posBinding = "double elm_" ++ posVar ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
                                                                 nestedBindings =
                                                                     case innerPat of
                                                                         Src.PVar vName ->
-                                                                            "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                            "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
 
                                                                         Src.PCtor _ _ nestedArgs ->
                                                                             nestedArgs
@@ -5191,7 +5301,7 @@ generateStandaloneCase scrutinee branches =
                                                                                     (\(Src.At _ p) ->
                                                                                         case p of
                                                                                             Src.PVar vName ->
-                                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
                                                                                             _ ->
                                                                                                 ""
                                                                                     )
@@ -5204,7 +5314,7 @@ generateStandaloneCase scrutinee branches =
                                                                                     (\(Src.At _ p) ->
                                                                                         case p of
                                                                                             Src.PVar vName ->
-                                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
                                                                                             _ ->
                                                                                                 ""
                                                                                     )
@@ -5220,7 +5330,7 @@ generateStandaloneCase scrutinee branches =
 
                                                         -- Single arg patterns
                                                         [ Src.At _ (Src.PVar vName) ] ->
-                                                            "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                            "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
 
                                                         _ ->
                                                             ctorArgs
@@ -5228,7 +5338,7 @@ generateStandaloneCase scrutinee branches =
                                                                     (\i (Src.At _ p) ->
                                                                         case p of
                                                                             Src.PVar vName ->
-                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;"
+                                                                                "double elm_" ++ vName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data.num;"
                                                                             Src.PAnything ->
                                                                                 ""
                                                                             _ ->
@@ -5400,7 +5510,7 @@ generateStandaloneCase scrutinee branches =
                                                             (\_ (Src.At _ pat) ->
                                                                 case pat of
                                                                     Src.PVar varName ->
-                                                                        "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data;"
+                                                                        "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data.num;"
 
                                                                     _ ->
                                                                         ""
@@ -5490,7 +5600,7 @@ generateStandaloneCase scrutinee branches =
                                                     (\_ (Src.At _ pat) ->
                                                         case pat of
                                                             Src.PVar varName ->
-                                                                "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data;"
+                                                                "double elm_" ++ varName ++ " = " ++ inlineScrutinee ++ ".data.num;"
 
                                                             _ ->
                                                                 ""
