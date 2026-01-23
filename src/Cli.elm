@@ -7963,6 +7963,32 @@ generateStandaloneCase scrutinee branches =
                                 let
                                     resultStr = generateStandaloneExpr resultExpr
 
+                                    -- Generate conditions for nested constructor patterns (e.g., Just North -> check inner tag)
+                                    innerConditions2 =
+                                        ctorPatterns
+                                            |> List.indexedMap
+                                                (\patIdx (Src.At _ pat) ->
+                                                    let
+                                                        accessor =
+                                                            if patIdx == 0 then
+                                                                "elm_case_scrutinee.data.child"
+                                                            else
+                                                                "elm_case_scrutinee.data2"
+                                                    in
+                                                    case pat of
+                                                        Src.PCtor _ innerCtorName [] ->
+                                                            -- Nested nullary constructor (e.g., Just North)
+                                                            Just (accessor ++ "->tag == TAG_" ++ innerCtorName)
+
+                                                        Src.PCtorQual _ innerModName innerCtorName [] ->
+                                                            -- Nested qualified nullary constructor
+                                                            Just (accessor ++ "->tag == TAG_" ++ innerModName ++ "_" ++ innerCtorName)
+
+                                                        _ ->
+                                                            Nothing
+                                                )
+                                            |> List.filterMap identity
+
                                     bindings =
                                         ctorPatterns
                                             |> List.indexedMap
@@ -8038,9 +8064,14 @@ generateStandaloneCase scrutinee branches =
 
                                             Just guardExpr ->
                                                 "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
+
+                                    -- Combine outer tag condition with inner conditions
+                                    fullCondition2 =
+                                        ("elm_case_scrutinee.tag == TAG_" ++ fullCtorName)
+                                            :: innerConditions2
+                                            |> String.join " && "
                                 in
-                                "(elm_case_scrutinee.tag == TAG_"
-                                    ++ fullCtorName
+                                "(" ++ fullCondition2
                                     ++ " ? ({ "
                                     ++ bindings
                                     ++ " "
