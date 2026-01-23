@@ -25,14 +25,19 @@ type Decl
 
 declaration : Parser E.Problem ( Decl, Position )
 declaration =
-    P.getPosition
+    -- First, check for a doc comment before the declaration
+    Space.chompDocComment E.DeclStart
         |> P.andThen
-            (\start ->
-                P.oneOf E.DeclStart
-                    [ typeDecl start
-                    , portDecl start
-                    , valueDecl start
-                    ]
+            (\maybeDoc ->
+                P.getPosition
+                    |> P.andThen
+                        (\start ->
+                            P.oneOf E.DeclStart
+                                [ typeDecl start maybeDoc
+                                , portDecl start maybeDoc
+                                , valueDecl start maybeDoc
+                                ]
+                        )
             )
 
 
@@ -40,8 +45,8 @@ declaration =
 -- TYPE DECLARATIONS
 
 
-typeDecl : Position -> Parser E.Problem ( Decl, Position )
-typeDecl start =
+typeDecl : Position -> Maybe Src.DocComment -> Parser E.Problem ( Decl, Position )
+typeDecl start maybeDoc =
     Keyword.type_ E.DeclStart
         |> P.andThen
             (\_ ->
@@ -54,17 +59,17 @@ typeDecl start =
                                     |> P.andThen
                                         (\_ ->
                                             Space.chompAndCheckIndent E.DeclSpace E.DeclStart
-                                                |> P.andThen (\_ -> typeAlias start)
+                                                |> P.andThen (\_ -> typeAlias start maybeDoc)
                                         )
                                 , -- type union
-                                  typeUnion start
+                                  typeUnion start maybeDoc
                                 ]
                         )
             )
 
 
-typeAlias : Position -> Parser E.Problem ( Decl, Position )
-typeAlias start =
+typeAlias : Position -> Maybe Src.DocComment -> Parser E.Problem ( Decl, Position )
+typeAlias start maybeDoc =
     P.addLocation (Var.upper E.DeclStart)
         |> P.andThen
             (\name ->
@@ -84,7 +89,7 @@ typeAlias start =
                                                             { name = name
                                                             , args = List.reverse args
                                                             , type_ = tipe
-                                                            , docs = Nothing
+                                                            , docs = maybeDoc
                                                             }
                                                     in
                                                     P.succeed
@@ -97,8 +102,8 @@ typeAlias start =
             )
 
 
-typeUnion : Position -> Parser E.Problem ( Decl, Position )
-typeUnion start =
+typeUnion : Position -> Maybe Src.DocComment -> Parser E.Problem ( Decl, Position )
+typeUnion start maybeDoc =
     P.addLocation (Var.upper E.DeclStart)
         |> P.andThen
             (\name ->
@@ -118,7 +123,7 @@ typeUnion start =
                                                             { name = name
                                                             , args = List.reverse args
                                                             , ctors = variants
-                                                            , docs = Nothing
+                                                            , docs = maybeDoc
                                                             }
                                                     in
                                                     P.succeed
@@ -205,8 +210,8 @@ chompVariantArgs revArgs =
 -- PORT DECLARATIONS
 
 
-portDecl : Position -> Parser E.Problem ( Decl, Position )
-portDecl start =
+portDecl : Position -> Maybe Src.DocComment -> Parser E.Problem ( Decl, Position )
+portDecl _ maybeDoc =
     Keyword.port_ E.DeclStart
         |> P.andThen
             (\_ ->
@@ -230,7 +235,7 @@ portDecl start =
                                                                                 port_ =
                                                                                     { name = name
                                                                                     , type_ = tipe
-                                                                                    , docs = Nothing
+                                                                                    , docs = maybeDoc
                                                                                     }
                                                                             in
                                                                             P.succeed ( PortDecl port_, end )
@@ -246,8 +251,8 @@ portDecl start =
 -- VALUE DECLARATIONS
 
 
-valueDecl : Position -> Parser E.Problem ( Decl, Position )
-valueDecl start =
+valueDecl : Position -> Maybe Src.DocComment -> Parser E.Problem ( Decl, Position )
+valueDecl start maybeDoc =
     P.addLocation (Var.lower E.DeclStart)
         |> P.andThen
             (\((Src.At _ funcName) as locName) ->
@@ -270,20 +275,20 @@ valueDecl start =
                                                                         |> P.andThen
                                                                             (\defName ->
                                                                                 Space.chompAndCheckIndent E.DeclSpace E.DeclStart
-                                                                                    |> P.andThen (\_ -> chompValueBody start defName (Just tipe))
+                                                                                    |> P.andThen (\_ -> chompValueBody start defName (Just tipe) maybeDoc)
                                                                             )
                                                                 )
                                                     )
                                         )
                                 , -- Just definition (no type annotation)
-                                  chompValueBody start locName Nothing
+                                  chompValueBody start locName Nothing maybeDoc
                                 ]
                         )
             )
 
 
-chompValueBody : Position -> Src.Located String -> Maybe Src.Type -> Parser E.Problem ( Decl, Position )
-chompValueBody start name tipe =
+chompValueBody : Position -> Src.Located String -> Maybe Src.Type -> Maybe Src.DocComment -> Parser E.Problem ( Decl, Position )
+chompValueBody start name tipe maybeDoc =
     chompArgs []
         |> P.andThen
             (\revArgs ->
@@ -301,7 +306,7 @@ chompValueBody start name tipe =
                                                 , args = revArgs
                                                 , body = body
                                                 , type_ = tipe
-                                                , docs = Nothing
+                                                , docs = maybeDoc
                                                 }
                                         in
                                         P.succeed
