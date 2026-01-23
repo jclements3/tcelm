@@ -2565,8 +2565,31 @@ generateStandaloneBinops pairs finalExpr =
                                 buildPipe (arg ++ "." ++ fieldName) rest
 
                             Nothing ->
-                                -- Regular function call
-                                buildPipe (generateStandaloneExpr first ++ "(" ++ arg ++ ")") rest
+                                -- Check for partial application (Call with args that needs pipe arg)
+                                case first of
+                                    Src.At pos (Src.Call fn partialArgs) ->
+                                        -- Partial application: add pipe arg to the call
+                                        -- Generate as complete call with all args
+                                        let
+                                            -- Create a synthetic expression for the piped argument
+                                            -- We use a string literal wrapped in an Src.Str as a placeholder
+                                            -- that will be replaced with the actual arg value
+                                            pipeArgExpr = Src.At pos (Src.Str ("__PIPE_ARG__" ++ arg ++ "__PIPE_ARG__"))
+
+                                            -- Full argument list with the pipe arg at the end
+                                            fullArgs = partialArgs ++ [ pipeArgExpr ]
+
+                                            -- Re-generate the full call - this handles Maybe.map, List.filter, etc. correctly
+                                            fullCall =
+                                                generateStandaloneCall fn fullArgs
+                                                    -- Replace the placeholder with the actual arg
+                                                    |> String.replace ("\"__PIPE_ARG__" ++ arg ++ "__PIPE_ARG__\"") arg
+                                        in
+                                        buildPipe fullCall rest
+
+                                    _ ->
+                                        -- Regular function call
+                                        buildPipe (generateStandaloneExpr first ++ "(" ++ arg ++ ")") rest
         in
         buildPipe firstArg functionExprs
 
@@ -3098,9 +3121,10 @@ generateStandaloneCall fn args =
     case fn of
         Src.At _ (Src.Var _ "modBy") ->
             -- modBy divisor dividend = dividend % divisor (positive result)
+            -- Cast to int since modBy is for integers and % requires int operands in C
             case args of
                 [ divisor, dividend ] ->
-                    "((" ++ generateStandaloneExpr dividend ++ " % " ++ generateStandaloneExpr divisor ++ " + " ++ generateStandaloneExpr divisor ++ ") % " ++ generateStandaloneExpr divisor ++ ")"
+                    "((((int)" ++ generateStandaloneExpr dividend ++ " % (int)" ++ generateStandaloneExpr divisor ++ " + (int)" ++ generateStandaloneExpr divisor ++ ") % (int)" ++ generateStandaloneExpr divisor ++ "))"
 
                 [ divisor ] ->
                     -- Partial application - generate a comment placeholder
@@ -3111,9 +3135,10 @@ generateStandaloneCall fn args =
 
         Src.At _ (Src.Var _ "remainderBy") ->
             -- remainderBy divisor dividend = dividend % divisor (can be negative)
+            -- Cast to int since remainderBy is for integers and % requires int operands in C
             case args of
                 [ divisor, dividend ] ->
-                    "(" ++ generateStandaloneExpr dividend ++ " % " ++ generateStandaloneExpr divisor ++ ")"
+                    "((int)" ++ generateStandaloneExpr dividend ++ " % (int)" ++ generateStandaloneExpr divisor ++ ")"
 
                 _ ->
                     "/* remainderBy wrong arity */ 0"
@@ -4056,10 +4081,18 @@ generateStandaloneCall fn args =
                                 valueStr
                             else if isStringValue valueStr then
                                 "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                            else if isRecordValue valueStr then
+                                -- Record needs to be heap-allocated - construct Just directly without elm_Just wrapper
+                                -- This avoids double-indirection through elm_alloc_union
+                                "({ __typeof__(" ++ valueStr ++ ") *__rec = malloc(sizeof(*__rec)); *__rec = " ++ valueStr ++ "; ((elm_union_t){TAG_Just, {.child = (elm_union_t*)__rec}, 0}); })"
                             else
                                 "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
                     in
-                    "elm_Just(" ++ wrappedValue ++ ")"
+                    if isRecordValue valueStr then
+                        -- Record already wrapped with TAG_Just, don't call elm_Just again
+                        wrappedValue
+                    else
+                        "elm_Just(" ++ wrappedValue ++ ")"
 
                 _ ->
                     "/* Just wrong arity */ 0"
@@ -4106,13 +4139,19 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Accessor fieldName) ->
                                     -- Accessor function: .field extracts field from record in Maybe
                                     -- The record is stored via data.child pointer
+                                    -- Just return the field access - wrapping handled below
                                     "((__maybe_val.data.child)->" ++ fieldName ++ ")"
 
                                 _ ->
                                     -- Regular function call
                                     generateStandaloneExpr fnExpr ++ "(__maybe_val.data)"
                     in
-                    "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; __maybe_val.tag == TAG_Just ? ((elm_union_t){TAG_Just, {.str = " ++ fnAppStr ++ "}}) : ((elm_union_t){TAG_Nothing, 0}); })"
+                    case fnExpr of
+                        Src.At _ (Src.Accessor _) ->
+                            -- Accessor returns a field value (string) - wrap with elm_Just using temp var
+                            "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { __result.tag = TAG_Just; __result.data.str = " ++ fnAppStr ++ "; __result.data2 = 0; } else { __result = elm_Nothing(); } __result; })"
+                        _ ->
+                            "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { elm_union_t __inner = {0}; __inner.data.num = " ++ fnAppStr ++ "; __result = elm_Just(__inner); } else { __result = elm_Nothing(); } __result; })"
 
                 _ ->
                     "/* Maybe.map wrong arity */ 0"
@@ -4728,6 +4767,10 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
                                     "({ elm_tuple2_t __elem = __lst.data[__i]; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
+                                -- Accessor function: .fieldName
+                                Src.At _ (Src.Accessor fieldName) ->
+                                    "(__lst.data[__i]." ++ fieldName ++ ")"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
@@ -4822,7 +4865,7 @@ generateStandaloneCall fn args =
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __trues, __falses; __trues.length = 0; __falses.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __trues.data[__trues.length++] = __lst.data[__i]; else __falses.data[__falses.length++] = __lst.data[__i]; } ((elm_tuple2_t){__trues, __falses}); })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __trues, __falses; __trues.length = 0; __falses.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __trues.data[__trues.length++] = __lst.data[__i]; else __falses.data[__falses.length++] = __lst.data[__i]; } ((struct { elm_list_t _0; elm_list_t _1; }){__trues, __falses}); })"
 
                 _ ->
                     "/* List.partition wrong arity */ 0"
@@ -5237,6 +5280,102 @@ generateInlinedLambdaWithStringArgs patterns argStrings body =
         "({\n        " ++ String.join "\n        " bindings ++ "\n        " ++ bodyExpr ++ ";\n    })"
 
 
+{-| Generate a function call with an additional pipe argument.
+    Used when handling partial applications in pipes like: x |> Maybe.map .field
+    The function has partial args from the Call node, plus the pipe arg.
+-}
+generateStandaloneCallWithPipeArg : Src.Expr -> List Src.Expr -> String -> String
+generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
+    case fn of
+        -- Maybe.map with accessor and pipe arg
+        Src.At _ (Src.VarQual _ "Maybe" "map") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    -- fnExpr is the mapper function, pipeArg is the Maybe value
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Accessor fieldName) ->
+                                    "((__maybe_val.data.child)->" ++ fieldName ++ ")"
+
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar varName) ] body) ->
+                                    "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ generateStandaloneExpr body ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_val.data.num)"
+                    in
+                    case fnExpr of
+                        Src.At _ (Src.Accessor _) ->
+                            "({ elm_union_t __maybe_val = " ++ pipeArg ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { __result.tag = TAG_Just; __result.data.str = " ++ fnAppStr ++ "; __result.data2 = 0; } else { __result = elm_Nothing(); } __result; })"
+
+                        _ ->
+                            "({ elm_union_t __maybe_val = " ++ pipeArg ++ "; elm_union_t __result; if (__maybe_val.tag == TAG_Just) { elm_union_t __inner = {0}; __inner.data.num = " ++ fnAppStr ++ "; __result = elm_Just(__inner); } else { __result = elm_Nothing(); } __result; })"
+
+                _ ->
+                    "/* Maybe.map partial wrong arity */ 0"
+
+        -- List.map with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "map") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                Src.At _ (Src.Accessor fieldName) ->
+                                    "(__lst.data[__i]." ++ fieldName ++ ")"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+                _ ->
+                    "/* List.map partial wrong arity */ 0"
+
+        -- List.filter with predicate and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "filter") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; } __result; })"
+
+                _ ->
+                    "/* List.filter partial wrong arity */ 0"
+
+        -- List.take with count and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "take") ->
+            case partialArgs of
+                [ nExpr ] ->
+                    let
+                        nStr = generateStandaloneExpr nExpr
+                    in
+                    "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __n < __lst.length ? __n : __lst.length; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__i]; __result; })"
+
+                _ ->
+                    "/* List.take partial wrong arity */ 0"
+
+        -- Default: just generate a simple function call with all args
+        _ ->
+            let
+                allArgsStr =
+                    (partialArgs |> List.map generateStandaloneExpr)
+                        ++ [ pipeArg ]
+                        |> String.join ", "
+            in
+            generateStandaloneExpr fn ++ "(" ++ allArgsStr ++ ")"
+
+
 {-| Generate a user-defined function in C
 -}
 generateUserFunction : String -> List Src.Pattern -> Src.Expr -> String
@@ -5261,6 +5400,7 @@ generateUserFunction name args body =
                                     isUnionType =
                                         String.contains ("elm_" ++ varName ++ ".tag") bodyExpr
                                             || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+                                            || String.contains ("elm_union_t __maybe_val = elm_" ++ varName) bodyExpr
 
                                     -- Check if parameter is used as a list (has .length or .data access, or is bound as elm_list_t)
                                     isListType =
@@ -5512,6 +5652,10 @@ generateUserFunction name args body =
         isUnionReturn =
             String.contains "((elm_union_t){TAG_" bodyExpr
                 || String.contains "elm_union_t result" bodyExpr
+                || String.contains "elm_Just(" bodyExpr
+                || String.contains "elm_Nothing(" bodyExpr
+                || String.contains "elm_Ok(" bodyExpr
+                || String.contains "elm_Err(" bodyExpr
 
         isListReturn =
             String.contains "((elm_list_t){" bodyExpr
@@ -6268,12 +6412,12 @@ inferCTypeAndInit locatedExpr =
             ( "const char *", generateStandaloneExpr locatedExpr )
 
         Src.Call (Src.At _ (Src.VarQual _ "List" "partition")) _ ->
-            -- List.partition returns (List a, List a) tuple
-            ( "elm_tuple2_t", generateStandaloneExpr locatedExpr )
+            -- List.partition returns (List a, List a) tuple - use custom struct for list elements
+            ( "struct { elm_list_t _0; elm_list_t _1; }", generateStandaloneExpr locatedExpr )
 
         Src.Call (Src.At _ (Src.VarQual _ "List" "unzip")) _ ->
-            -- List.unzip returns (List a, List b) tuple
-            ( "elm_tuple2_t", generateStandaloneExpr locatedExpr )
+            -- List.unzip returns (List a, List b) tuple - use custom struct for list elements
+            ( "struct { elm_list_t _0; elm_list_t _1; }", generateStandaloneExpr locatedExpr )
 
         Src.Call (Src.At _ (Src.Var _ funcName)) _ ->
             -- Check if function call result is a string or record
@@ -6486,6 +6630,18 @@ generateDestructuring pattern expr =
         -- Generate unique temp variable name based on pattern hash
         tempName =
             "__destruct_" ++ String.fromInt (String.length exprStr |> modBy 1000)
+
+        -- Check if expr is List.partition or List.unzip (returns tuple of lists)
+        isListTuple =
+            case expr of
+                Src.At _ (Src.Call (Src.At _ (Src.VarQual _ "List" "partition")) _) ->
+                    True
+
+                Src.At _ (Src.Call (Src.At _ (Src.VarQual _ "List" "unzip")) _) ->
+                    True
+
+                _ ->
+                    False
     in
     case pattern of
         Src.At _ (Src.PTuple first second rest) ->
@@ -6494,7 +6650,9 @@ generateDestructuring pattern expr =
                     2 + List.length rest
 
                 tupleType =
-                    if numElements == 2 then
+                    if isListTuple && numElements == 2 then
+                        "struct { elm_list_t _0; elm_list_t _1; }"
+                    else if numElements == 2 then
                         "elm_tuple2_t"
                     else if numElements == 3 then
                         "elm_tuple3_t"
@@ -6512,9 +6670,12 @@ generateDestructuring pattern expr =
                 generateBinding idx pat =
                     case pat of
                         Src.At _ (Src.PVar name) ->
-                            -- Determine element type from context
-                            -- Default to double, but could be enhanced
-                            Just ("double elm_" ++ name ++ " = " ++ tempName ++ "._" ++ String.fromInt idx ++ ".d;")
+                            -- For list tuples, elements are elm_list_t, accessed directly
+                            -- For regular tuples, elements are elm_elem_t union, access .d
+                            if isListTuple then
+                                Just ("elm_list_t elm_" ++ name ++ " = " ++ tempName ++ "._" ++ String.fromInt idx ++ ";")
+                            else
+                                Just ("double elm_" ++ name ++ " = " ++ tempName ++ "._" ++ String.fromInt idx ++ ".d;")
 
                         Src.At _ Src.PAnything ->
                             -- Wildcard, skip
