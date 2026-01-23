@@ -123,6 +123,10 @@ generateRtemsCode ast =
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
 
+        -- Process imports to generate includes
+        importCode =
+            generateImportCode ast.imports
+
         mainValue =
             extractMain ast
 
@@ -296,6 +300,7 @@ generateRtemsCode ast =
                 , ""
                 , "#include <stdlib.h>"
                 , ""
+                , importCode
                 , "/* RTEMS entry point */"
                 , "typedef unsigned int rtems_task_argument;"
                 , "typedef unsigned int rtems_id;"
@@ -1147,6 +1152,10 @@ generateNativeCode ast =
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
 
+        -- Process imports to generate includes
+        importCode =
+            generateImportCode ast.imports
+
         -- Separate helper functions from main
         ( helpers, mainFunc ) =
             List.partition
@@ -1204,6 +1213,7 @@ generateNativeCode ast =
     in
     String.join "\n"
         (header
+            ++ [ importCode ]
             ++ [ "/* Forward declarations */" ]
             ++ forwardDecls
             ++ [ "" ]
@@ -1226,6 +1236,10 @@ generateTccCode ast =
             ast.name
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
+
+        -- Process imports to generate includes and extern declarations
+        importCode =
+            generateImportCode ast.imports
 
         mainValue =
             extractMain ast
@@ -1524,6 +1538,7 @@ generateTccCode ast =
             , "#include <string.h>"
             , "#include <math.h>"
             , ""
+            , importCode
             , "/* String.fromInt - convert int to string (uses rotating buffer pool) */"
             , "#define ELM_FROMINT_POOL_SIZE 64"
             , "static char __elm_fromint_pool[ELM_FROMINT_POOL_SIZE][32];"
@@ -1760,6 +1775,106 @@ generateTccCode ast =
             ++ [ constructorDefinesCode ++ forwardDeclsCode ++ moduleConstantsCode ++ liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */" ]
             ++ mainImpl
         )
+
+
+{-| Generate C code for imports (includes and extern declarations)
+-}
+generateImportCode : List Src.Import -> String
+generateImportCode imports =
+    let
+        -- Built-in modules that don't need includes (handled by runtime)
+        builtinModules =
+            [ "Basics", "String", "List", "Maybe", "Result", "Tuple", "Debug", "Char", "Platform", "Bitwise", "Array", "Dict", "Set", "Json.Decode", "Json.Encode" ]
+
+        -- RTEMS modules that map to specific runtime includes
+        rtemsModuleMap =
+            [ ( "Rtems.Task", "tcelm_task.h" )
+            , ( "Rtems.Interrupt", "tcelm_isr.h" )
+            , ( "Rtems.Uart", "tcelm_uart.h" )
+            , ( "Rtems.Gpio", "tcelm_gpio.h" )
+            , ( "Rtems.Sync", "tcelm_semaphore.h" )
+            , ( "Rtems.Semaphore", "tcelm_semaphore.h" )
+            , ( "Rtems.Mutex", "tcelm_semaphore.h" )
+            , ( "Rtems.Events", "tcelm_events.h" )
+            , ( "Rtems.Clock", "tcelm_clock.h" )
+            , ( "Rtems.Barrier", "tcelm_barrier.h" )
+            , ( "Rtems.SMP", "tcelm_smp.h" )
+            , ( "Rtems.SPI", "tcelm_spi.h" )
+            , ( "Rtems.I2C", "tcelm_i2c.h" )
+            , ( "Rtems.ADC", "tcelm_adc.h" )
+            , ( "Rtems.DAC", "tcelm_dac.h" )
+            , ( "Rtems.Socket", "tcelm_socket.h" )
+            , ( "Rtems.Network", "tcelm_socket.h" )
+            , ( "Rtems.Timer", "tcelm_timer.h" )
+            , ( "Rtems.Channel", "tcelm_channel.h" )
+            , ( "Rtems.MVar", "tcelm_mvar.h" )
+            , ( "Rtems.Budget", "tcelm_budget.h" )
+            , ( "Rtems.Protected", "tcelm_protected.h" )
+            , ( "RMS", "tcelm_rms.h" )
+            , ( "Rtems.RMS", "tcelm_rms.h" )
+            , ( "Platform", "" )
+            , ( "Platform.Cmd", "" )
+            , ( "Platform.Sub", "" )
+            ]
+
+        -- Check if a module needs an include
+        getInclude : String -> Maybe String
+        getInclude modName =
+            rtemsModuleMap
+                |> List.filterMap (\( m, h ) -> if m == modName && h /= "" then Just h else Nothing)
+                |> List.head
+
+        -- Process each import
+        processImport : Src.Import -> Maybe String
+        processImport imp =
+            let
+                (Src.At _ name) = imp.name
+            in
+            if List.member name builtinModules then
+                Nothing
+            else
+                getInclude name
+
+        -- Generate unique includes
+        includes =
+            imports
+                |> List.filterMap processImport
+                |> List.foldr (\h acc -> if List.member h acc then acc else h :: acc) []
+                |> List.map (\h -> "#include \"" ++ h ++ "\"")
+                |> String.join "\n"
+
+        -- Generate extern declarations for local modules (non-RTEMS, non-builtin)
+        isLocalModule : String -> Bool
+        isLocalModule name =
+            not (List.member name builtinModules)
+                && not (String.startsWith "Rtems." name)
+                && name /= "RMS"
+                && name /= "Platform"
+
+        localModules =
+            imports
+                |> List.filterMap
+                    (\imp ->
+                        let
+                            (Src.At _ name) = imp.name
+                        in
+                        if isLocalModule name then
+                            Just name
+                        else
+                            Nothing
+                    )
+
+        -- Generate extern comment for local modules
+        externComment =
+            if List.isEmpty localModules then
+                ""
+            else
+                "/* External modules: " ++ String.join ", " localModules ++ " */\n"
+    in
+    if String.isEmpty includes && String.isEmpty externComment then
+        ""
+    else
+        "/* Imports */\n" ++ includes ++ (if String.isEmpty includes then "" else "\n") ++ externComment ++ "\n"
 
 
 {-| Generate forward declaration for a standalone function
