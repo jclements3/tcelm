@@ -238,6 +238,24 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "String" "join") ->
             Just (generateStringJoin genExpr args)
 
+        Src.At _ (Src.VarQual _ "String" "any") ->
+            Just (generateStringAny genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "all") ->
+            Just (generateStringAll genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "foldl") ->
+            Just (generateStringFoldl genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "foldr") ->
+            Just (generateStringFoldr genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "filter") ->
+            Just (generateStringFilter genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "map") ->
+            Just (generateStringMap genExpr args)
+
         -- Bitwise module
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
             Just (generateBitwiseAnd genExpr args)
@@ -1133,6 +1151,159 @@ generateStringJoin genExpr args =
 
         _ ->
             "/* String.join wrong arity */ 0"
+
+
+generateStringAny : GenExpr -> List Src.Expr -> String
+generateStringAny genExpr args =
+    case args of
+        [ predExpr, strExpr ] ->
+            let
+                strStr =
+                    genExpr strExpr
+
+                predAppStr =
+                    case predExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __str[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.VarQual _ "Char" fnName) ->
+                            Shared.generateCharPredCall fnName "__str[__i]"
+
+                        _ ->
+                            genExpr predExpr ++ "(__str[__i])"
+            in
+            "({ const char *__str = " ++ strStr ++ "; int __result = 0; for (int __i = 0; __str[__i]; __i++) { if (" ++ predAppStr ++ ") { __result = 1; break; } } __result; })"
+
+        _ ->
+            "/* String.any wrong arity */ 0"
+
+
+generateStringAll : GenExpr -> List Src.Expr -> String
+generateStringAll genExpr args =
+    case args of
+        [ predExpr, strExpr ] ->
+            let
+                strStr =
+                    genExpr strExpr
+
+                predAppStr =
+                    case predExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __str[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.VarQual _ "Char" fnName) ->
+                            Shared.generateCharPredCall fnName "__str[__i]"
+
+                        _ ->
+                            genExpr predExpr ++ "(__str[__i])"
+            in
+            "({ const char *__str = " ++ strStr ++ "; int __result = 1; for (int __i = 0; __str[__i]; __i++) { if (!(" ++ predAppStr ++ ")) { __result = 0; break; } } __result; })"
+
+        _ ->
+            "/* String.all wrong arity */ 0"
+
+
+generateStringFoldl : GenExpr -> List Src.Expr -> String
+generateStringFoldl genExpr args =
+    case args of
+        [ fnExpr, initExpr, strExpr ] ->
+            let
+                strStr =
+                    genExpr strExpr
+
+                initStr =
+                    genExpr initExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar charName), Src.At _ (Src.PVar accName) ] lambdaBody) ->
+                            "({ double elm_" ++ charName ++ " = __str[__i]; double elm_" ++ accName ++ " = __acc; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__str[__i], __acc)"
+            in
+            "({ const char *__str = " ++ strStr ++ "; int __acc = " ++ initStr ++ "; for (int __i = 0; __str[__i]; __i++) { __acc = " ++ fnAppStr ++ "; } __acc; })"
+
+        _ ->
+            "/* String.foldl wrong arity */ 0"
+
+
+generateStringFoldr : GenExpr -> List Src.Expr -> String
+generateStringFoldr genExpr args =
+    case args of
+        [ fnExpr, initExpr, strExpr ] ->
+            let
+                strStr =
+                    genExpr strExpr
+
+                initStr =
+                    genExpr initExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar charName), Src.At _ (Src.PVar accName) ] lambdaBody) ->
+                            "({ double elm_" ++ charName ++ " = __str[__i]; double elm_" ++ accName ++ " = __acc; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__str[__i], __acc)"
+            in
+            "({ const char *__str = " ++ strStr ++ "; int __len = 0; while (__str[__len]) __len++; int __acc = " ++ initStr ++ "; for (int __i = __len - 1; __i >= 0; __i--) { __acc = " ++ fnAppStr ++ "; } __acc; })"
+
+        _ ->
+            "/* String.foldr wrong arity */ 0"
+
+
+generateStringFilter : GenExpr -> List Src.Expr -> String
+generateStringFilter genExpr args =
+    case args of
+        [ predExpr, strExpr ] ->
+            let
+                strStr =
+                    genExpr strExpr
+
+                predAppStr =
+                    case predExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __str[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.VarQual _ "Char" fnName) ->
+                            Shared.generateCharPredCall fnName "__str[__i]"
+
+                        _ ->
+                            genExpr predExpr ++ "(__str[__i])"
+            in
+            "({ static char __filter_buf[256]; const char *__str = " ++ strStr ++ "; int __j = 0; for (int __i = 0; __str[__i] && __j < 255; __i++) { if (" ++ predAppStr ++ ") { __filter_buf[__j++] = __str[__i]; } } __filter_buf[__j] = 0; __filter_buf; })"
+
+        _ ->
+            "/* String.filter wrong arity */ 0"
+
+
+generateStringMap : GenExpr -> List Src.Expr -> String
+generateStringMap genExpr args =
+    case args of
+        [ fnExpr, strExpr ] ->
+            let
+                strStr =
+                    genExpr strExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __str[__i]; " ++ genExpr lambdaBody ++ "; })"
+
+                        Src.At _ (Src.VarQual _ "Char" "toUpper") ->
+                            "((__str[__i] >= 'a' && __str[__i] <= 'z') ? __str[__i] - 32 : __str[__i])"
+
+                        Src.At _ (Src.VarQual _ "Char" "toLower") ->
+                            "((__str[__i] >= 'A' && __str[__i] <= 'Z') ? __str[__i] + 32 : __str[__i])"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__str[__i])"
+            in
+            "({ static char __map_buf[256]; const char *__str = " ++ strStr ++ "; int __i; for (__i = 0; __str[__i] && __i < 255; __i++) __map_buf[__i] = " ++ fnAppStr ++ "; __map_buf[__i] = 0; __map_buf; })"
+
+        _ ->
+            "/* String.map wrong arity */ 0"
 
 
 
