@@ -5908,7 +5908,17 @@ generateStandaloneCase scrutinee branches =
 
                         Src.PVar varName ->
                             -- Variable binding - bind scrutinee to variable name
-                            "({\n            double elm_"
+                            -- Use appropriate type based on detected scrutinee type
+                            let
+                                varType =
+                                    if isListCase then
+                                        "elm_list_t"
+                                    else if isCustomTypeCase then
+                                        "elm_union_t"
+                                    else
+                                        "double"
+                            in
+                            "({\n            " ++ varType ++ " elm_"
                                 ++ varName
                                 ++ " = elm_case_scrutinee;\n            "
                                 ++ generateStandaloneExpr resultExpr
