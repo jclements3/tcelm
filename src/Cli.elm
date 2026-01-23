@@ -4825,6 +4825,15 @@ generateUserFunction name args body =
                                             "struct { " ++ fieldDefs ++ "; }"
                                         else
                                             ""
+                                    -- Check if parameter is used as a tuple (has ._0, ._1 access or assigned to elm_tuple2_t/elm_tuple3_t)
+                                    isTuple2Type =
+                                        String.contains ("elm_" ++ varName ++ "._0") bodyExpr
+                                            || String.contains ("elm_" ++ varName ++ "._1") bodyExpr
+                                            || String.contains ("elm_tuple2_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
+
+                                    isTuple3Type =
+                                        String.contains ("elm_" ++ varName ++ "._2") bodyExpr
+                                            || String.contains ("elm_tuple3_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
                                 in
                                 if isListType then
                                     "elm_list_t elm_" ++ varName
@@ -4832,6 +4841,10 @@ generateUserFunction name args body =
                                     "const char *elm_" ++ varName
                                 else if isUnionType then
                                     "elm_union_t elm_" ++ varName
+                                else if isTuple3Type then
+                                    "elm_tuple3_t elm_" ++ varName
+                                else if isTuple2Type then
+                                    "elm_tuple2_t elm_" ++ varName
                                 else if isRecordType then
                                     -- For struct parameters, generate the struct type directly
                                     -- We'll handle type compatibility at call sites
@@ -5874,6 +5887,34 @@ generateStandaloneCase scrutinee branches =
                 )
                 branches
 
+        -- Check if this is a tuple case (has PTuple patterns)
+        isTupleCase =
+            List.any
+                (\( Src.At _ pat, _ ) ->
+                    case pat of
+                        Src.PTuple _ _ _ ->
+                            True
+
+                        _ ->
+                            False
+                )
+                branches
+
+        -- Count tuple arity if it's a tuple case
+        tupleArity =
+            branches
+                |> List.filterMap
+                    (\( Src.At _ pat, _ ) ->
+                        case pat of
+                            Src.PTuple _ _ rest ->
+                                Just (2 + List.length rest)
+
+                            _ ->
+                                Nothing
+                    )
+                |> List.head
+                |> Maybe.withDefault 2
+
         -- Check if case expression returns a union type (by checking first branch's result)
         returnsUnion =
             case branches of
@@ -5955,36 +5996,73 @@ generateStandaloneCase scrutinee branches =
                                 ++ ")"
 
                         Src.PTuple first second restPats ->
-                            -- Tuple pattern - destructure and bind variables
+                            -- Tuple pattern - destructure and bind variables, check conditions
                             let
                                 allPats =
                                     first :: second :: restPats
 
+                                -- Generate conditions for integer patterns
+                                conditions =
+                                    allPats
+                                        |> List.indexedMap
+                                            (\i (Src.At _ pat) ->
+                                                case pat of
+                                                    Src.PInt n ->
+                                                        Just ("elm_case_scrutinee._" ++ String.fromInt i ++ ".d == " ++ String.fromInt n)
+
+                                                    _ ->
+                                                        Nothing
+                                            )
+                                        |> List.filterMap identity
+
+                                -- Generate bindings for variable patterns
                                 bindings =
                                     allPats
                                         |> List.indexedMap
                                             (\i (Src.At _ pat) ->
                                                 case pat of
                                                     Src.PVar varName ->
-                                                        "double elm_" ++ varName ++ " = elm_case_scrutinee._" ++ String.fromInt i ++ ";"
-
-                                                    Src.PAnything ->
-                                                        ""
+                                                        "double elm_" ++ varName ++ " = elm_case_scrutinee._" ++ String.fromInt i ++ ".d;"
 
                                                     _ ->
-                                                        "/* unsupported tuple element pattern */"
+                                                        ""
                                             )
                                         |> List.filter (not << String.isEmpty)
-                                        |> String.join "\n            "
+                                        |> String.join "\n                "
 
                                 bodyStr =
                                     generateStandaloneExpr resultExpr
                             in
-                            "({\n            "
-                                ++ bindings
-                                ++ "\n            "
-                                ++ bodyStr
-                                ++ ";\n        })"
+                            if List.isEmpty conditions then
+                                -- No conditions - just bind variables and return
+                                if String.isEmpty bindings then
+                                    bodyStr
+
+                                else
+                                    "({\n                "
+                                        ++ bindings
+                                        ++ "\n                "
+                                        ++ bodyStr
+                                        ++ ";\n            })"
+
+                            else
+                                -- Has conditions - generate ternary with bindings
+                                let
+                                    conditionStr =
+                                        String.join " && " conditions
+
+                                    bodyWithBindings =
+                                        if String.isEmpty bindings then
+                                            bodyStr
+
+                                        else
+                                            "({\n                "
+                                                ++ bindings
+                                                ++ "\n                "
+                                                ++ bodyStr
+                                                ++ ";\n            })"
+                                in
+                                "(" ++ conditionStr ++ " ? " ++ bodyWithBindings ++ " : " ++ generateBranches rest ++ ")"
 
                         Src.PCtor _ ctorName ctorPatterns ->
                             -- Constructor pattern
@@ -6460,7 +6538,7 @@ generateStandaloneCase scrutinee branches =
                         _ ->
                             "/* unsupported pattern */ " ++ generateBranches rest
     in
-    if hasVarBinding || hasCtorWithData || isListCase then
+    if hasVarBinding || hasCtorWithData || isListCase || isTupleCase then
         -- Use compound statement to bind scrutinee to a variable
         let
             scrutineeType =
@@ -6469,6 +6547,13 @@ generateStandaloneCase scrutinee branches =
 
                 else if isCustomTypeCase then
                     "elm_union_t"
+
+                else if isTupleCase then
+                    if tupleArity == 3 then
+                        "elm_tuple3_t"
+
+                    else
+                        "elm_tuple2_t"
 
                 else
                     "int"
