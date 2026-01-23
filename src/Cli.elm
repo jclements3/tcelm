@@ -131,12 +131,30 @@ generateRtemsCode ast =
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
 
+        modulePrefix =
+            String.replace "." "_" moduleName
+
         -- Process imports to generate includes
         importCode =
             generateImportCode ast.imports
 
         mainValue =
             extractMain ast
+
+        -- Collect user function names for context
+        userFunctionNames =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) =
+                                value.name
+                        in
+                        if name /= "main" && not (List.isEmpty value.args) then
+                            Just name
+                        else
+                            Nothing
+                    )
 
         -- Generate user-defined functions (non-main values with arguments)
         userFunctions =
@@ -148,7 +166,7 @@ generateRtemsCode ast =
                                 value.name
                         in
                         if name /= "main" && not (List.isEmpty value.args) then
-                            Just (generateUserFunction name value.args value.body)
+                            Just (generateUserFunction modulePrefix userFunctionNames name value.args value.body)
 
                         else
                             Nothing
@@ -1265,6 +1283,24 @@ generateTccCode ast =
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
 
+        modulePrefix =
+            String.replace "." "_" moduleName
+
+        -- Collect user function names for context (used for module-prefixed function calls)
+        userFunctionNames =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) =
+                                value.name
+                        in
+                        if name /= "main" && not (List.isEmpty value.args) then
+                            Just name
+                        else
+                            Nothing
+                    )
+
         -- Check if module has a main function
         hasMain =
             ast.values
@@ -1425,13 +1461,15 @@ generateTccCode ast =
                     (\( name, body, _ ) ->
                         let
                             cExpr = generateStandaloneExpr body
-                            -- Check for list type first (before record, since list of records contains struct)
-                            isList = String.contains "elm_list_t" cExpr || String.startsWith "((elm_list_t)" cExpr
+                            -- Check for record list first (special marker format)
+                            isRecordList = String.contains "/*RECORD_LIST:" cExpr
+                            -- Check for list type (before record, since list of records contains struct)
+                            isList = not isRecordList && (String.contains "elm_list_t" cExpr || String.startsWith "((elm_list_t)" cExpr)
                             -- Check for union type (Maybe, Result, etc.) - contains TAG_ usage or elm_union_t
-                            isUnion = not isList && (String.contains "TAG_" cExpr || String.contains "elm_union_t" cExpr || String.contains "elm_Just" cExpr || String.contains "elm_Nothing" cExpr)
+                            isUnion = not isList && not isRecordList && (String.contains "TAG_" cExpr || String.contains "elm_union_t" cExpr || String.contains "elm_Just" cExpr || String.contains "elm_Nothing" cExpr)
                             -- String detection - only if it's a string expression, not just contains a string literal argument
-                            isString = not isUnion && not isList && (String.contains "elm_str_" cExpr || (String.startsWith "\"" cExpr && String.endsWith "\"" cExpr))
-                            isRecord = not isList && String.contains "((struct {" cExpr
+                            isString = not isUnion && not isList && not isRecordList && (String.contains "elm_str_" cExpr || (String.startsWith "\"" cExpr && String.endsWith "\"" cExpr))
+                            isRecord = not isList && not isRecordList && String.contains "((struct {" cExpr
                             -- Extract record type from the expression
                             recordType =
                                 if isRecord then
@@ -1453,8 +1491,49 @@ generateTccCode ast =
                                 else if isRecord then recordType
                                 else "double"
                         in
-                        -- For lists, generate static constants
-                        if isList then
+                        -- For record lists, generate typedef and static array
+                        if isRecordList then
+                            let
+                                -- Extract record type from /*RECORD_LIST:struct {...}*/
+                                typeStartMarker = "/*RECORD_LIST:"
+                                typeStartIdx = String.indexes typeStartMarker cExpr |> List.head |> Maybe.withDefault 0
+                                afterTypeStart = String.dropLeft (typeStartIdx + String.length typeStartMarker) cExpr
+                                typeEndMarker = "*/ "
+                                typeEndIdx = String.indexes typeEndMarker afterTypeStart |> List.head |> Maybe.withDefault 0
+                                recType = String.left typeEndIdx afterTypeStart
+                                -- Extract count from /*END_RECORD_LIST:N*/
+                                countStartMarker = "/*END_RECORD_LIST:"
+                                countStartIdx = String.indexes countStartMarker cExpr |> List.head |> Maybe.withDefault 0
+                                afterCountStart = String.dropLeft (countStartIdx + String.length countStartMarker) cExpr
+                                countEndIdx = String.indexes "*/" afterCountStart |> List.head |> Maybe.withDefault 0
+                                countStr = String.left countEndIdx afterCountStart
+                                -- Extract the data after */ { ... } /*END
+                                -- Find the position after the closing */ of RECORD_LIST comment
+                                afterTypeComment = String.dropLeft (typeEndIdx + String.length typeEndMarker) afterTypeStart
+                                -- Now find the opening { and extract content until } /*END
+                                dataStartIdx = String.indexes "{ " afterTypeComment |> List.head |> Maybe.withDefault 0
+                                afterDataStart = String.dropLeft (dataStartIdx + 2) afterTypeComment
+                                dataEndIdx = String.indexes " } /*END" afterDataStart |> List.head |> Maybe.withDefault (String.length afterDataStart)
+                                dataContent = String.left dataEndIdx afterDataStart
+                                -- Generate typedef name from constant name
+                                -- Use modulePrefix from outer scope (module name with . replaced by _)
+                                typedefName = "elm_" ++ modulePrefix ++ "_" ++ name ++ "_elem_t"
+                                listTypeName = "elm_" ++ modulePrefix ++ "_" ++ name ++ "_list_t"
+                                dataArrayName = "elm_" ++ modulePrefix ++ "_" ++ name ++ "_data"
+                                varName = "elm_" ++ modulePrefix ++ "_" ++ name
+                            in
+                            -- Generate typedef for element
+                            "typedef " ++ recType ++ " " ++ typedefName ++ ";\n" ++
+                            -- Generate static array
+                            "static " ++ typedefName ++ " " ++ dataArrayName ++ "[] = { " ++ dataContent ++ " };\n" ++
+                            -- Generate list wrapper type with typed data pointer
+                            "typedef struct { int length; " ++ typedefName ++ " *data; } " ++ listTypeName ++ ";\n" ++
+                            -- Generate wrapper variable that points to the array
+                            "static " ++ listTypeName ++ " " ++ varName ++ " = { " ++ countStr ++ ", " ++ dataArrayName ++ " };\n" ++
+                            -- Generate alias for backward compatibility (elm_name = module-prefixed name)
+                            "#define elm_" ++ name ++ " " ++ varName
+                        -- For regular lists, generate static constants
+                        else if isList then
                             let
                                 -- Extract initializer from ((elm_list_t){...})
                                 initStartMarker = "((elm_list_t){"
@@ -1501,7 +1580,7 @@ generateTccCode ast =
                                 value.name
                         in
                         if name /= "main" && not (List.isEmpty value.args) then
-                            Just (fixComplexConstantRefs (generateUserFunction name value.args value.body))
+                            Just (fixComplexConstantRefs (generateUserFunction modulePrefix userFunctionNames name value.args value.body))
 
                         else
                             Nothing
@@ -1634,15 +1713,21 @@ generateTccCode ast =
                         in
                         if name /= "main" && not (List.isEmpty value.args) then
                             let
+                                -- Build prefixed name for this function
+                                prefixedName =
+                                    if String.isEmpty modulePrefix then
+                                        name
+                                    else
+                                        modulePrefix ++ "_" ++ name
                                 -- Generate implementation to infer types
-                                implCode = generateUserFunction name value.args value.body
+                                implCode = generateUserFunction modulePrefix userFunctionNames name value.args value.body
                                 -- Extract signature parts from implementation
                                 signatureEnd = String.indexes "(" implCode |> List.head |> Maybe.withDefault 0
                                 paramsStart = signatureEnd + 1
                                 paramsEnd = String.indexes ")" implCode |> List.head |> Maybe.withDefault 0
                                 returnTypeStart = 7 -- Length of "static "
                                 -- Find " elm_<name>(" to locate the function name position
-                                funcNameMarker = " elm_" ++ name ++ "("
+                                funcNameMarker = " elm_" ++ prefixedName ++ "("
                                 returnTypeEnd = String.indexes funcNameMarker implCode |> List.head |> Maybe.withDefault 0
                                 funcReturnType = String.slice returnTypeStart returnTypeEnd implCode
                                 params = String.slice paramsStart paramsEnd implCode
@@ -1650,11 +1735,13 @@ generateTccCode ast =
                                 -- In C, anonymous structs are always different types
                                 isStructReturn = String.contains "struct {" funcReturnType
                                 isStructParam = String.contains "struct {" params
+                                -- Skip typeof return types (needs the type to be declared first)
+                                isTypeofReturn = String.contains "typeof(" funcReturnType
                             in
-                            if isStructReturn || isStructParam then
+                            if isStructReturn || isStructParam || isTypeofReturn then
                                 Nothing
                             else
-                                Just ("static " ++ funcReturnType ++ " elm_" ++ name ++ "(" ++ params ++ ");")
+                                Just ("static " ++ funcReturnType ++ " elm_" ++ prefixedName ++ "(" ++ params ++ ");")
                         else
                             Nothing
                     )
@@ -2044,6 +2131,20 @@ generateTccLibCode ast =
                     )
                 |> String.join "\n\n"
 
+        -- Collect user function names for context
+        userFunctionNames =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) = value.name
+                        in
+                        if not (List.isEmpty value.args) then
+                            Just name
+                        else
+                            Nothing
+                    )
+
         -- Generate user-defined functions with qualified names
         userFunctions =
             ast.values
@@ -2053,13 +2154,8 @@ generateTccLibCode ast =
                             (Src.At _ name) = value.name
                         in
                         if not (List.isEmpty value.args) then
-                            let
-                                -- Generate function with qualified name
-                                funcCode = generateUserFunction name value.args value.body
-                                -- Replace elm_name with elm_ModuleName_name
-                                qualifiedCode = String.replace ("elm_" ++ name) (qualifyName name) funcCode
-                            in
-                            Just qualifiedCode
+                            -- generateUserFunction now handles module prefixing internally
+                            Just (generateUserFunction cModuleName userFunctionNames name value.args value.body)
                         else
                             Nothing
                     )
@@ -2148,6 +2244,20 @@ generateTccHeader ast =
         cModuleName =
             String.replace "." "_" moduleName
 
+        -- Collect user function names for context
+        userFunctionNames =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) = value.name
+                        in
+                        if not (List.isEmpty value.args) then
+                            Just name
+                        else
+                            Nothing
+                    )
+
         -- Get exported names
         (Src.At _ exports) = ast.exports
         exportedNames =
@@ -2179,7 +2289,7 @@ generateTccHeader ast =
             if List.member name exportedNames then
                 let
                     -- Generate the function to infer return type
-                    funcCode = generateUserFunction name value.args value.body
+                    funcCode = generateUserFunction cModuleName userFunctionNames name value.args value.body
                     -- Extract return type (format: static TYPE elm_NAME...)
                     returnTypeStart = 7 -- "static "
                     returnTypeEnd = String.indexes " elm_" funcCode |> List.head |> Maybe.withDefault 0
@@ -2359,7 +2469,8 @@ generateStandaloneForwardDecl (Src.At _ value) =
     let
         (Src.At _ name) = value.name
         -- Generate the implementation first to infer types
-        implCode = generateUserFunction name value.args value.body
+        -- Use empty module prefix for native code (single module)
+        implCode = generateUserFunction "" [] name value.args value.body
         -- Extract the signature from the implementation
         -- Format is: static TYPE elm_NAME(PARAMS) {
         signatureEnd = String.indexes "(" implCode |> List.head |> Maybe.withDefault 0
@@ -2786,9 +2897,8 @@ generateInlineLambdaBodyIndexed patterns body idxExpr elemExpr =
 -}
 generateStandaloneBinopsWithCtx : ExprCtx -> List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
 generateStandaloneBinopsWithCtx ctx pairs finalExpr =
-    -- For now, delegate to non-context version
-    -- The context is mainly needed for Let handling, which is handled separately
-    generateStandaloneBinops pairs finalExpr
+    -- Thread the context through to generateStandaloneBinopsImpl
+    generateStandaloneBinopsImpl ctx pairs finalExpr
 
 
 {-| Generate standalone C code for binary operations (no runtime needed)
@@ -2796,6 +2906,14 @@ generateStandaloneBinopsWithCtx ctx pairs finalExpr =
 -}
 generateStandaloneBinops : List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
 generateStandaloneBinops pairs finalExpr =
+    -- Use default context for backward compatibility
+    generateStandaloneBinopsImpl defaultExprCtx pairs finalExpr
+
+
+{-| Internal implementation with context threading
+-}
+generateStandaloneBinopsImpl : ExprCtx -> List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
+generateStandaloneBinopsImpl ctx pairs finalExpr =
     let
         -- Check if this is a forward pipe chain (all ops are |>)
         isForwardPipe =
@@ -2848,10 +2966,10 @@ generateStandaloneBinops pairs finalExpr =
             firstArg =
                 case pairs of
                     ( expr, _ ) :: _ ->
-                        generateStandaloneExpr expr
+                        generateStandaloneExprWithCtx ctx expr
 
                     [] ->
-                        generateStandaloneExpr finalExpr
+                        generateStandaloneExprWithCtx ctx finalExpr
 
             -- Get expressions for the "functions" (can be functions or accessors)
             functionExprs =
@@ -2878,13 +2996,25 @@ generateStandaloneBinops pairs finalExpr =
                                     Src.At pos (Src.Call fn partialArgs) ->
                                         -- Partial application: use specialized handler that knows about pipe arg
                                         let
-                                            fullCall = generateStandaloneCallWithPipeArg fn partialArgs arg
+                                            fullCall = generateStandaloneCallWithPipeArgCtx ctx fn partialArgs arg
+                                        in
+                                        buildPipe fullCall rest
+
+                                    Src.At pos (Src.VarQual varType moduleName funcName) ->
+                                        -- Qualified function in pipe: use generateStandaloneCall for proper inlining
+                                        -- This handles List.head, List.filter, etc. correctly
+                                        let
+                                            -- Create a fake argument expression from the pipe arg string
+                                            -- We wrap the arg in a Var so generateStandaloneCall can process it
+                                            -- Actually, generateStandaloneCall expects Src.Expr, but we have a string
+                                            -- Use context-aware version for proper module prefixing
+                                            fullCall = generateStandaloneCallWithPipeArgCtx ctx first [] arg
                                         in
                                         buildPipe fullCall rest
 
                                     _ ->
                                         -- Regular function call
-                                        buildPipe (generateStandaloneExpr first ++ "(" ++ arg ++ ")") rest
+                                        buildPipe (generateStandaloneExprWithCtx ctx first ++ "(" ++ arg ++ ")") rest
         in
         buildPipe firstArg functionExprs
 
@@ -2894,7 +3024,7 @@ generateStandaloneBinops pairs finalExpr =
         -- Result: pairs[0](pairs[1](...finalExpr))
         let
             arg =
-                generateStandaloneExpr finalExpr
+                generateStandaloneExprWithCtx ctx finalExpr
 
             functionExprs =
                 pairs
@@ -2917,7 +3047,7 @@ generateStandaloneBinops pairs finalExpr =
 
                             Nothing ->
                                 -- Regular function call
-                                buildBackPipe (generateStandaloneExpr first ++ "(" ++ innerArg ++ ")") rest
+                                buildBackPipe (generateStandaloneExprWithCtx ctx first ++ "(" ++ innerArg ++ ")") rest
         in
         buildBackPipe arg functionExprs
 
@@ -2948,7 +3078,7 @@ generateStandaloneBinops pairs finalExpr =
                                 buildConsExpr rest final
 
                             headCode =
-                                generateStandaloneExpr headExpr
+                                generateStandaloneExprWithCtx ctx headExpr
                         in
                         "({ elm_list_t __cons_result = " ++ tailCode ++ "; for(int __i = __cons_result.length; __i > 0; __i--) __cons_result.data[__i] = __cons_result.data[__i-1]; __cons_result.data[0] = " ++ headCode ++ "; __cons_result.length++; __cons_result; })"
 
@@ -2983,10 +3113,10 @@ generateStandaloneBinops pairs finalExpr =
                         []
 
                     ( expr, Src.At _ op ) :: rest ->
-                        ( generateStandaloneExpr expr, op ) :: buildTerms rest
+                        ( generateStandaloneExprWithCtx ctx expr, op ) :: buildTerms rest
 
             terms = buildTerms pairs
-            finalTerm = generateStandaloneExpr finalExpr
+            finalTerm = generateStandaloneExprWithCtx ctx finalExpr
 
             -- Convert Elm operator to C operator
             elmOpToC op =
@@ -3048,16 +3178,42 @@ generateStandaloneBinops pairs finalExpr =
             -- String comparison using strcmp
             case pairs of
                 [ ( leftExpr, Src.At _ "==" ) ] ->
-                    "(strcmp(" ++ generateStandaloneExpr leftExpr ++ ", " ++ finalTerm ++ ") == 0)"
+                    "(strcmp(" ++ generateStandaloneExprWithCtx ctx leftExpr ++ ", " ++ finalTerm ++ ") == 0)"
 
                 [ ( leftExpr, Src.At _ "/=" ) ] ->
-                    "(strcmp(" ++ generateStandaloneExpr leftExpr ++ ", " ++ finalTerm ++ ") != 0)"
+                    "(strcmp(" ++ generateStandaloneExprWithCtx ctx leftExpr ++ ", " ++ finalTerm ++ ") != 0)"
 
                 _ ->
                     "(" ++ buildExpr terms ++ ")"
 
         else
-            "(" ++ buildExpr terms ++ ")"
+            -- Check if this might be a union type comparison
+            -- If either side contains .tag or .country/.type/.class patterns, compare tags
+            let
+                leftStr = List.head terms |> Maybe.map Tuple.first |> Maybe.withDefault finalTerm
+                isUnionComparison =
+                    -- Check for field access patterns that are likely union types
+                    (String.contains ".country" leftStr || String.contains ".country" finalTerm)
+                    || (String.contains ".type" leftStr || String.contains ".type" finalTerm)
+                    || (String.contains ".class" leftStr || String.contains ".class" finalTerm)
+                    || (String.contains ".kind" leftStr || String.contains ".kind" finalTerm)
+                    || (String.contains ".status" leftStr || String.contains ".status" finalTerm)
+                    || (String.contains ".state" leftStr || String.contains ".state" finalTerm)
+                    -- Also check for direct union comparisons
+                    || (String.contains "elm_union_t" leftStr || String.contains "elm_union_t" finalTerm)
+            in
+            if isUnionComparison then
+                case pairs of
+                    [ ( leftExpr, Src.At _ "==" ) ] ->
+                        "((" ++ generateStandaloneExprWithCtx ctx leftExpr ++ ").tag == (" ++ finalTerm ++ ").tag)"
+
+                    [ ( leftExpr, Src.At _ "/=" ) ] ->
+                        "((" ++ generateStandaloneExprWithCtx ctx leftExpr ++ ").tag != (" ++ finalTerm ++ ").tag)"
+
+                    _ ->
+                        "(" ++ buildExpr terms ++ ")"
+            else
+                "(" ++ buildExpr terms ++ ")"
 
 
 {-| Helper to determine if an expression generates a union value
@@ -3122,6 +3278,8 @@ makeUnionCtor tag dataValue =
 -}
 type alias ExprCtx =
     { funcPrefix : String  -- The enclosing function name for lifted local functions
+    , modulePrefix : String  -- Module name with dots replaced by underscores (for function prefixes)
+    , userFunctions : List String  -- Names of user-defined functions in this module
     }
 
 
@@ -3129,7 +3287,10 @@ type alias ExprCtx =
 -}
 defaultExprCtx : ExprCtx
 defaultExprCtx =
-    { funcPrefix = "main" }
+    { funcPrefix = "main"
+    , modulePrefix = ""
+    , userFunctions = []
+    }
 
 
 {-| Generate standalone C code for a single expression (no runtime)
@@ -3238,10 +3399,10 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
 
                     else
                         -- Not a composition or multiple args - fall back
-                        generateStandaloneCall fn args
+                        generateStandaloneCallWithCtx ctx fn args
 
                 _ ->
-                    generateStandaloneCall fn args
+                    generateStandaloneCallWithCtx ctx fn args
 
         Src.Var varType name ->
             case ( varType, name ) of
@@ -3260,18 +3421,28 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
                     makeUnionCtor ("TAG_" ++ name) "0"
 
                 _ ->
-                    "elm_" ++ name
+                    -- Check if this is a user-defined function that needs module prefix
+                    if List.member name ctx.userFunctions && not (String.isEmpty ctx.modulePrefix) then
+                        "elm_" ++ ctx.modulePrefix ++ "_" ++ name
+                    else
+                        "elm_" ++ name
 
-        Src.VarQual varType moduleName name ->
+        Src.VarQual varType qualModuleName name ->
             case varType of
                 Src.CapVar ->
                     -- Qualified constructor - generate tag value
                     -- For nullary constructors like Src.LowVar, Src.CapVar
-                    makeUnionCtor ("TAG_" ++ moduleName ++ "_" ++ name) "0"
+                    let
+                        prefixedModuleName = String.replace "." "_" qualModuleName
+                    in
+                    makeUnionCtor ("TAG_" ++ prefixedModuleName ++ "_" ++ name) "0"
 
                 Src.LowVar ->
                     -- Qualified variable - reference as function/value
-                    "elm_" ++ moduleName ++ "_" ++ name
+                    let
+                        prefixedModuleName = String.replace "." "_" qualModuleName
+                    in
+                    "elm_" ++ prefixedModuleName ++ "_" ++ name
 
         Src.Case scrutinee branches ->
             generateStandaloneCase scrutinee branches
@@ -3343,6 +3514,8 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
                             "const char *"
                         else if String.contains "elm_str_" valueStr || String.contains "elm_from_" valueStr then
                             "const char *"
+                        else if String.contains "TAG_" valueStr || String.contains "elm_union_t" valueStr then
+                            "elm_union_t"
                         else
                             "double"
 
@@ -3409,7 +3582,7 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
             "({ typeof(elm_" ++ recordName ++ ") __update_tmp = elm_" ++ recordName ++ "; " ++ updateAssignments ++ " __update_tmp; })"
 
         Src.List elements ->
-            -- Generate list literal as elm_list_t
+            -- Generate list literal
             let
                 numElements =
                     List.length elements
@@ -3435,6 +3608,47 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
                         Src.Record _ -> True
                         _ -> False
 
+                -- Check if first element is a record (determines list type)
+                firstIsRecord =
+                    case elements of
+                        first :: _ -> isRecordExpr first
+                        [] -> False
+
+                -- Extract record type from first element if it's a record
+                extractRecordType elemExpr =
+                    let
+                        genExpr = generateStandaloneExpr elemExpr
+                    in
+                    if String.startsWith "((struct {" genExpr then
+                        let
+                            startMarker = "((struct {"
+                            afterStart = String.dropLeft (String.length startMarker) genExpr
+                            endIdx = String.indexes "})" afterStart |> List.head |> Maybe.withDefault 0
+                            fieldDefs = String.left endIdx afterStart
+                        in
+                        "struct {" ++ fieldDefs ++ "}"
+                    else
+                        ""
+
+                recordType =
+                    case elements of
+                        first :: _ -> extractRecordType first
+                        [] -> ""
+
+                -- For record lists, extract just the initializer part of each record
+                extractRecordInitializer genExpr =
+                    if String.startsWith "((struct {" genExpr then
+                        let
+                            initMarker = "){"
+                            initIdx = String.indexes initMarker genExpr |> List.head |> Maybe.withDefault 0
+                            afterInit = String.dropLeft (initIdx + String.length initMarker) genExpr
+                            -- Remove trailing }))
+                            initLen = String.length afterInit - 2
+                        in
+                        "{" ++ String.left initLen afterInit ++ "}"
+                    else
+                        genExpr
+
                 wrapDataElement elemExpr =
                     let
                         genExpr = generateStandaloneExpr elemExpr
@@ -3446,8 +3660,8 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
                                   String.contains "elm_union_t" genExpr)
                     in
                     if isRecord then
-                        -- Records stored via u field but need to be explicitly typed
-                        "{.u = (elm_union_t){0, {.ptr = (void*)&" ++ genExpr ++ "}}}"
+                        -- For record lists, just output the initializer
+                        extractRecordInitializer genExpr
                     else if isUnion then
                         "{.u = " ++ genExpr ++ "}"
                     else if String.startsWith "\"" genExpr then
@@ -3462,6 +3676,9 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
             in
             if numElements == 0 then
                 "((elm_list_t){ .length = 0 })"
+            else if firstIsRecord && recordType /= "" then
+                -- For lists of records, use special marker format
+                "/*RECORD_LIST:" ++ recordType ++ "*/ { " ++ values ++ " } /*END_RECORD_LIST:" ++ String.fromInt numElements ++ "*/"
             else
                 "((elm_list_t){ .length = " ++ String.fromInt numElements ++ ", .data = { " ++ values ++ " } })"
 
@@ -3469,10 +3686,25 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
             "/* unsupported expr */ 0"
 
 
-{-| Generate standalone C code for function calls
+{-| Generate standalone C code for function calls (context-aware)
+-}
+generateStandaloneCallWithCtx : ExprCtx -> Src.Expr -> List Src.Expr -> String
+generateStandaloneCallWithCtx ctx fn args =
+    -- Delegate to implementation
+    generateStandaloneCallImpl ctx fn args
+
+
+{-| Generate standalone C code for function calls (backward compatible)
 -}
 generateStandaloneCall : Src.Expr -> List Src.Expr -> String
 generateStandaloneCall fn args =
+    generateStandaloneCallImpl defaultExprCtx fn args
+
+
+{-| Implementation of standalone call generation with context
+-}
+generateStandaloneCallImpl : ExprCtx -> Src.Expr -> List Src.Expr -> String
+generateStandaloneCallImpl ctx fn args =
     -- Handle built-in functions
     case fn of
         Src.At _ (Src.Var _ "modBy") ->
@@ -4507,9 +4739,59 @@ generateStandaloneCall fn args =
                                                     "((struct { const char *" ++ fieldName ++ "; } *)__maybe_val.data.ptr)->" ++ fieldName
 
                                                 Nothing ->
-                                                    -- Check if body is a record field access nested in something
-                                                    -- For now, fall back to double binding
-                                                    "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ generateStandaloneExpr body ++ "; })"
+                                                    -- Check if body contains any field accesses on the variable
+                                                    -- If so, it's a record and we need data.ptr
+                                                    let
+                                                        bodyStr = generateStandaloneExpr body
+                                                        prefix = "elm_" ++ varName ++ "."
+                                                        hasFieldAccess = String.contains prefix bodyStr
+
+                                                        -- Extract field names accessed on this variable
+                                                        extractFieldNames str =
+                                                            let
+                                                                -- Helper to take characters while predicate is true
+                                                                takeWhileHelper pred chars =
+                                                                    case chars of
+                                                                        [] -> []
+                                                                        c :: rest ->
+                                                                            if pred c then
+                                                                                c :: takeWhileHelper pred rest
+                                                                            else
+                                                                                []
+
+                                                                findFields remaining =
+                                                                    case String.indexes prefix remaining of
+                                                                        [] -> []
+                                                                        idx :: _ ->
+                                                                            let
+                                                                                afterPrefix = String.dropLeft (idx + String.length prefix) remaining
+                                                                                -- Extract alphanumeric chars
+                                                                                fieldChars = String.toList afterPrefix
+                                                                                    |> takeWhileHelper (\c -> Char.isAlphaNum c || c == '_')
+                                                                                fieldName = String.fromList fieldChars
+                                                                                rest = String.dropLeft (idx + String.length prefix + String.length fieldName) remaining
+                                                                            in
+                                                                            if String.isEmpty fieldName then
+                                                                                findFields rest
+                                                                            else
+                                                                                fieldName :: findFields rest
+                                                            in
+                                                            findFields str
+                                                                |> List.foldr (\f acc -> if List.member f acc then acc else f :: acc) []
+
+                                                        fieldNames = extractFieldNames bodyStr
+                                                        -- Generate struct type with all accessed fields (use double for all)
+                                                        structDef =
+                                                            fieldNames
+                                                                |> List.map (\f -> "double " ++ f)
+                                                                |> String.join "; "
+                                                    in
+                                                    if hasFieldAccess && not (List.isEmpty fieldNames) then
+                                                        -- Bind as record pointer with constructed struct type
+                                                        "({ struct { " ++ structDef ++ "; } elm_" ++ varName ++ " = *(struct { " ++ structDef ++ "; } *)__maybe_val.data.ptr; " ++ bodyStr ++ "; })"
+                                                    else
+                                                        -- Regular binding as double
+                                                        "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ bodyStr ++ "; })"
 
                                         -- Constructor pattern: \(Src.At _ n) -> n
                                         [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] ->
@@ -4962,12 +5244,15 @@ generateStandaloneCall fn args =
 
         Src.At _ (Src.VarQual _ "List" "head") ->
             -- List.head list = Maybe first element
+            -- Uses typeof for type inference to support both elm_list_t and typed record lists
             case args of
                 [ listExpr ] ->
                     let
                         listStr = generateStandaloneExpr listExpr
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, __lst.data[0]}) : ((elm_union_t){TAG_Nothing, 0}); })"
+                    -- For typed record lists, wrap the element pointer in elm_union_t.ptr
+                    -- For regular lists, use elm_union_t with data from elm_data_t
+                    "({ typeof(" ++ listStr ++ ") __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.ptr = (void*)&__lst.data[0]}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
 
                 _ ->
                     "/* List.head wrong arity */ 0"
@@ -5262,6 +5547,7 @@ generateStandaloneCall fn args =
 
         Src.At _ (Src.VarQual _ "List" "filter") ->
             -- List.filter pred list = keep elements where pred returns true
+            -- Uses typeof for type inference to support both elm_list_t and typed record lists
             case args of
                 [ fnExpr, listExpr ] ->
                     let
@@ -5270,7 +5556,8 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    -- Use typeof for element type inference
+                                    "({ typeof(__lst.data[0]) elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 -- Handle not << String.isEmpty composition
                                 Src.At _ (Src.Binops [ ( Src.At _ (Src.Var _ "not"), Src.At _ "<<" ) ] (Src.At _ (Src.VarQual _ "String" "isEmpty"))) ->
@@ -5287,7 +5574,8 @@ generateStandaloneCall fn args =
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; __result; })"
+                    -- Use typeof for type inference
+                    "({ typeof(" ++ listStr ++ ") __lst = " ++ listStr ++ "; typeof(__lst) __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; __result; })"
 
                 _ ->
                     "/* List.filter wrong arity */ 0"
@@ -5708,14 +5996,21 @@ generateStandaloneCall fn args =
                         fnName =
                             case fn of
                                 Src.At _ (Src.Var _ name) ->
-                                    "elm_" ++ name
+                                    -- Check if this is a user-defined function that needs module prefix
+                                    if List.member name ctx.userFunctions && not (String.isEmpty ctx.modulePrefix) then
+                                        "elm_" ++ ctx.modulePrefix ++ "_" ++ name
+                                    else
+                                        "elm_" ++ name
 
-                                Src.At _ (Src.VarQual _ moduleName funcName) ->
+                                Src.At _ (Src.VarQual _ qualModuleName funcName) ->
                                     -- Qualified function: Module.function -> elm_Module_function
-                                    "elm_" ++ moduleName ++ "_" ++ funcName
+                                    let
+                                        prefixedModuleName = String.replace "." "_" qualModuleName
+                                    in
+                                    "elm_" ++ prefixedModuleName ++ "_" ++ funcName
 
                                 _ ->
-                                    "/* complex fn */" ++ generateStandaloneExpr fn
+                                    "/* complex fn */" ++ generateStandaloneExprWithCtx ctx fn
 
                         -- Expand record literal arguments to individual field values
                         -- This matches functions with record patterns that take individual field params
@@ -5726,10 +6021,10 @@ generateStandaloneCall fn args =
                                     -- Expand record to field values in alphabetical order by field name
                                     fields
                                         |> List.sortBy (\( Src.At _ fieldName, _ ) -> fieldName)
-                                        |> List.map (\( _, fieldValue ) -> generateStandaloneExpr fieldValue)
+                                        |> List.map (\( _, fieldValue ) -> generateStandaloneExprWithCtx ctx fieldValue)
 
                                 _ ->
-                                    [ generateStandaloneExpr arg ]
+                                    [ generateStandaloneExprWithCtx ctx arg ]
 
                         argStrs =
                             List.concatMap expandCallArg args
@@ -5796,12 +6091,27 @@ generateInlinedLambdaWithStringArgs patterns argStrings body =
         "({\n        " ++ String.join "\n        " bindings ++ "\n        " ++ bodyExpr ++ ";\n    })"
 
 
-{-| Generate a function call with an additional pipe argument.
+{-| Generate a function call with an additional pipe argument (context-aware version).
     Used when handling partial applications in pipes like: x |> Maybe.map .field
     The function has partial args from the Call node, plus the pipe arg.
 -}
+generateStandaloneCallWithPipeArgCtx : ExprCtx -> Src.Expr -> List Src.Expr -> String -> String
+generateStandaloneCallWithPipeArgCtx ctx fn partialArgs pipeArg =
+    -- Delegate to the implementation (for now, passes ctx only to recursive calls)
+    generateStandaloneCallWithPipeArgImpl ctx fn partialArgs pipeArg
+
+
+{-| Generate a function call with an additional pipe argument (backward compatible).
+-}
 generateStandaloneCallWithPipeArg : Src.Expr -> List Src.Expr -> String -> String
 generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
+    generateStandaloneCallWithPipeArgImpl defaultExprCtx fn partialArgs pipeArg
+
+
+{-| Implementation of pipe argument call generation.
+-}
+generateStandaloneCallWithPipeArgImpl : ExprCtx -> Src.Expr -> List Src.Expr -> String -> String
+generateStandaloneCallWithPipeArgImpl ctx fn partialArgs pipeArg =
     case fn of
         -- Maybe.map with accessor and pipe arg
         Src.At _ (Src.VarQual _ "Maybe" "map") ->
@@ -5820,7 +6130,59 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                                         Just fName ->
                                             "((struct { const char *" ++ fName ++ "; } *)__maybe_val.data.ptr)->" ++ fName
                                         Nothing ->
-                                            "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ generateStandaloneExpr body ++ "; })"
+                                            -- Check if body contains any field accesses on the variable
+                                            let
+                                                bodyStr = generateStandaloneExpr body
+                                                prefix = "elm_" ++ varName ++ "."
+                                                hasFieldAccess = String.contains prefix bodyStr
+
+                                                -- Helper to take chars while predicate is true
+                                                takeWhile pred chars =
+                                                    case chars of
+                                                        [] -> []
+                                                        c :: rest ->
+                                                            if pred c then
+                                                                c :: takeWhile pred rest
+                                                            else
+                                                                []
+
+                                                -- Extract field names accessed on this variable
+                                                extractFieldNames str =
+                                                    let
+                                                        findFields remaining =
+                                                            case String.indexes prefix remaining of
+                                                                [] -> []
+                                                                idx :: _ ->
+                                                                    let
+                                                                        afterPrefix = String.dropLeft (idx + String.length prefix) remaining
+                                                                        fieldChars = String.toList afterPrefix
+                                                                            |> takeWhile (\c -> Char.isAlphaNum c || c == '_')
+                                                                        fieldName = String.fromList fieldChars
+                                                                        rest = String.dropLeft (idx + String.length prefix + String.length fieldName) remaining
+                                                                    in
+                                                                    if String.isEmpty fieldName then
+                                                                        findFields rest
+                                                                    else
+                                                                        fieldName :: findFields rest
+                                                    in
+                                                    findFields str
+                                                        |> List.foldr (\f acc -> if List.member f acc then acc else f :: acc) []
+
+                                                fieldNames = extractFieldNames bodyStr
+                                                structDef = fieldNames |> List.map (\f -> "double " ++ f) |> String.join "; "
+
+                                                -- Generate body with pointer dereference instead of variable binding
+                                                -- Replace elm_varName.field with ((struct {...}*)__maybe_val.data.ptr)->field
+                                                ptrRef = "((struct { " ++ structDef ++ "; } *)__maybe_val.data.ptr)"
+                                                replaceFieldAccess fld str =
+                                                    String.replace ("elm_" ++ varName ++ "." ++ fld) (ptrRef ++ "->" ++ fld) str
+                                                modifiedBodyStr = List.foldl replaceFieldAccess bodyStr fieldNames
+                                            in
+                                            if hasFieldAccess && not (List.isEmpty fieldNames) then
+                                                -- Use direct pointer dereference pattern (TCC compatible)
+                                                "({ " ++ modifiedBodyStr ++ "; })"
+                                            else
+                                                "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ bodyStr ++ "; })"
 
                                 -- Constructor pattern: \(Src.At _ n) -> n
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
@@ -5903,7 +6265,8 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    -- Use typeof for element type inference
+                                    "({ typeof(__lst.data[0]) elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 -- Generic lambda with any pattern - use helper
                                 Src.At _ (Src.Lambda patterns lambdaBody) ->
@@ -5912,7 +6275,8 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
-                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; } __result; })"
+                    -- Use typeof for type inference
+                    "({ typeof(" ++ pipeArg ++ ") __lst = " ++ pipeArg ++ "; typeof(__lst) __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result.data[__result.length++] = __lst.data[__i]; } __result; })"
 
                 _ ->
                     "/* List.filter partial wrong arity */ 0"
@@ -6167,8 +6531,9 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
             "({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length; })"
 
         -- List.head with pipe arg (list)
+        -- Uses typeof for type inference to support both elm_list_t and typed record lists
         Src.At _ (Src.VarQual _ "List" "head") ->
-            "({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.num = __lst.data[0].d}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
+            "({ typeof(" ++ pipeArg ++ ") __lst = " ++ pipeArg ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.ptr = (void*)&__lst.data[0]}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
 
         -- List.last with pipe arg (list)
         Src.At _ (Src.VarQual _ "List" "last") ->
@@ -6178,21 +6543,33 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
         _ ->
             let
                 allArgsStr =
-                    (partialArgs |> List.map generateStandaloneExpr)
+                    (partialArgs |> List.map (generateStandaloneExprWithCtx ctx))
                         ++ [ pipeArg ]
                         |> String.join ", "
             in
-            generateStandaloneExpr fn ++ "(" ++ allArgsStr ++ ")"
+            generateStandaloneExprWithCtx ctx fn ++ "(" ++ allArgsStr ++ ")"
 
 
 {-| Generate a user-defined function in C
 -}
-generateUserFunction : String -> List Src.Pattern -> Src.Expr -> String
-generateUserFunction name args body =
+generateUserFunction : String -> List String -> String -> List Src.Pattern -> Src.Expr -> String
+generateUserFunction modulePrefix userFunctions name args body =
     let
+        -- Build the full prefixed function name
+        prefixedName =
+            if String.isEmpty modulePrefix then
+                name
+            else
+                modulePrefix ++ "_" ++ name
+
         -- Generate function body with correct context for lifted local functions
         bodyExpr =
-            generateStandaloneExprWithCtx { funcPrefix = name } body
+            generateStandaloneExprWithCtx
+                { funcPrefix = name
+                , modulePrefix = modulePrefix
+                , userFunctions = userFunctions
+                }
+                body
 
         -- Generate parameter list with type inference based on usage
         params =
@@ -6210,6 +6587,16 @@ generateUserFunction name args body =
                                         String.contains ("elm_" ++ varName ++ ".tag") bodyExpr
                                             || String.contains ("elm_union_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
                                             || String.contains ("elm_union_t __maybe_val = elm_" ++ varName) bodyExpr
+                                            -- Parameter compared with record field (like .country == elm_country)
+                                            -- Detect patterns like: .fieldname == elm_varName where field is likely a union type
+                                            || (String.contains (".country == elm_" ++ varName) bodyExpr)
+                                            || (String.contains (".type == elm_" ++ varName) bodyExpr)
+                                            || (String.contains (".kind == elm_" ++ varName) bodyExpr)
+                                            || (String.contains (".class == elm_" ++ varName) bodyExpr)
+                                            || (String.contains (".status == elm_" ++ varName) bodyExpr)
+                                            || (String.contains (".state == elm_" ++ varName) bodyExpr)
+                                            -- Also detect tag comparison patterns: (elm_varName).tag
+                                            || String.contains ("(elm_" ++ varName ++ ").tag") bodyExpr
 
                                     -- Check if parameter is used as a list (has .length or .data access, or is bound as elm_list_t)
                                     isListType =
@@ -6218,7 +6605,7 @@ generateUserFunction name args body =
                                             || String.contains ("(elm_" ++ varName ++ ").length") bodyExpr
                                             || String.contains ("elm_list_t elm_case_scrutinee = elm_" ++ varName) bodyExpr
 
-                                    -- Check if parameter is used as a string (with string functions)
+                                    -- Check if parameter is used as a string (with string functions or string comparisons)
                                     -- Use more precise patterns with trailing delimiter to avoid matching function name prefixes
                                     isStringType =
                                         String.contains ("elm_str_append(elm_" ++ varName ++ ",") bodyExpr
@@ -6229,6 +6616,15 @@ generateUserFunction name args body =
                                             || String.contains ("strlen(elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("strcmp(elm_" ++ varName ++ ", ") bodyExpr
                                             || String.contains ("strcmp(elm_" ++ varName ++ ",") bodyExpr
+                                            -- Detect string comparisons: .name == elm_varName or elm_varName == .name
+                                            || String.contains (".name == elm_" ++ varName) bodyExpr
+                                            || String.contains ("elm_" ++ varName ++ " == ") bodyExpr && String.contains ".name" bodyExpr
+                                            -- Passed to a function that takes a string (e.g., elm_byName(elm_varName))
+                                            || String.contains ("elm_byName(elm_" ++ varName ++ ")") bodyExpr
+                                            -- Also check for module-prefixed version
+                                            || (not (String.isEmpty modulePrefix) && String.contains ("elm_" ++ modulePrefix ++ "_byName(elm_" ++ varName ++ ")") bodyExpr)
+                                            -- Generic pattern: passed to any user function that might take strings
+                                            || (not (String.isEmpty modulePrefix) && List.any (\fn -> String.contains ("elm_" ++ modulePrefix ++ "_" ++ fn ++ "(elm_" ++ varName) bodyExpr) userFunctions)
 
                                     -- Check if parameter is used as a record (field access like .name, .value)
                                     -- Exclude .tag, .data, .length which are for unions/lists
@@ -6475,6 +6871,27 @@ generateUserFunction name args body =
                 || String.contains "elm_Ok(" bodyExpr
                 || String.contains "elm_Err(" bodyExpr
 
+        -- Check for typeof-based list returns (typed record lists)
+        -- Pattern: ({ typeof(elm_varname) __lst = elm_varname; typeof(__lst) __result; ... __result; })
+        isTypeofListReturn =
+            String.contains "typeof(elm_" bodyExpr && String.contains "__result.length" bodyExpr
+
+        -- Extract the variable name from typeof pattern for proper return type
+        typeofListVarName =
+            if isTypeofListReturn then
+                -- Find typeof(elm_NAME) pattern and extract NAME
+                let
+                    marker = "typeof(elm_"
+                    startIdx = String.indexes marker bodyExpr |> List.head |> Maybe.withDefault 0
+                    afterMarker = String.dropLeft (startIdx + String.length marker) bodyExpr
+                    -- Find the closing paren
+                    endIdx = String.indexes ")" afterMarker |> List.head |> Maybe.withDefault 0
+                    varName = String.left endIdx afterMarker
+                in
+                "elm_" ++ varName
+            else
+                ""
+
         isListReturn =
             String.contains "((elm_list_t){" bodyExpr
                 || String.contains "elm_list_t __" bodyExpr
@@ -6513,6 +6930,9 @@ generateUserFunction name args body =
                 "const char *"
             else if isUnionReturn then
                 "elm_union_t"
+            else if isTypeofListReturn then
+                -- Use typeof for typed list return (e.g., typeof(elm_all))
+                "typeof(" ++ typeofListVarName ++ ")"
             else if isListReturn then
                 "elm_list_t"
             else if isRecordReturn then
@@ -6542,12 +6962,12 @@ generateUserFunction name args body =
             initEndIdx = String.length afterInitStart - 2
             initializer = String.left initEndIdx afterInitStart
         in
-        "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ initializer ++ "};"
+        "static " ++ recordType ++ " elm_" ++ prefixedName ++ " = {" ++ initializer ++ "};"
     else if isRecordReturn then
         -- For functions returning records, use a typedef to ensure type consistency
         -- TCC and standard C treat each anonymous struct as a distinct type
         let
-            typedefName = "elm_" ++ name ++ "_return_t"
+            typedefName = "elm_" ++ prefixedName ++ "_return_t"
             initStartMarker = "){"
             initStartIdx = String.indexes initStartMarker bodyExpr |> List.head |> Maybe.withDefault 0
             afterInitStart = String.dropLeft (initStartIdx + String.length initStartMarker) bodyExpr
@@ -6555,7 +6975,7 @@ generateUserFunction name args body =
             initializer = String.left initEndIdx afterInitStart
         in
         "typedef " ++ recordType ++ " " ++ typedefName ++ ";\n" ++
-        "static " ++ typedefName ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return (" ++ typedefName ++ "){" ++ initializer ++ "};\n}"
+        "static " ++ typedefName ++ " elm_" ++ prefixedName ++ "(" ++ params ++ ") {\n    return (" ++ typedefName ++ "){" ++ initializer ++ "};\n}"
     else if not (String.isEmpty recordPreamble) then
         -- Has record pattern - extract fields directly from parameter
         -- Use individual parameters for each field to avoid anonymous struct incompatibility
@@ -6613,7 +7033,7 @@ generateUserFunction name args body =
                     |> String.join ", "
         in
         -- No preamble needed since fields are passed directly as parameters
-        "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ allParams ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+        "static " ++ returnType ++ " elm_" ++ prefixedName ++ "(" ++ allParams ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
     else
         -- Check for tail recursion and apply TCO if possible
         let
@@ -6640,10 +7060,10 @@ generateUserFunction name args body =
         in
         case tcoBody of
             Just loopCode ->
-                "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    while (1) {\n" ++ loopCode ++ "\n    }\n}"
+                "static " ++ returnType ++ " elm_" ++ prefixedName ++ "(" ++ params ++ ") {\n    while (1) {\n" ++ loopCode ++ "\n    }\n}"
 
             Nothing ->
-                "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+                "static " ++ returnType ++ " elm_" ++ prefixedName ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
 
 {-| Check if an expression contains a tail call to the given function name.
@@ -7661,7 +8081,7 @@ generateStandaloneLetWithPrefix prefix defs body =
 
         -- Use context-aware generation for the body to handle nested lets correctly
         bodyStr =
-            generateStandaloneExprWithCtx { funcPrefix = prefix } body
+            generateStandaloneExprWithCtx { funcPrefix = prefix, modulePrefix = "", userFunctions = [] } body
 
         undefStrs =
             if List.isEmpty undefMacros then
