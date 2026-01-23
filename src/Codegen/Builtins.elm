@@ -271,6 +271,34 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Result" "fromMaybe") ->
             Just (generateResultFromMaybe genExpr args)
 
+        -- Math functions (Basics module, unqualified)
+        Src.At _ (Src.Var _ "floor") ->
+            Just (generateFloor genExpr args)
+
+        Src.At _ (Src.Var _ "ceiling") ->
+            Just (generateCeiling genExpr args)
+
+        Src.At _ (Src.Var _ "round") ->
+            Just (generateRound genExpr args)
+
+        Src.At _ (Src.Var _ "truncate") ->
+            Just (generateTruncate genExpr args)
+
+        Src.At _ (Src.Var _ "sqrt") ->
+            Just (generateSqrt genExpr args)
+
+        Src.At _ (Src.Var _ "logBase") ->
+            Just (generateLogBase genExpr args)
+
+        Src.At _ (Src.Var _ "toFloat") ->
+            Just (generateToFloat genExpr args)
+
+        Src.At _ (Src.Var _ "isEven") ->
+            Just (generateIsEven genExpr args)
+
+        Src.At _ (Src.Var _ "isOdd") ->
+            Just (generateIsOdd genExpr args)
+
         -- Not a builtin we handle here
         _ ->
             Nothing
@@ -1056,3 +1084,112 @@ generateResultFromMaybe genExpr args =
 
         _ ->
             "/* Result.fromMaybe wrong arity */ 0"
+
+
+
+-- MATH/BASICS FUNCTIONS
+
+
+generateFloor : GenExpr -> List Src.Expr -> String
+generateFloor genExpr args =
+    case args of
+        [ x ] ->
+            "((int)" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* floor wrong arity */ 0"
+
+
+generateCeiling : GenExpr -> List Src.Expr -> String
+generateCeiling genExpr args =
+    case args of
+        [ x ] ->
+            let
+                xStr =
+                    genExpr x
+            in
+            "((int)" ++ xStr ++ " + (" ++ xStr ++ " > (int)" ++ xStr ++ " ? 1 : 0))"
+
+        _ ->
+            "/* ceiling wrong arity */ 0"
+
+
+generateRound : GenExpr -> List Src.Expr -> String
+generateRound genExpr args =
+    case args of
+        [ x ] ->
+            let
+                xStr =
+                    genExpr x
+            in
+            "(" ++ xStr ++ " >= 0 ? (int)(" ++ xStr ++ " + 0.5) : (int)(" ++ xStr ++ " - 0.5))"
+
+        _ ->
+            "/* round wrong arity */ 0"
+
+
+generateTruncate : GenExpr -> List Src.Expr -> String
+generateTruncate genExpr args =
+    case args of
+        [ x ] ->
+            "((int)" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* truncate wrong arity */ 0"
+
+
+generateSqrt : GenExpr -> List Src.Expr -> String
+generateSqrt genExpr args =
+    case args of
+        [ x ] ->
+            "sqrt(" ++ genExpr x ++ ")"
+
+        _ ->
+            "/* sqrt wrong arity */ 0"
+
+
+generateLogBase : GenExpr -> List Src.Expr -> String
+generateLogBase genExpr args =
+    case args of
+        [ base, x ] ->
+            let
+                baseStr =
+                    genExpr base
+
+                xStr =
+                    genExpr x
+            in
+            "({ int __b = " ++ baseStr ++ ", __x = " ++ xStr ++ ", __r = 0; if (__b > 1 && __x > 0) { while (__x >= __b) { __x /= __b; __r++; } } __r; })"
+
+        _ ->
+            "/* logBase wrong arity */ 0"
+
+
+generateToFloat : GenExpr -> List Src.Expr -> String
+generateToFloat genExpr args =
+    case args of
+        [ n ] ->
+            "((double)" ++ genExpr n ++ ")"
+
+        _ ->
+            "/* toFloat wrong arity */ 0"
+
+
+generateIsEven : GenExpr -> List Src.Expr -> String
+generateIsEven genExpr args =
+    case args of
+        [ n ] ->
+            "((" ++ genExpr n ++ " % 2) == 0)"
+
+        _ ->
+            "/* isEven wrong arity */ 0"
+
+
+generateIsOdd : GenExpr -> List Src.Expr -> String
+generateIsOdd genExpr args =
+    case args of
+        [ n ] ->
+            "((" ++ genExpr n ++ " % 2) != 0)"
+
+        _ ->
+            "/* isOdd wrong arity */ 0"
