@@ -119,5 +119,9 @@ After fix (CORRECT):
 ```
 
 ## Status
-- Fix 1 (PCtor): APPLIED to Cli.elm
-- Fix 2 (PCtorQual): NOT YET APPLIED - waiting for other chat to finish editing Cli.elm
+- Fix 1 (PCtor): APPLIED to Cli.elm (commit eb41651 or earlier)
+- Fix 2 (PCtorQual): APPLIED to Cli.elm (commit 836f029)
+
+Both fixes have been applied and tested. Nested pattern matching on
+`Just North`, `Just South`, etc. now generates correct C code that
+compares both the outer tag (TAG_Just) and inner tag (TAG_North, etc.).
