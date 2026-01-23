@@ -134,6 +134,15 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Tuple" "pair") ->
             Just (generateTuplePair genExpr args)
 
+        Src.At _ (Src.VarQual _ "Tuple" "mapFirst") ->
+            Just (generateTupleMapFirst genExpr args)
+
+        Src.At _ (Src.VarQual _ "Tuple" "mapSecond") ->
+            Just (generateTupleMapSecond genExpr args)
+
+        Src.At _ (Src.VarQual _ "Tuple" "mapBoth") ->
+            Just (generateTupleMapBoth genExpr args)
+
         -- Char module
         Src.At _ (Src.VarQual _ "Char" "toCode") ->
             Just (generateCharToCode genExpr args)
@@ -297,6 +306,80 @@ generateBuiltinCall genExpr ctx fn args =
             Just (generateIsEven genExpr args)
 
         Src.At _ (Src.Var _ "isOdd") ->
+            Just (generateIsOdd genExpr args)
+
+        -- List module (simple functions - map/filter/foldl/foldr/etc remain in Cli.elm)
+        Src.At _ (Src.VarQual _ "List" "head") ->
+            Just (generateListHead genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "tail") ->
+            Just (generateListTail genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "last") ->
+            Just (generateListLast genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "sum") ->
+            Just (generateListSum genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "product") ->
+            Just (generateListProduct genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "maximum") ->
+            Just (generateListMaximum genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "minimum") ->
+            Just (generateListMinimum genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "reverse") ->
+            Just (generateListReverse genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "member") ->
+            Just (generateListMember genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "range") ->
+            Just (generateListRange genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "take") ->
+            Just (generateListTake genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "drop") ->
+            Just (generateListDrop genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "append") ->
+            Just (generateListAppend genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "repeat") ->
+            Just (generateListRepeat genExpr args)
+
+        Src.At _ (Src.VarQual _ "List" "intersperse") ->
+            Just (generateListIntersperse genExpr args)
+
+        -- Math functions (Basics module, qualified)
+        Src.At _ (Src.VarQual _ "Basics" "floor") ->
+            Just (generateFloor genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "ceiling") ->
+            Just (generateCeiling genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "round") ->
+            Just (generateRound genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "truncate") ->
+            Just (generateTruncate genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "sqrt") ->
+            Just (generateSqrt genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "logBase") ->
+            Just (generateLogBase genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "toFloat") ->
+            Just (generateToFloat genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "isEven") ->
+            Just (generateIsEven genExpr args)
+
+        Src.At _ (Src.VarQual _ "Basics" "isOdd") ->
             Just (generateIsOdd genExpr args)
 
         -- Not a builtin we handle here
@@ -547,6 +630,80 @@ generateTuplePair genExpr args =
 
         _ ->
             "/* Tuple.pair wrong arity */ 0"
+
+
+generateTupleMapFirst : GenExpr -> List Src.Expr -> String
+generateTupleMapFirst genExpr args =
+    case args of
+        [ fnExpr, tupleExpr ] ->
+            let
+                tupleStr =
+                    genExpr tupleExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __tuple_in._0; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__tuple_in._0)"
+            in
+            "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = " ++ fnAppStr ++ "; __tuple_out._1 = __tuple_in._1; __tuple_out; })"
+
+        _ ->
+            "/* Tuple.mapFirst wrong arity */ 0"
+
+
+generateTupleMapSecond : GenExpr -> List Src.Expr -> String
+generateTupleMapSecond genExpr args =
+    case args of
+        [ fnExpr, tupleExpr ] ->
+            let
+                tupleStr =
+                    genExpr tupleExpr
+
+                fnAppStr =
+                    case fnExpr of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __tuple_in._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnExpr ++ "(__tuple_in._1)"
+            in
+            "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = __tuple_in._0; __tuple_out._1 = " ++ fnAppStr ++ "; __tuple_out; })"
+
+        _ ->
+            "/* Tuple.mapSecond wrong arity */ 0"
+
+
+generateTupleMapBoth : GenExpr -> List Src.Expr -> String
+generateTupleMapBoth genExpr args =
+    case args of
+        [ fnFirst, fnSecond, tupleExpr ] ->
+            let
+                tupleStr =
+                    genExpr tupleExpr
+
+                fnFirstApp =
+                    case fnFirst of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __tuple_in._0; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnFirst ++ "(__tuple_in._0)"
+
+                fnSecondApp =
+                    case fnSecond of
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                            "({ double elm_" ++ pname ++ " = __tuple_in._1; " ++ genExpr lambdaBody ++ "; })"
+
+                        _ ->
+                            genExpr fnSecond ++ "(__tuple_in._1)"
+            in
+            "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = " ++ fnFirstApp ++ "; __tuple_out._1 = " ++ fnSecondApp ++ "; __tuple_out; })"
+
+        _ ->
+            "/* Tuple.mapBoth wrong arity */ 0"
 
 
 
@@ -1193,3 +1350,238 @@ generateIsOdd genExpr args =
 
         _ ->
             "/* isOdd wrong arity */ 0"
+
+
+
+-- LIST MODULE HANDLERS
+
+
+generateListHead : GenExpr -> List Src.Expr -> String
+generateListHead genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ typeof(" ++ listStr ++ ") __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.ptr = (void*)&__lst.data[0]}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
+
+        _ ->
+            "/* List.head wrong arity */ 0"
+
+
+generateListTail : GenExpr -> List Src.Expr -> String
+generateListTail genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { __result = (elm_union_t){TAG_Just, __lst.length - 1}; } __result; })"
+
+        _ ->
+            "/* List.tail wrong arity */ 0"
+
+
+generateListLast : GenExpr -> List Src.Expr -> String
+generateListLast genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, __lst.data[__lst.length - 1]}) : ((elm_union_t){TAG_Nothing, 0}); })"
+
+        _ ->
+            "/* List.last wrong arity */ 0"
+
+
+generateListSum : GenExpr -> List Src.Expr -> String
+generateListSum genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; double __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i].d; __sum; })"
+
+        _ ->
+            "/* List.sum wrong arity */ 0"
+
+
+generateListProduct : GenExpr -> List Src.Expr -> String
+generateListProduct genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; double __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i].d; __prod; })"
+
+        _ ->
+            "/* List.product wrong arity */ 0"
+
+
+generateListMaximum : GenExpr -> List Src.Expr -> String
+generateListMaximum genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { int __max = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] > __max) __max = __lst.data[__i]; __result = (elm_union_t){TAG_Just, __max}; } __result; })"
+
+        _ ->
+            "/* List.maximum wrong arity */ 0"
+
+
+generateListMinimum : GenExpr -> List Src.Expr -> String
+generateListMinimum genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { int __min = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] < __min) __min = __lst.data[__i]; __result = (elm_union_t){TAG_Just, __min}; } __result; })"
+
+        _ ->
+            "/* List.minimum wrong arity */ 0"
+
+
+generateListReverse : GenExpr -> List Src.Expr -> String
+generateListReverse genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __rev; __rev.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __rev.data[__i] = __lst.data[__lst.length - 1 - __i]; __rev; })"
+
+        _ ->
+            "/* List.reverse wrong arity */ 0"
+
+
+generateListMember : GenExpr -> List Src.Expr -> String
+generateListMember genExpr args =
+    case args of
+        [ elemExpr, listExpr ] ->
+            let
+                elemStr =
+                    genExpr elemExpr
+
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; int __elem = " ++ elemStr ++ "; int __found = 0; for (int __i = 0; __i < __lst.length && !__found; __i++) if (__lst.data[__i] == __elem) __found = 1; __found; })"
+
+        _ ->
+            "/* List.member wrong arity */ 0"
+
+
+generateListRange : GenExpr -> List Src.Expr -> String
+generateListRange genExpr args =
+    case args of
+        [ loExpr, hiExpr ] ->
+            let
+                loStr =
+                    genExpr loExpr
+
+                hiStr =
+                    genExpr hiExpr
+            in
+            "({ int __lo = " ++ loStr ++ ", __hi = " ++ hiStr ++ "; elm_list_t __lst; __lst.length = __hi >= __lo ? __hi - __lo + 1 : 0; if (__lst.length > ELM_LIST_MAX) __lst.length = ELM_LIST_MAX; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i].d = __lo + __i; __lst; })"
+
+        _ ->
+            "/* List.range wrong arity */ 0"
+
+
+generateListTake : GenExpr -> List Src.Expr -> String
+generateListTake genExpr args =
+    case args of
+        [ nExpr, listExpr ] ->
+            let
+                nStr =
+                    genExpr nExpr
+
+                listStr =
+                    genExpr listExpr
+            in
+            "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __n < __lst.length ? __n : __lst.length; if (__result.length < 0) __result.length = 0; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__i]; __result; })"
+
+        _ ->
+            "/* List.take wrong arity */ 0"
+
+
+generateListDrop : GenExpr -> List Src.Expr -> String
+generateListDrop genExpr args =
+    case args of
+        [ nExpr, listExpr ] ->
+            let
+                nStr =
+                    genExpr nExpr
+
+                listStr =
+                    genExpr listExpr
+            in
+            "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; int __start = __n < __lst.length ? __n : __lst.length; if (__start < 0) __start = 0; __result.length = __lst.length - __start; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__start + __i]; __result; })"
+
+        _ ->
+            "/* List.drop wrong arity */ 0"
+
+
+generateListAppend : GenExpr -> List Src.Expr -> String
+generateListAppend genExpr args =
+    case args of
+        [ listAExpr, listBExpr ] ->
+            let
+                listAStr =
+                    genExpr listAExpr
+
+                listBStr =
+                    genExpr listBExpr
+            in
+            "({ elm_list_t __a = " ++ listAStr ++ ", __b = " ++ listBStr ++ "; elm_list_t __result; __result.length = __a.length + __b.length; if (__result.length > ELM_LIST_MAX) __result.length = ELM_LIST_MAX; int __i; for (__i = 0; __i < __a.length && __i < __result.length; __i++) __result.data[__i] = __a.data[__i]; for (int __j = 0; __i < __result.length; __i++, __j++) __result.data[__i] = __b.data[__j]; __result; })"
+
+        _ ->
+            "/* List.append wrong arity */ 0"
+
+
+generateListRepeat : GenExpr -> List Src.Expr -> String
+generateListRepeat genExpr args =
+    case args of
+        [ nExpr, elemExpr ] ->
+            let
+                nStr =
+                    genExpr nExpr
+
+                elemStr =
+                    genExpr elemExpr
+            in
+            "({ int __n = " ++ nStr ++ ", __elem = " ++ elemStr ++ "; elm_list_t __lst; __lst.length = __n > 0 ? (__n > ELM_LIST_MAX ? ELM_LIST_MAX : __n) : 0; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i] = __elem; __lst; })"
+
+        _ ->
+            "/* List.repeat wrong arity */ 0"
+
+
+generateListIntersperse : GenExpr -> List Src.Expr -> String
+generateListIntersperse genExpr args =
+    case args of
+        [ sepExpr, listExpr ] ->
+            let
+                sepStr =
+                    genExpr sepExpr
+
+                listStr =
+                    genExpr listExpr
+            in
+            "({ int __sep = " ++ sepStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; if (__lst.length == 0) { __result.length = 0; } else { __result.length = __lst.length * 2 - 1; if (__result.length > ELM_LIST_MAX) __result.length = ELM_LIST_MAX; int __j = 0; for (int __i = 0; __i < __lst.length && __j < __result.length; __i++) { if (__i > 0 && __j < __result.length) __result.data[__j++] = __sep; if (__j < __result.length) __result.data[__j++] = __lst.data[__i]; } __result.length = __j; } __result; })"
+
+        _ ->
+            "/* List.intersperse wrong arity */ 0"

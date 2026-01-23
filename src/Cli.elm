@@ -2994,94 +2994,10 @@ generateStandaloneCallImpl ctx fn args =
 generateStandaloneCallImplFallback : ExprCtx -> Src.Expr -> List Src.Expr -> String
 generateStandaloneCallImplFallback ctx fn args =
     -- Handle built-in functions not yet migrated to Codegen.Builtins
-    -- Note: modBy, remainderBy, abs, negate, min, max, identity, always, never,
-    -- not, clamp, xor, compare, Tuple.first/second/pair, and Char functions
-    -- are now handled by Builtins.generateBuiltinCall (called first in generateStandaloneCallImpl)
+    -- Note: Basic module functions, Tuple.*, Char.*, and simple String.* functions
+    -- are now handled by Builtins.generateBuiltinCall (called first in generateStandaloneCallImpl).
+    -- Complex String functions that need lambda handling (any, all, foldl, foldr, filter, map) remain here.
     case fn of
-        Src.At _ (Src.VarQual _ "Tuple" "mapFirst") ->
-            -- Tuple.mapFirst f (a, b) = (f a, b)
-            case args of
-                [ fnExpr, tupleExpr ] ->
-                    let
-                        tupleStr = generateStandaloneExpr tupleExpr
-
-                        fnAppStr =
-                            case fnExpr of
-                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    let
-                                        bodyStr = generateStandaloneExpr lambdaBody
-                                    in
-                                    "({ double elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
-
-                                _ ->
-                                    generateStandaloneExpr fnExpr ++ "(__tuple_in._0)"
-                    in
-                    "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = " ++ fnAppStr ++ "; __tuple_out._1 = __tuple_in._1; __tuple_out; })"
-
-                _ ->
-                    "/* Tuple.mapFirst wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Tuple" "mapSecond") ->
-            -- Tuple.mapSecond f (a, b) = (a, f b)
-            case args of
-                [ fnExpr, tupleExpr ] ->
-                    let
-                        tupleStr = generateStandaloneExpr tupleExpr
-
-                        fnAppStr =
-                            case fnExpr of
-                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    let
-                                        bodyStr = generateStandaloneExpr lambdaBody
-                                    in
-                                    "({ double elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
-
-                                _ ->
-                                    generateStandaloneExpr fnExpr ++ "(__tuple_in._1)"
-                    in
-                    "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = __tuple_in._0; __tuple_out._1 = " ++ fnAppStr ++ "; __tuple_out; })"
-
-                _ ->
-                    "/* Tuple.mapSecond wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Tuple" "mapBoth") ->
-            -- Tuple.mapBoth f g (a, b) = (f a, g b)
-            case args of
-                [ fnFirst, fnSecond, tupleExpr ] ->
-                    let
-                        tupleStr = generateStandaloneExpr tupleExpr
-
-                        fnFirstAppStr =
-                            case fnFirst of
-                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    let
-                                        bodyStr = generateStandaloneExpr lambdaBody
-                                    in
-                                    "({ double elm_" ++ pname ++ " = __tuple_in._0; " ++ bodyStr ++ "; })"
-
-                                _ ->
-                                    generateStandaloneExpr fnFirst ++ "(__tuple_in._0)"
-
-                        fnSecondAppStr =
-                            case fnSecond of
-                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    let
-                                        bodyStr = generateStandaloneExpr lambdaBody
-                                    in
-                                    "({ double elm_" ++ pname ++ " = __tuple_in._1; " ++ bodyStr ++ "; })"
-
-                                _ ->
-                                    generateStandaloneExpr fnSecond ++ "(__tuple_in._1)"
-                    in
-                    "({ elm_tuple2_t __tuple_in = " ++ tupleStr ++ "; elm_tuple2_t __tuple_out; __tuple_out._0 = " ++ fnFirstAppStr ++ "; __tuple_out._1 = " ++ fnSecondAppStr ++ "; __tuple_out; })"
-
-                _ ->
-                    "/* Tuple.mapBoth wrong arity */ 0"
-
-        -- Note: compare, Char.*, and simple String.* functions are now handled
-        -- by Builtins.generateBuiltinCall. Complex String functions that need
-        -- lambda handling (any, all, foldl, foldr, filter, map) remain here.
-
         Src.At _ (Src.VarQual _ "String" "any") ->
             -- String.any pred s = True if any char satisfies pred
             case args of
@@ -3781,169 +3697,8 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* List.isEmpty wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "List" "head") ->
-            -- List.head list = Maybe first element
-            -- Uses typeof for type inference to support both elm_list_t and typed record lists
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    -- For typed record lists, wrap the element pointer in elm_union_t.ptr
-                    -- For regular lists, use elm_union_t with data from elm_data_t
-                    "({ typeof(" ++ listStr ++ ") __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.ptr = (void*)&__lst.data[0]}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
-
-                _ ->
-                    "/* List.head wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "tail") ->
-            -- List.tail list = Maybe rest of list after first element
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { __result = (elm_union_t){TAG_Just, __lst.length - 1}; } __result; })"
-
-                _ ->
-                    "/* List.tail wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "last") ->
-            -- List.last list = Maybe last element
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, __lst.data[__lst.length - 1]}) : ((elm_union_t){TAG_Nothing, 0}); })"
-
-                _ ->
-                    "/* List.last wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "sum") ->
-            -- List.sum list = sum of all elements
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; double __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i].d; __sum; })"
-
-                _ ->
-                    "/* List.sum wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "product") ->
-            -- List.product list = product of all elements
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; double __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i].d; __prod; })"
-
-                _ ->
-                    "/* List.product wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "maximum") ->
-            -- List.maximum list = Maybe maximum element
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { int __max = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] > __max) __max = __lst.data[__i]; __result = (elm_union_t){TAG_Just, __max}; } __result; })"
-
-                _ ->
-                    "/* List.maximum wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "minimum") ->
-            -- List.minimum list = Maybe minimum element
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_union_t __result; if (__lst.length == 0) { __result = (elm_union_t){TAG_Nothing, 0}; } else { int __min = __lst.data[0]; for (int __i = 1; __i < __lst.length; __i++) if (__lst.data[__i] < __min) __min = __lst.data[__i]; __result = (elm_union_t){TAG_Just, __min}; } __result; })"
-
-                _ ->
-                    "/* List.minimum wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "reverse") ->
-            -- List.reverse list = reversed list
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __rev; __rev.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __rev.data[__i] = __lst.data[__lst.length - 1 - __i]; __rev; })"
-
-                _ ->
-                    "/* List.reverse wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "member") ->
-            -- List.member elem list = True if elem is in list
-            case args of
-                [ elemExpr, listExpr ] ->
-                    let
-                        elemStr = generateStandaloneExpr elemExpr
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; int __elem = " ++ elemStr ++ "; int __found = 0; for (int __i = 0; __i < __lst.length && !__found; __i++) if (__lst.data[__i] == __elem) __found = 1; __found; })"
-
-                _ ->
-                    "/* List.member wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "range") ->
-            -- List.range lo hi = list from lo to hi inclusive
-            case args of
-                [ loExpr, hiExpr ] ->
-                    let
-                        loStr = generateStandaloneExpr loExpr
-                        hiStr = generateStandaloneExpr hiExpr
-                    in
-                    "({ int __lo = " ++ loStr ++ ", __hi = " ++ hiStr ++ "; elm_list_t __lst; __lst.length = __hi >= __lo ? __hi - __lo + 1 : 0; if (__lst.length > ELM_LIST_MAX) __lst.length = ELM_LIST_MAX; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i].d = __lo + __i; __lst; })"
-
-                _ ->
-                    "/* List.range wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "take") ->
-            -- List.take n list = first n elements
-            case args of
-                [ nExpr, listExpr ] ->
-                    let
-                        nStr = generateStandaloneExpr nExpr
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __n < __lst.length ? __n : __lst.length; if (__result.length < 0) __result.length = 0; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__i]; __result; })"
-
-                _ ->
-                    "/* List.take wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "drop") ->
-            -- List.drop n list = drop first n elements
-            case args of
-                [ nExpr, listExpr ] ->
-                    let
-                        nStr = generateStandaloneExpr nExpr
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ int __n = " ++ nStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; int __start = __n < __lst.length ? __n : __lst.length; if (__start < 0) __start = 0; __result.length = __lst.length - __start; for (int __i = 0; __i < __result.length; __i++) __result.data[__i] = __lst.data[__start + __i]; __result; })"
-
-                _ ->
-                    "/* List.drop wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "List" "append") ->
-            -- List.append listA listB = concatenate two lists
-            case args of
-                [ listAExpr, listBExpr ] ->
-                    let
-                        listAStr = generateStandaloneExpr listAExpr
-                        listBStr = generateStandaloneExpr listBExpr
-                    in
-                    "({ elm_list_t __a = " ++ listAStr ++ ", __b = " ++ listBStr ++ "; elm_list_t __result; __result.length = __a.length + __b.length; if (__result.length > ELM_LIST_MAX) __result.length = ELM_LIST_MAX; int __i; for (__i = 0; __i < __a.length && __i < __result.length; __i++) __result.data[__i] = __a.data[__i]; for (int __j = 0; __i < __result.length; __i++, __j++) __result.data[__i] = __b.data[__j]; __result; })"
-
-                _ ->
-                    "/* List.append wrong arity */ 0"
+        -- Note: List.head, tail, last, sum, product, maximum, minimum, reverse,
+        -- member, range, take, drop, append are now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "List" "singleton") ->
             -- List.singleton x = single-element list
@@ -3981,18 +3736,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* List.singleton wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "List" "repeat") ->
-            -- List.repeat n elem = list with n copies of elem
-            case args of
-                [ nExpr, elemExpr ] ->
-                    let
-                        nStr = generateStandaloneExpr nExpr
-                        elemStr = generateStandaloneExpr elemExpr
-                    in
-                    "({ int __n = " ++ nStr ++ ", __elem = " ++ elemStr ++ "; elm_list_t __lst; __lst.length = __n > 0 ? (__n > ELM_LIST_MAX ? ELM_LIST_MAX : __n) : 0; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i] = __elem; __lst; })"
-
-                _ ->
-                    "/* List.repeat wrong arity */ 0"
+        -- Note: List.repeat is now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "List" "map") ->
             -- List.map f list = apply f to each element
@@ -4370,18 +4114,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* List.concat wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "List" "intersperse") ->
-            -- List.intersperse sep list = insert sep between elements
-            case args of
-                [ sepExpr, listExpr ] ->
-                    let
-                        sepStr = generateStandaloneExpr sepExpr
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ int __sep = " ++ sepStr ++ "; elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; if (__lst.length == 0) { __result.length = 0; } else { __result.length = __lst.length * 2 - 1; if (__result.length > ELM_LIST_MAX) __result.length = ELM_LIST_MAX; int __j = 0; for (int __i = 0; __i < __lst.length && __j < __result.length; __i++) { if (__i > 0 && __j < __result.length) __result.data[__j++] = __sep; if (__j < __result.length) __result.data[__j++] = __lst.data[__i]; } __result.length = __j; } __result; })"
-
-                _ ->
-                    "/* List.intersperse wrong arity */ 0"
+        -- Note: List.intersperse is now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "List" "filterMap") ->
             -- List.filterMap f list = map and keep Just values
