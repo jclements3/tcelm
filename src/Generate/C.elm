@@ -10,7 +10,7 @@ For RTEMS targets, generates task definitions and shell registration.
 
 import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
 import Codegen.Lambda exposing (LambdaState, LiftedLambda)
-import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix)
+import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix, patternVars)
 
 
 
@@ -138,7 +138,7 @@ generateValueWithLiftedLambdas modulePrefix lambdaCounter (Src.At _ value) =
 
         -- Collect local variable names from patterns
         localVars =
-            collectPatternVars args
+            patternVarss args
 
         -- Generate pattern bindings for arguments
         bindings =
@@ -208,7 +208,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                     "__lambda_" ++ String.fromInt counter
 
                 lambdaLocals =
-                    collectPatternVars args
+                    patternVarss args
 
                 -- Find free vars (only lambdaLocals are bound)
                 -- Captures are free vars that come from outer scope (locals)
@@ -261,7 +261,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                     [ defName ]
 
                                 Src.Destruct pat _ ->
-                                    collectPatternVar pat
+                                    patternVars pat
                         )
                         defs
 
@@ -289,7 +289,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                                 "__lambda_" ++ String.fromInt c
 
                                             defLocals =
-                                                collectPatternVars defArgs
+                                                patternVarss defArgs
 
                                             -- Find free vars (only defLocals are bound)
                                             -- Captures are free vars from outer scope
@@ -387,7 +387,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\( pat, _, branchExpr ) ( c, acc ) ->
                             let
                                 patLocals =
-                                    collectPatternVar pat ++ locals
+                                    patternVars pat ++ locals
 
                                 ( c2, branchCode ) =
                                     generateExprWithLiftedLambdas modulePrefix patLocals c branchExpr
@@ -932,7 +932,7 @@ generateValue (Src.At _ value) =
 
         -- Collect local variable names from patterns
         localVars =
-            collectPatternVars args
+            patternVarss args
 
         -- Generate pattern bindings for arguments
         bindings =
@@ -984,7 +984,7 @@ generateValueWithPrefix modulePrefix (Src.At _ value) =
 
         -- Collect local variable names from patterns
         localVars =
-            collectPatternVars args
+            patternVarss args
 
         -- Generate pattern bindings for arguments
         bindings =
@@ -1039,44 +1039,12 @@ generateValueWithPrefix modulePrefix (Src.At _ value) =
     implFunc ++ directCallWrapper
 
 
-{-| Collect variable names bound by a list of patterns
+{-| Collect variable names from a list of patterns.
+    Uses patternVars from Codegen.Shared.
 -}
-collectPatternVars : List Pattern -> List String
-collectPatternVars patterns =
-    List.concatMap collectPatternVar patterns
-
-
-{-| Collect variable names from a single pattern
--}
-collectPatternVar : Pattern -> List String
-collectPatternVar (Src.At _ pattern) =
-    case pattern of
-        PVar name ->
-            [ name ]
-
-        PRecord fields ->
-            List.map (\(Src.At _ n) -> n) fields
-
-        PTuple p1 p2 rest ->
-            collectPatternVar p1 ++ collectPatternVar p2 ++ List.concatMap collectPatternVar rest
-
-        PCtor _ _ args ->
-            List.concatMap collectPatternVar args
-
-        PCtorQual _ _ _ args ->
-            List.concatMap collectPatternVar args
-
-        PAlias inner (Src.At _ aliasName) ->
-            aliasName :: collectPatternVar inner
-
-        PCons head tail ->
-            collectPatternVar head ++ collectPatternVar tail
-
-        PList patterns ->
-            List.concatMap collectPatternVar patterns
-
-        _ ->
-            []
+patternVarss : List Pattern -> List String
+patternVarss patterns =
+    List.concatMap patternVars patterns
 
 
 {-| Collect all lambdas from an expression, assigning unique IDs
@@ -1089,7 +1057,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
             let
                 -- Variables bound by the lambda's arguments
                 lambdaLocals =
-                    collectPatternVars args
+                    patternVarss args
 
                 -- Find free vars in body (only lambdaLocals are bound)
                 freeVars =
@@ -1131,7 +1099,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                                     [ name ]
 
                                 Src.Destruct pat _ ->
-                                    collectPatternVar pat
+                                    patternVars pat
                         )
                         defs
 
@@ -1152,7 +1120,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                                         -- Local function - treat as a lambda
                                         let
                                             defLocals =
-                                                collectPatternVars defArgs
+                                                patternVarss defArgs
 
                                             -- Find free vars in body (only defLocals are bound)
                                             freeVars =
@@ -1210,7 +1178,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                 (\( pat, _, branchExpr ) st ->
                     let
                         patLocals =
-                            collectPatternVar pat ++ outerLocals
+                            patternVars pat ++ outerLocals
                     in
                     collectLambdasFromExpr modulePrefix patLocals branchExpr st
                 )
@@ -1277,7 +1245,7 @@ collectFreeVars boundVars (Src.At _ expr) =
         Lambda args body ->
             let
                 lambdaBound =
-                    collectPatternVars args ++ boundVars
+                    patternVarss args ++ boundVars
             in
             collectFreeVars lambdaBound body
 
@@ -1291,7 +1259,7 @@ collectFreeVars boundVars (Src.At _ expr) =
                                     [ name ]
 
                                 Src.Destruct pat _ ->
-                                    collectPatternVar pat
+                                    patternVars pat
                         )
                         defs
                         ++ boundVars
@@ -1301,7 +1269,7 @@ collectFreeVars boundVars (Src.At _ expr) =
                         (\(Src.At _ def) ->
                             case def of
                                 Src.Define _ defArgs defBody _ ->
-                                    collectFreeVars (collectPatternVars defArgs ++ letBound) defBody
+                                    collectFreeVars (patternVarss defArgs ++ letBound) defBody
 
                                 Src.Destruct _ defBody ->
                                     collectFreeVars letBound defBody
@@ -1329,7 +1297,7 @@ collectFreeVars boundVars (Src.At _ expr) =
                 branchVars =
                     List.concatMap
                         (\( pat, _, branchExpr ) ->
-                            collectFreeVars (collectPatternVar pat ++ boundVars) branchExpr
+                            collectFreeVars (patternVars pat ++ boundVars) branchExpr
                         )
                         branches
             in
@@ -1370,7 +1338,7 @@ collectLambdasFromValue : String -> Src.Located Value -> LambdaState -> LambdaSt
 collectLambdasFromValue modulePrefix (Src.At _ value) state =
     let
         localVars =
-            collectPatternVars value.args
+            patternVarss value.args
     in
     collectLambdasFromExpr modulePrefix localVars value.body state
 
@@ -1411,7 +1379,7 @@ generateLiftedLambdaWithCounter startCounter lambda =
 
         -- Generate body with all locals in scope, using lifted lambda references
         lambdaLocals =
-            collectPatternVars lambda.args
+            patternVarss lambda.args
 
         allLocals =
             lambdaLocals ++ lambda.captures ++ lambda.outerLocals
@@ -1666,7 +1634,7 @@ generateLambdaInContextWithPrefix : String -> List String -> List Pattern -> Exp
 generateLambdaInContextWithPrefix modulePrefix outerLocals args body =
     let
         arity = List.length args
-        lambdaLocals = collectPatternVars args
+        lambdaLocals = patternVarss args
         allLocals = lambdaLocals ++ outerLocals
         paramBindings = List.indexedMap (\i pattern -> generateLambdaArgBindingLocal pattern ("args[" ++ String.fromInt i ++ "]")) args
             |> List.concat |> String.join "\n                "
@@ -1773,7 +1741,7 @@ generateLetInContextWithPrefix modulePrefix outerLocals defs body =
         letLocals = List.concatMap (\(Src.At _ def) ->
             case def of
                 Src.Define (Src.At _ name) _ _ _ -> [ name ]
-                Src.Destruct pat _ -> collectPatternVar pat
+                Src.Destruct pat _ -> patternVars pat
             ) defs
         allLocals = letLocals ++ outerLocals
         defStrs = List.map (generateLocatedDefInContextWithPrefix modulePrefix allLocals) defs
@@ -1794,7 +1762,7 @@ generateLocatedDefInContextWithPrefix modulePrefix locals (Src.At _ def) =
                 -- Local function with arguments - generate GCC nested function + closure
                 let
                     arity = List.length args
-                    funcLocals = collectPatternVars args
+                    funcLocals = patternVarss args
                     allLocals = funcLocals ++ locals
                     mangledName = mangleLocal name
                     implName = mangledName ++ "_impl"
@@ -1852,7 +1820,7 @@ generateCaseInContextWithPrefix modulePrefix locals subject branches =
 generateBranchInContextWithPrefix : String -> List String -> String -> Int -> ( Pattern, Expr ) -> String
 generateBranchInContextWithPrefix modulePrefix outerLocals subjectVar index ( pattern, body ) =
     let
-        patternLocals = collectPatternVar pattern
+        patternLocals = patternVars pattern
         allLocals = patternLocals ++ outerLocals
         condition = generatePatternMatch subjectVar pattern
         bindings = generatePatternBindingsLocal subjectVar pattern
@@ -2162,7 +2130,7 @@ generateLambdaInContext outerLocals args body =
 
         -- Collect new locals from lambda args
         lambdaLocals =
-            collectPatternVars args
+            patternVarss args
 
         allLocals =
             lambdaLocals ++ outerLocals
@@ -2535,7 +2503,7 @@ generateLetInContext outerLocals defs body =
                             [ name ]
 
                         Src.Destruct pat _ ->
-                            collectPatternVar pat
+                            patternVars pat
                 )
                 defs
 
@@ -2568,7 +2536,7 @@ generateLocatedDefInContext locals (Src.At _ def) =
                 -- Local function with arguments - generate GCC nested function + closure
                 let
                     arity = List.length args
-                    funcLocals = collectPatternVars args
+                    funcLocals = patternVarss args
                     allLocals = funcLocals ++ locals
                     mangledName = mangleLocal name
                     implName = mangledName ++ "_impl"
@@ -2640,7 +2608,7 @@ generateBranchInContext outerLocals subjectVar index ( pattern, body ) =
     let
         -- Collect new locals from pattern
         patternLocals =
-            collectPatternVar pattern
+            patternVars pattern
 
         allLocals =
             patternLocals ++ outerLocals
