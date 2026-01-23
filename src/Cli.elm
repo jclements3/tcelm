@@ -3261,68 +3261,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* String.join wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "Bitwise" "and") ->
-            -- Bitwise.and a b = a & b
-            case args of
-                [ a, b ] ->
-                    "(" ++ generateStandaloneExpr a ++ " & " ++ generateStandaloneExpr b ++ ")"
-
-                _ ->
-                    "/* Bitwise.and wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Bitwise" "or") ->
-            -- Bitwise.or a b = a | b
-            case args of
-                [ a, b ] ->
-                    "(" ++ generateStandaloneExpr a ++ " | " ++ generateStandaloneExpr b ++ ")"
-
-                _ ->
-                    "/* Bitwise.or wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Bitwise" "xor") ->
-            -- Bitwise.xor a b = a ^ b
-            case args of
-                [ a, b ] ->
-                    "(" ++ generateStandaloneExpr a ++ " ^ " ++ generateStandaloneExpr b ++ ")"
-
-                _ ->
-                    "/* Bitwise.xor wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Bitwise" "complement") ->
-            -- Bitwise.complement a = ~a
-            case args of
-                [ a ] ->
-                    "(~" ++ generateStandaloneExpr a ++ ")"
-
-                _ ->
-                    "/* Bitwise.complement wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Bitwise" "shiftLeftBy") ->
-            -- Bitwise.shiftLeftBy n x = x << n
-            case args of
-                [ n, x ] ->
-                    "(" ++ generateStandaloneExpr x ++ " << " ++ generateStandaloneExpr n ++ ")"
-
-                _ ->
-                    "/* Bitwise.shiftLeftBy wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Bitwise" "shiftRightBy") ->
-            -- Bitwise.shiftRightBy n x = x >> n (arithmetic shift)
-            case args of
-                [ n, x ] ->
-                    "(" ++ generateStandaloneExpr x ++ " >> " ++ generateStandaloneExpr n ++ ")"
-
-                _ ->
-                    "/* Bitwise.shiftRightBy wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Bitwise" "shiftRightZfBy") ->
-            -- Bitwise.shiftRightZfBy n x = x >>> n (logical shift - zero fill)
-            case args of
-                [ n, x ] ->
-                    "((unsigned int)" ++ generateStandaloneExpr x ++ " >> " ++ generateStandaloneExpr n ++ ")"
-
-                _ ->
-                    "/* Bitwise.shiftRightZfBy wrong arity */ 0"
+        -- Note: Bitwise.* functions are now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.Var _ "floor") ->
             -- floor x = largest int <= x
@@ -3899,24 +3838,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* Result.fromMaybe wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "Debug" "log") ->
-            -- Debug.log tag value = prints tag:value and returns value
-            -- On embedded target, just return the value
-            case args of
-                [ _, value ] ->
-                    generateStandaloneExpr value
-
-                _ ->
-                    "/* Debug.log wrong arity */ 0"
-
-        Src.At _ (Src.VarQual _ "Debug" "todo") ->
-            -- Debug.todo msg = halt execution (for unimplemented code)
-            case args of
-                [ _ ] ->
-                    "({ while(1); 0; })"
-
-                _ ->
-                    "/* Debug.todo wrong arity */ 0"
+        -- Note: Debug.* functions are now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "List" "length") ->
             -- List.length list = number of elements

@@ -228,6 +228,35 @@ generateBuiltinCall genExpr ctx fn args =
 
         -- Note: String.join has inline implementation in Cli.elm, not handled here
 
+        -- Bitwise module
+        Src.At _ (Src.VarQual _ "Bitwise" "and") ->
+            Just (generateBitwiseAnd genExpr args)
+
+        Src.At _ (Src.VarQual _ "Bitwise" "or") ->
+            Just (generateBitwiseOr genExpr args)
+
+        Src.At _ (Src.VarQual _ "Bitwise" "xor") ->
+            Just (generateBitwiseXor genExpr args)
+
+        Src.At _ (Src.VarQual _ "Bitwise" "complement") ->
+            Just (generateBitwiseComplement genExpr args)
+
+        Src.At _ (Src.VarQual _ "Bitwise" "shiftLeftBy") ->
+            Just (generateBitwiseShiftLeftBy genExpr args)
+
+        Src.At _ (Src.VarQual _ "Bitwise" "shiftRightBy") ->
+            Just (generateBitwiseShiftRightBy genExpr args)
+
+        Src.At _ (Src.VarQual _ "Bitwise" "shiftRightZfBy") ->
+            Just (generateBitwiseShiftRightZfBy genExpr args)
+
+        -- Debug module
+        Src.At _ (Src.VarQual _ "Debug" "log") ->
+            Just (generateDebugLog genExpr args)
+
+        Src.At _ (Src.VarQual _ "Debug" "todo") ->
+            Just (generateDebugTodo genExpr args)
+
         -- Not a builtin we handle here
         _ ->
             Nothing
@@ -840,3 +869,103 @@ generateStringReplace genExpr args =
 
         _ ->
             "/* String.replace wrong arity */ 0"
+
+
+
+-- BITWISE MODULE HANDLERS
+
+
+generateBitwiseAnd : GenExpr -> List Src.Expr -> String
+generateBitwiseAnd genExpr args =
+    case args of
+        [ a, b ] ->
+            "(" ++ genExpr a ++ " & " ++ genExpr b ++ ")"
+
+        _ ->
+            "/* Bitwise.and wrong arity */ 0"
+
+
+generateBitwiseOr : GenExpr -> List Src.Expr -> String
+generateBitwiseOr genExpr args =
+    case args of
+        [ a, b ] ->
+            "(" ++ genExpr a ++ " | " ++ genExpr b ++ ")"
+
+        _ ->
+            "/* Bitwise.or wrong arity */ 0"
+
+
+generateBitwiseXor : GenExpr -> List Src.Expr -> String
+generateBitwiseXor genExpr args =
+    case args of
+        [ a, b ] ->
+            "(" ++ genExpr a ++ " ^ " ++ genExpr b ++ ")"
+
+        _ ->
+            "/* Bitwise.xor wrong arity */ 0"
+
+
+generateBitwiseComplement : GenExpr -> List Src.Expr -> String
+generateBitwiseComplement genExpr args =
+    case args of
+        [ a ] ->
+            "(~" ++ genExpr a ++ ")"
+
+        _ ->
+            "/* Bitwise.complement wrong arity */ 0"
+
+
+generateBitwiseShiftLeftBy : GenExpr -> List Src.Expr -> String
+generateBitwiseShiftLeftBy genExpr args =
+    case args of
+        [ n, x ] ->
+            "(" ++ genExpr x ++ " << " ++ genExpr n ++ ")"
+
+        _ ->
+            "/* Bitwise.shiftLeftBy wrong arity */ 0"
+
+
+generateBitwiseShiftRightBy : GenExpr -> List Src.Expr -> String
+generateBitwiseShiftRightBy genExpr args =
+    case args of
+        [ n, x ] ->
+            "(" ++ genExpr x ++ " >> " ++ genExpr n ++ ")"
+
+        _ ->
+            "/* Bitwise.shiftRightBy wrong arity */ 0"
+
+
+generateBitwiseShiftRightZfBy : GenExpr -> List Src.Expr -> String
+generateBitwiseShiftRightZfBy genExpr args =
+    case args of
+        [ n, x ] ->
+            "((unsigned int)" ++ genExpr x ++ " >> " ++ genExpr n ++ ")"
+
+        _ ->
+            "/* Bitwise.shiftRightZfBy wrong arity */ 0"
+
+
+
+-- DEBUG MODULE HANDLERS
+
+
+generateDebugLog : GenExpr -> List Src.Expr -> String
+generateDebugLog genExpr args =
+    case args of
+        -- Debug.log just returns the value (embedded-friendly, no printing)
+        [ _, value ] ->
+            genExpr value
+
+        _ ->
+            "/* Debug.log wrong arity */ 0"
+
+
+generateDebugTodo : GenExpr -> List Src.Expr -> String
+generateDebugTodo _ args =
+    case args of
+        -- Debug.todo halts execution (infinite loop for embedded targets)
+        [ _ ] ->
+            "({ while(1); 0; })"
+
+        _ ->
+            "/* Debug.todo wrong arity */ 0"
