@@ -34,3 +34,4 @@ build/
 # External repos (submodules or separate)
 elm-compiler-src/
 tcc/
+taos/
