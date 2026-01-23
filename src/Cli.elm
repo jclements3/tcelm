@@ -6639,6 +6639,9 @@ generateUserFunction modulePrefix userFunctions name args body =
                                             || (String.contains (".state == elm_" ++ varName) bodyExpr)
                                             -- Also detect tag comparison patterns: (elm_varName).tag
                                             || String.contains ("(elm_" ++ varName ++ ").tag") bodyExpr
+                                            -- Variable is used as case scrutinee in custom type case
+                                            || (String.contains ("elm_case_scrutinee = elm_" ++ varName) bodyExpr
+                                                && String.contains "elm_case_scrutinee.tag == TAG_" bodyExpr)
 
                                     -- Check if parameter is used as a list (has .length or .data access, or is bound as elm_list_t)
                                     isListType =
@@ -6968,6 +6971,28 @@ generateUserFunction modulePrefix userFunctions name args body =
             else
                 ""
 
+        -- Check for struct return from case expression (extracted via data.ptr)
+        -- Pattern: ({ struct { ... } elm_varName = *(struct { ... }*)...->data.ptr; elm_varName; })
+        isStructCaseReturn =
+            String.contains "->data.ptr; elm_" bodyExpr
+                && String.contains "= *(struct {" bodyExpr
+
+        -- Extract struct type from case expression extraction
+        structCaseType =
+            if isStructCaseReturn then
+                let
+                    -- Find the struct type: "= *(struct { ... }*)"
+                    marker = "= *(struct {"
+                    startIdx2 = String.indexes marker bodyExpr |> List.head |> Maybe.withDefault 0
+                    afterMarker = String.dropLeft (startIdx2 + String.length marker) bodyExpr
+                    -- Find the end at "*)"
+                    endIdx2 = String.indexes "}*)" afterMarker |> List.head |> Maybe.withDefault 0
+                    fieldDefs2 = String.left endIdx2 afterMarker
+                in
+                "struct {" ++ fieldDefs2 ++ "}"
+            else
+                ""
+
         returnType =
             if isStringReturn then
                 "const char *"
@@ -6980,6 +7005,8 @@ generateUserFunction modulePrefix userFunctions name args body =
                 "elm_list_t"
             else if isRecordReturn then
                 recordType
+            else if isStructCaseReturn then
+                structCaseType
             else
                 "double"
 
@@ -8772,6 +8799,73 @@ generateStandaloneCase scrutinee branches =
                                                                                     || String.contains (", elm_" ++ varName ++ ")") resultStr
                                                                                     || String.contains ("elm_" ++ varName ++ ".tag") resultStr)
 
+                                                                        -- Check if used as a struct (has field accesses that aren't union/list fields)
+                                                                        prefix = "elm_" ++ varName ++ "."
+
+                                                                        -- Extract field names accessed on this variable
+                                                                        extractStructFields : String -> List String
+                                                                        extractStructFields str =
+                                                                            let
+                                                                                -- Helper to take characters while predicate is true
+                                                                                takeWhileChars : (Char -> Bool) -> List Char -> List Char
+                                                                                takeWhileChars pred chars =
+                                                                                    case chars of
+                                                                                        [] -> []
+                                                                                        c :: rest2 ->
+                                                                                            if pred c then
+                                                                                                c :: takeWhileChars pred rest2
+                                                                                            else
+                                                                                                []
+
+                                                                                -- Find all occurrences of elm_varName.fieldName
+                                                                                findField remaining =
+                                                                                    case String.indexes prefix remaining of
+                                                                                        [] -> []
+                                                                                        idx :: _ ->
+                                                                                            let
+                                                                                                afterPrefix = String.dropLeft (idx + String.length prefix) remaining
+                                                                                                -- Extract field name (alphanumeric chars until non-alphanum)
+                                                                                                fieldChars = String.toList afterPrefix
+                                                                                                    |> takeWhileChars (\c -> Char.isAlphaNum c || c == '_')
+                                                                                                fieldName = String.fromList fieldChars
+                                                                                                restStr = String.dropLeft (idx + String.length prefix + String.length fieldName) remaining
+                                                                                            in
+                                                                                            if String.isEmpty fieldName then
+                                                                                                findField restStr
+                                                                                            else
+                                                                                                fieldName :: findField restStr
+                                                                            in
+                                                                            findField str
+                                                                                |> List.filter (\f -> f /= "tag" && f /= "data" && f /= "length" && f /= "child")
+                                                                                |> List.foldr (\f acc -> if List.member f acc then acc else f :: acc) []
+
+                                                                        structFields = extractStructFields resultStr
+
+                                                                        -- Special case: At constructor's first arg is always a Region
+                                                                        isAtFirstArg2 = ctorName == "At" && patIdx == 0
+
+                                                                        isUsedAsStruct = not (List.isEmpty structFields) || isAtFirstArg2
+
+                                                                        -- Determine struct type based on fields
+                                                                        -- For Region type (has start/end with row/col), or At constructor first arg
+                                                                        isRegionType = List.member "start" structFields || List.member "end" structFields || isAtFirstArg2
+
+                                                                        -- For Position type (has row/col)
+                                                                        isPositionType = (List.member "row" structFields || List.member "col" structFields)
+                                                                            && not isRegionType
+
+                                                                        structType =
+                                                                            if isRegionType then
+                                                                                "struct { struct { int row; int col; } start; struct { int row; int col; } end; }"
+                                                                            else if isPositionType then
+                                                                                "struct { int row; int col; }"
+                                                                            else
+                                                                                -- Generic struct with double fields
+                                                                                let
+                                                                                    fieldDefs = structFields |> List.map (\f -> "double " ++ f) |> String.join "; "
+                                                                                in
+                                                                                "struct { " ++ fieldDefs ++ "; }"
+
                                                                         -- First arg from data.child, second arg from data2
                                                                         accessor =
                                                                             if patIdx == 0 then
@@ -8783,6 +8877,9 @@ generateStandaloneCase scrutinee branches =
                                                                         "elm_union_t elm_" ++ varName ++ " = *" ++ accessor ++ ";"
                                                                     else if isUsedAsString then
                                                                         "const char *elm_" ++ varName ++ " = " ++ accessor ++ "->data.str;"
+                                                                    else if isUsedAsStruct then
+                                                                        -- Cast data.ptr to struct pointer and dereference
+                                                                        structType ++ " elm_" ++ varName ++ " = *(" ++ structType ++ "*)" ++ accessor ++ "->data.ptr;"
                                                                     else
                                                                         "double elm_" ++ varName ++ " = " ++ accessor ++ "->data.num;"
 
@@ -8927,6 +9024,73 @@ generateStandaloneCase scrutinee branches =
                                                                             || String.contains (", elm_" ++ varName ++ ")") resultStr
                                                                             || String.contains ("elm_" ++ varName ++ ".tag") resultStr)
 
+                                                                -- Check if used as a struct (has field accesses that aren't union/list fields)
+                                                                prefix2 = "elm_" ++ varName ++ "."
+
+                                                                -- Extract field names accessed on this variable
+                                                                extractStructFields2 : String -> List String
+                                                                extractStructFields2 str =
+                                                                    let
+                                                                        -- Helper to take characters while predicate is true
+                                                                        takeWhileChars2 : (Char -> Bool) -> List Char -> List Char
+                                                                        takeWhileChars2 pred chars =
+                                                                            case chars of
+                                                                                [] -> []
+                                                                                c :: rest3 ->
+                                                                                    if pred c then
+                                                                                        c :: takeWhileChars2 pred rest3
+                                                                                    else
+                                                                                        []
+
+                                                                        -- Find all occurrences of elm_varName.fieldName
+                                                                        findField2 remaining =
+                                                                            case String.indexes prefix2 remaining of
+                                                                                [] -> []
+                                                                                idx :: _ ->
+                                                                                    let
+                                                                                        afterPrefix = String.dropLeft (idx + String.length prefix2) remaining
+                                                                                        -- Extract field name (alphanumeric chars until non-alphanum)
+                                                                                        fieldChars = String.toList afterPrefix
+                                                                                            |> takeWhileChars2 (\c -> Char.isAlphaNum c || c == '_')
+                                                                                        fieldName = String.fromList fieldChars
+                                                                                        restStr2 = String.dropLeft (idx + String.length prefix2 + String.length fieldName) remaining
+                                                                                    in
+                                                                                    if String.isEmpty fieldName then
+                                                                                        findField2 restStr2
+                                                                                    else
+                                                                                        fieldName :: findField2 restStr2
+                                                                    in
+                                                                    findField2 str
+                                                                        |> List.filter (\f -> f /= "tag" && f /= "data" && f /= "length" && f /= "child")
+                                                                        |> List.foldr (\f acc -> if List.member f acc then acc else f :: acc) []
+
+                                                                structFields2 = extractStructFields2 resultStr
+
+                                                                -- Special case: At constructor's first arg is always a Region
+                                                                isAtFirstArg = ctorName == "At" && patIdx == 0
+
+                                                                isUsedAsStruct2 = not (List.isEmpty structFields2) || isAtFirstArg
+
+                                                                -- Determine struct type based on fields
+                                                                -- For Region type (has start/end with row/col), or At constructor first arg
+                                                                isRegionType2 = List.member "start" structFields2 || List.member "end" structFields2 || isAtFirstArg
+
+                                                                -- For Position type (has row/col)
+                                                                isPositionType2 = (List.member "row" structFields2 || List.member "col" structFields2)
+                                                                    && not isRegionType2
+
+                                                                structType2 =
+                                                                    if isRegionType2 then
+                                                                        "struct { struct { int row; int col; } start; struct { int row; int col; } end; }"
+                                                                    else if isPositionType2 then
+                                                                        "struct { int row; int col; }"
+                                                                    else
+                                                                        -- Generic struct with double fields
+                                                                        let
+                                                                            fieldDefs2 = structFields2 |> List.map (\f -> "double " ++ f) |> String.join "; "
+                                                                        in
+                                                                        "struct { " ++ fieldDefs2 ++ "; }"
+
                                                                 -- First arg from data.child, second arg from data2
                                                                 accessor =
                                                                     if patIdx == 0 then
@@ -8938,6 +9102,9 @@ generateStandaloneCase scrutinee branches =
                                                                 "elm_union_t elm_" ++ varName ++ " = *" ++ accessor ++ ";"
                                                             else if isUsedAsString then
                                                                 "const char *elm_" ++ varName ++ " = " ++ accessor ++ "->data.str;"
+                                                            else if isUsedAsStruct2 then
+                                                                -- Cast data.ptr to struct pointer and dereference
+                                                                structType2 ++ " elm_" ++ varName ++ " = *(" ++ structType2 ++ "*)" ++ accessor ++ "->data.ptr;"
                                                             else
                                                                 "double elm_" ++ varName ++ " = " ++ accessor ++ "->data.num;"
 
