@@ -4630,7 +4630,11 @@ generateLiftedFunction prefix funcName args body =
     Returns (type, initializer) pair
 -}
 inferCTypeAndInit : Src.Expr -> ( String, String )
-inferCTypeAndInit (Src.At _ expr) =
+inferCTypeAndInit locatedExpr =
+    let
+        (Src.At _ expr) =
+            locatedExpr
+    in
     case expr of
         Src.Record fields ->
             let
@@ -4695,22 +4699,22 @@ inferCTypeAndInit (Src.At _ expr) =
         Src.Float f ->
             ( "double", String.fromFloat f )
 
-        Src.Call (Src.At _ (Src.Var Src.CapVar _)) args ->
+        Src.Call (Src.At _ (Src.Var Src.CapVar _)) _ ->
             -- Constructor call returns elm_union_t
-            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "elm_union_t", generateStandaloneExpr locatedExpr )
 
-        Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) args ->
+        Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) _ ->
             -- Qualified constructor call returns elm_union_t
-            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "elm_union_t", generateStandaloneExpr locatedExpr )
 
         Src.Call (Src.At _ (Src.VarQual _ "String" _)) _ ->
             -- String module function call returns string
-            ( "const char *", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "const char *", generateStandaloneExpr locatedExpr )
 
         Src.Call (Src.At _ (Src.Var _ funcName)) _ ->
             -- Check if function call result is a string
             let
-                cExpr = generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr)
+                cExpr = generateStandaloneExpr locatedExpr
                 -- String functions, or user functions with string-like names
                 isStringResult =
                     String.contains "elm_str_" cExpr
@@ -4730,23 +4734,23 @@ inferCTypeAndInit (Src.At _ expr) =
             -- Check if this is string concatenation
             let
                 isStringConcat = List.all (\( _, Src.At _ op ) -> op == "++") pairs
-                cExpr = generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr)
+                cExpr = generateStandaloneExpr locatedExpr
             in
             if isStringConcat then
                 ( "const char *", cExpr )
             else
                 ( "double", cExpr )
 
-        Src.Var Src.CapVar name ->
+        Src.Var Src.CapVar _ ->
             -- Standalone constructor (nullary) returns elm_union_t
-            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "elm_union_t", generateStandaloneExpr locatedExpr )
 
         Src.VarQual Src.CapVar _ _ ->
             -- Qualified constructor (nullary) returns elm_union_t
-            ( "elm_union_t", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "elm_union_t", generateStandaloneExpr locatedExpr )
 
         _ ->
-            ( "double", generateStandaloneExpr (Src.At { start = { row = 0, col = 0 }, end = { row = 0, col = 0 } } expr) )
+            ( "double", generateStandaloneExpr locatedExpr )
 
 
 {-| Generate standalone C code for let bindings using GCC compound statements
