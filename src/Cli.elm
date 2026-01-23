@@ -228,12 +228,16 @@ generateRtemsCode ast =
                         let
                             (Src.At _ name) =
                                 value.name
+
+                            -- Include function parameters in scope for captured variable detection
+                            funcParamNames =
+                                List.concatMap patternVars value.args
                         in
-                        collectLocalFunctions name value.body
+                        collectLocalFunctionsWithScope name funcParamNames value.body
                     )
                 |> List.map
                     (\lf ->
-                        generateLiftedFunction lf.prefix lf.name lf.args lf.body
+                        generateLiftedFunction lf.prefix lf.name lf.args lf.body lf.capturedVars
                     )
                 |> String.join "\n\n"
 
@@ -1347,12 +1351,16 @@ generateTccCode ast =
                         let
                             (Src.At _ name) =
                                 value.name
+
+                            -- Include function parameters in scope for captured variable detection
+                            funcParamNames =
+                                List.concatMap patternVars value.args
                         in
-                        collectLocalFunctions name value.body
+                        collectLocalFunctionsWithScope name funcParamNames value.body
                     )
                 |> List.map
                     (\lf ->
-                        generateLiftedFunction lf.prefix lf.name lf.args lf.body
+                        generateLiftedFunction lf.prefix lf.name lf.args lf.body lf.capturedVars
                     )
                 |> String.join "\n\n"
 
@@ -1473,11 +1481,12 @@ generateTccCode ast =
                                 returnTypeEnd = String.indexes funcNameMarker implCode |> List.head |> Maybe.withDefault 0
                                 funcReturnType = String.slice returnTypeStart returnTypeEnd implCode
                                 params = String.slice paramsStart paramsEnd implCode
-                                -- Skip forward declarations for functions returning anonymous structs
+                                -- Skip forward declarations for functions with anonymous structs
                                 -- In C, anonymous structs are always different types
                                 isStructReturn = String.contains "struct {" funcReturnType
+                                isStructParam = String.contains "struct {" params
                             in
-                            if isStructReturn then
+                            if isStructReturn || isStructParam then
                                 Nothing
                             else
                                 Just ("static " ++ funcReturnType ++ " elm_" ++ name ++ "(" ++ params ++ ");")
@@ -2022,6 +2031,15 @@ generateArgsString exprs =
             generateStandaloneExpr first ++ ", " ++ generateArgsString rest
 
 
+{-| Generate binary operations with function context (for nested Let handling)
+-}
+generateStandaloneBinopsWithCtx : ExprCtx -> List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
+generateStandaloneBinopsWithCtx ctx pairs finalExpr =
+    -- For now, delegate to non-context version
+    -- The context is mainly needed for Let handling, which is handled separately
+    generateStandaloneBinops pairs finalExpr
+
+
 {-| Generate standalone C code for binary operations (no runtime needed)
     Outputs as flat expression relying on C operator precedence (matches Elm for arithmetic)
 -}
@@ -2326,10 +2344,31 @@ makeUnionCtor tag dataValue =
         "((elm_union_t){" ++ tag ++ ", " ++ wrapUnionData dataValue ++ "})"
 
 
+{-| Context for expression generation, tracks enclosing function name
+-}
+type alias ExprCtx =
+    { funcPrefix : String  -- The enclosing function name for lifted local functions
+    }
+
+
+{-| Default context for top-level or main expressions
+-}
+defaultExprCtx : ExprCtx
+defaultExprCtx =
+    { funcPrefix = "main" }
+
+
 {-| Generate standalone C code for a single expression (no runtime)
 -}
 generateStandaloneExpr : Src.Expr -> String
-generateStandaloneExpr (Src.At _ expr) =
+generateStandaloneExpr expr =
+    generateStandaloneExprWithCtx defaultExprCtx expr
+
+
+{-| Generate standalone C code with function context for lifted local functions
+-}
+generateStandaloneExprWithCtx : ExprCtx -> Src.Expr -> String
+generateStandaloneExprWithCtx ctx (Src.At _ expr) =
     case expr of
         Src.Int n ->
             String.fromInt n
@@ -2345,16 +2384,16 @@ generateStandaloneExpr (Src.At _ expr) =
             "'" ++ escapeC c ++ "'"
 
         Src.Negate inner ->
-            "(-" ++ generateStandaloneExpr inner ++ ")"
+            "(-" ++ generateStandaloneExprWithCtx ctx inner ++ ")"
 
         Src.Binops pairs final ->
-            generateStandaloneBinops pairs final
+            generateStandaloneBinopsWithCtx ctx pairs final
 
         Src.If branches elseExpr ->
-            generateStandaloneIf branches elseExpr
+            generateStandaloneIfWithCtx ctx branches elseExpr
 
         Src.Let defs body ->
-            generateStandaloneLet defs body
+            generateStandaloneLetWithPrefix ctx.funcPrefix defs body
 
         Src.Call fn args ->
             case fn of
@@ -4677,9 +4716,9 @@ generateInlinedLambdaWithStringArgs patterns argStrings body =
 generateUserFunction : String -> List Src.Pattern -> Src.Expr -> String
 generateUserFunction name args body =
     let
-        -- Generate function body first so we can check parameter usage
+        -- Generate function body with correct context for lifted local functions
         bodyExpr =
-            generateStandaloneExpr body
+            generateStandaloneExprWithCtx { funcPrefix = name } body
 
         -- Generate parameter list with type inference based on usage
         params =
@@ -4713,6 +4752,79 @@ generateUserFunction name args body =
                                             || String.contains ("elm_str_ends_with(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("elm_str_contains(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("strlen(elm_" ++ varName ++ ")") bodyExpr
+
+                                    -- Check if parameter is used as a record (field access like .name, .value)
+                                    -- Exclude .tag, .data, .length which are for unions/lists
+                                    prefix = "elm_" ++ varName ++ "."
+
+                                    -- Extract field names accessed on this variable
+                                    extractFields : String -> List String
+                                    extractFields str =
+                                        let
+                                            -- Helper to take characters while predicate is true
+                                            takeWhileHelper : (Char -> Bool) -> List Char -> List Char
+                                            takeWhileHelper pred chars =
+                                                case chars of
+                                                    [] -> []
+                                                    c :: rest ->
+                                                        if pred c then
+                                                            c :: takeWhileHelper pred rest
+                                                        else
+                                                            []
+
+                                            -- Find all occurrences of elm_varName.fieldName
+                                            findField remaining =
+                                                case String.indexes prefix remaining of
+                                                    [] -> []
+                                                    idx :: _ ->
+                                                        let
+                                                            afterPrefix = String.dropLeft (idx + String.length prefix) remaining
+                                                            -- Extract field name (alphanumeric chars until non-alphanum)
+                                                            fieldChars = String.toList afterPrefix
+                                                                |> takeWhileHelper (\c -> Char.isAlphaNum c || c == '_')
+                                                            fieldName = String.fromList fieldChars
+                                                            rest = String.dropLeft (idx + String.length prefix + String.length fieldName) remaining
+                                                        in
+                                                        if String.isEmpty fieldName then
+                                                            findField rest
+                                                        else
+                                                            fieldName :: findField rest
+                                        in
+                                        findField str
+                                            |> List.filter (\f -> f /= "tag" && f /= "data" && f /= "length")
+                                            |> List.foldr (\f acc -> if List.member f acc then acc else f :: acc) []
+
+                                    recordFields = extractFields bodyExpr
+
+                                    isRecordType = not (List.isEmpty recordFields)
+
+                                    -- Build struct type from field accesses
+                                    -- Infer field types: if used directly with elm_str_append as first arg, it's a string
+                                    inferFieldType : String -> String
+                                    inferFieldType fieldName =
+                                        let
+                                            fieldAccess = prefix ++ fieldName
+                                            -- Check if this field is used directly as first argument to elm_str_append
+                                            -- Pattern: elm_str_append(elm_cfg.fieldName,
+                                            isStringField =
+                                                String.contains ("elm_str_append(" ++ fieldAccess ++ ",") bodyExpr
+                                                    || String.contains ("elm_str_append(" ++ fieldAccess ++ ")") bodyExpr
+                                        in
+                                        if isStringField then
+                                            "const char *"
+                                        else
+                                            "double"
+
+                                    paramRecordType =
+                                        if isRecordType then
+                                            let
+                                                fieldDefs = recordFields
+                                                    |> List.map (\f -> inferFieldType f ++ " " ++ f)
+                                                    |> String.join "; "
+                                            in
+                                            "struct { " ++ fieldDefs ++ "; }"
+                                        else
+                                            ""
                                 in
                                 if isListType then
                                     "elm_list_t elm_" ++ varName
@@ -4720,7 +4832,10 @@ generateUserFunction name args body =
                                     "const char *elm_" ++ varName
                                 else if isUnionType then
                                     "elm_union_t elm_" ++ varName
-
+                                else if isRecordType then
+                                    -- For struct parameters, generate the struct type directly
+                                    -- We'll handle type compatibility at call sites
+                                    paramRecordType ++ " elm_" ++ varName
                                 else
                                     "double elm_" ++ varName
 
@@ -4879,16 +4994,157 @@ type alias LiftedFunc =
     , name : String
     , args : List Src.Pattern
     , body : Src.Expr
+    , capturedVars : List String  -- Variables captured from outer scope
     }
 
 
+{-| Collect all variable references from an expression
+-}
+collectVarRefs : Src.Expr -> List String
+collectVarRefs (Src.At _ expr) =
+    case expr of
+        Src.Var _ name ->
+            [ name ]
+
+        Src.VarQual _ _ name ->
+            [ name ]
+
+        Src.Call fn fnArgs ->
+            collectVarRefs fn ++ List.concatMap collectVarRefs fnArgs
+
+        Src.Binops pairs final ->
+            List.concatMap (\( e, _ ) -> collectVarRefs e) pairs ++ collectVarRefs final
+
+        Src.If branches elseExpr ->
+            List.concatMap (\( cond, thenE ) -> collectVarRefs cond ++ collectVarRefs thenE) branches
+                ++ collectVarRefs elseExpr
+
+        Src.Let defs letBody ->
+            let
+                -- Collect refs from def bodies (but not the names being defined)
+                defRefs =
+                    defs
+                        |> List.concatMap
+                            (\(Src.At _ def) ->
+                                case def of
+                                    Src.Define _ _ defBody _ ->
+                                        collectVarRefs defBody
+
+                                    Src.Destruct _ e ->
+                                        collectVarRefs e
+                            )
+            in
+            defRefs ++ collectVarRefs letBody
+
+        Src.Case scrutinee branches ->
+            collectVarRefs scrutinee
+                ++ List.concatMap (\( _, branchExpr ) -> collectVarRefs branchExpr) branches
+
+        Src.Lambda _ lambdaBody ->
+            collectVarRefs lambdaBody
+
+        Src.Record fields ->
+            fields |> List.concatMap (\( _, fieldExpr ) -> collectVarRefs fieldExpr)
+
+        Src.Update (Src.At _ baseName) fields ->
+            baseName :: List.concatMap (\( _, fieldExpr ) -> collectVarRefs fieldExpr) fields
+
+        Src.Access inner _ ->
+            collectVarRefs inner
+
+        Src.Negate inner ->
+            collectVarRefs inner
+
+        Src.Tuple first second rest ->
+            collectVarRefs first ++ collectVarRefs second ++ List.concatMap collectVarRefs rest
+
+        Src.List items ->
+            List.concatMap collectVarRefs items
+
+        _ ->
+            []
+
+
+{-| Extract variable names bound by a pattern
+-}
+patternVars : Src.Pattern -> List String
+patternVars (Src.At _ pat) =
+    case pat of
+        Src.PVar name ->
+            [ name ]
+
+        Src.PCtor _ _ subPats ->
+            List.concatMap patternVars subPats
+
+        Src.PCtorQual _ _ _ subPats ->
+            List.concatMap patternVars subPats
+
+        Src.PList subPats ->
+            List.concatMap patternVars subPats
+
+        Src.PCons headPat tailPat ->
+            patternVars headPat ++ patternVars tailPat
+
+        Src.PTuple first second rest ->
+            patternVars first ++ patternVars second ++ List.concatMap patternVars rest
+
+        Src.PRecord fields ->
+            List.map (\(Src.At _ name) -> name) fields
+
+        Src.PAlias innerPat (Src.At _ aliasName) ->
+            aliasName :: patternVars innerPat
+
+        _ ->
+            []
+
+
+{-| Remove duplicates from a list
+-}
+uniqueStrings : List String -> List String
+uniqueStrings list =
+    List.foldl
+        (\item acc ->
+            if List.member item acc then
+                acc
+            else
+                acc ++ [ item ]
+        )
+        []
+        list
+
+
 {-| Collect local function definitions from an expression for lifting to module level
+    The scope parameter tracks variables defined in outer scopes that might be captured.
 -}
 collectLocalFunctions : String -> Src.Expr -> List LiftedFunc
-collectLocalFunctions prefix (Src.At _ expr) =
+collectLocalFunctions prefix expr =
+    collectLocalFunctionsWithScope prefix [] expr
+
+
+{-| Internal helper that tracks scope for capture detection
+-}
+collectLocalFunctionsWithScope : String -> List String -> Src.Expr -> List LiftedFunc
+collectLocalFunctionsWithScope prefix scope (Src.At _ expr) =
     case expr of
         Src.Let defs body ->
             let
+                -- Names defined in this let block (both values and functions)
+                letBindingNames =
+                    defs
+                        |> List.filterMap
+                            (\(Src.At _ def) ->
+                                case def of
+                                    Src.Define (Src.At _ name) _ _ _ ->
+                                        Just name
+
+                                    Src.Destruct _ _ ->
+                                        Nothing
+                            )
+
+                -- Extended scope includes current let bindings
+                extendedScope =
+                    scope ++ letBindingNames
+
                 -- Collect functions defined in this let
                 localFuncs =
                     defs
@@ -4897,7 +5153,37 @@ collectLocalFunctions prefix (Src.At _ expr) =
                                 case def of
                                     Src.Define (Src.At _ name) args defBody _ ->
                                         if not (List.isEmpty args) then
-                                            Just { prefix = prefix, name = name, args = args, body = defBody }
+                                            let
+                                                -- Get parameter names
+                                                argNames =
+                                                    List.concatMap patternVars args
+
+                                                -- Get all var refs in body
+                                                allRefs =
+                                                    collectVarRefs defBody |> uniqueStrings
+
+                                                -- Captured = refs that are in scope but not in args or stdlib
+                                                stdlibFuncs =
+                                                    [ "elm_str_append", "elm_from_int", "elm_from_float"
+                                                    , "String", "List", "Maybe", "Result", "Debug"
+                                                    ]
+
+                                                capturedVars =
+                                                    allRefs
+                                                        |> List.filter
+                                                            (\v ->
+                                                                List.member v extendedScope
+                                                                    && not (List.member v argNames)
+                                                                    && not (List.member v stdlibFuncs)
+                                                            )
+                                            in
+                                            Just
+                                                { prefix = prefix
+                                                , name = name
+                                                , args = args
+                                                , body = defBody
+                                                , capturedVars = capturedVars
+                                                }
 
                                         else
                                             Nothing
@@ -4913,14 +5199,14 @@ collectLocalFunctions prefix (Src.At _ expr) =
                             (\(Src.At _ def) ->
                                 case def of
                                     Src.Define (Src.At _ name) _ defBody _ ->
-                                        collectLocalFunctions (prefix ++ "_" ++ name) defBody
+                                        collectLocalFunctionsWithScope (prefix ++ "_" ++ name) extendedScope defBody
 
                                     Src.Destruct _ _ ->
                                         []
                             )
 
                 bodyFuncs =
-                    collectLocalFunctions prefix body
+                    collectLocalFunctionsWithScope prefix extendedScope body
             in
             localFuncs ++ nestedFuncs ++ bodyFuncs
 
@@ -4930,52 +5216,86 @@ collectLocalFunctions prefix (Src.At _ expr) =
                     branches
                         |> List.concatMap
                             (\( cond, thenExpr ) ->
-                                collectLocalFunctions prefix cond
-                                    ++ collectLocalFunctions prefix thenExpr
+                                collectLocalFunctionsWithScope prefix scope cond
+                                    ++ collectLocalFunctionsWithScope prefix scope thenExpr
                             )
             in
-            branchFuncs ++ collectLocalFunctions prefix elseExpr
+            branchFuncs ++ collectLocalFunctionsWithScope prefix scope elseExpr
 
         Src.Case scrutinee branches ->
             let
                 scrutineeFuncs =
-                    collectLocalFunctions prefix scrutinee
+                    collectLocalFunctionsWithScope prefix scope scrutinee
 
                 branchFuncs =
                     branches
-                        |> List.concatMap (\( _, branchExpr ) -> collectLocalFunctions prefix branchExpr)
+                        |> List.concatMap
+                            (\( pat, branchExpr ) ->
+                                -- Add pattern vars to scope for this branch
+                                let
+                                    patVars = patternVars pat
+                                in
+                                collectLocalFunctionsWithScope prefix (scope ++ patVars) branchExpr
+                            )
             in
             scrutineeFuncs ++ branchFuncs
 
         Src.Call fn args ->
-            collectLocalFunctions prefix fn
-                ++ List.concatMap (collectLocalFunctions prefix) args
+            collectLocalFunctionsWithScope prefix scope fn
+                ++ List.concatMap (collectLocalFunctionsWithScope prefix scope) args
 
         Src.Binops pairs final ->
             let
                 pairFuncs =
                     pairs
-                        |> List.concatMap (\( e, _ ) -> collectLocalFunctions prefix e)
+                        |> List.concatMap (\( e, _ ) -> collectLocalFunctionsWithScope prefix scope e)
             in
-            pairFuncs ++ collectLocalFunctions prefix final
+            pairFuncs ++ collectLocalFunctionsWithScope prefix scope final
 
         Src.Negate inner ->
-            collectLocalFunctions prefix inner
+            collectLocalFunctionsWithScope prefix scope inner
 
         _ ->
             []
 
 
 {-| Generate a lifted local function as a module-level function
+    capturedVars are variables from outer scope that need to be passed as additional parameters
 -}
-generateLiftedFunction : String -> String -> List Src.Pattern -> Src.Expr -> String
-generateLiftedFunction prefix funcName args body =
+generateLiftedFunction : String -> String -> List Src.Pattern -> Src.Expr -> List String -> String
+generateLiftedFunction prefix funcName args body capturedVars =
     let
         liftedName =
             prefix ++ "_" ++ funcName
 
         bodyExpr =
             generateStandaloneExpr body
+
+        -- Generate parameter declarations for captured variables
+        -- All captured vars are assumed to be double unless we can infer otherwise from usage
+        capturedParams =
+            capturedVars
+                |> List.map
+                    (\varName ->
+                        let
+                            -- Check if captured var is used as a string in the body
+                            isStringType =
+                                String.contains ("elm_str_append(elm_" ++ varName) bodyExpr
+                                    || String.contains ("elm_str_append(" ++ "\"") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
+                                    || String.contains ("strlen(elm_" ++ varName) bodyExpr
+
+                            -- Check if captured var is used as a list
+                            isListType =
+                                String.contains ("elm_" ++ varName ++ ".length") bodyExpr
+                                    || String.contains ("elm_" ++ varName ++ ".data") bodyExpr
+                        in
+                        if isStringType then
+                            "const char *elm_" ++ varName
+                        else if isListType then
+                            "elm_list_t elm_" ++ varName
+                        else
+                            "double elm_" ++ varName
+                    )
 
         params =
             args
@@ -5154,8 +5474,21 @@ generateLiftedFunction prefix funcName args body =
         -- This handles local recursive functions that get lifted
         fixedBodyExpr =
             String.replace ("elm_" ++ funcName ++ "(") ("elm_" ++ liftedName ++ "(") bodyExpr
+
+        -- Combine regular params with captured params
+        allParams =
+            let
+                regularParams = params
+                captured = String.join ", " capturedParams
+            in
+            if String.isEmpty regularParams then
+                captured
+            else if String.isEmpty captured then
+                regularParams
+            else
+                regularParams ++ ", " ++ captured
     in
-    "static " ++ returnType ++ " elm_" ++ liftedName ++ "(" ++ params ++ ") {\n    return " ++ fixedBodyExpr ++ ";\n}"
+    "static " ++ returnType ++ " elm_" ++ liftedName ++ "(" ++ allParams ++ ") {\n    return " ++ fixedBodyExpr ++ ";\n}"
 
 
 {-| Infer C type and initializer for an expression
@@ -5308,7 +5641,84 @@ inferCTypeAndInit locatedExpr =
 -}
 generateStandaloneLet : List (Src.Located Src.Def) -> Src.Expr -> String
 generateStandaloneLet defs body =
+    generateStandaloneLetWithPrefix "main" defs body
+
+
+{-| Generate standalone C code for let bindings with a known prefix for lifted functions
+-}
+generateStandaloneLetWithPrefix : String -> List (Src.Located Src.Def) -> Src.Expr -> String
+generateStandaloneLetWithPrefix prefix defs body =
     let
+        -- Collect info about local functions for macro generation
+        localFuncInfo =
+            defs
+                |> List.filterMap
+                    (\(Src.At _ def) ->
+                        case def of
+                            Src.Define (Src.At _ name) args defBody _ ->
+                                if not (List.isEmpty args) then
+                                    let
+                                        -- Get parameter names
+                                        argNames =
+                                            List.concatMap patternVars args
+
+                                        -- Get all var refs in body
+                                        allRefs =
+                                            collectVarRefs defBody |> uniqueStrings
+
+                                        -- Collect names of values defined in this let (excluding functions)
+                                        letValueNames =
+                                            defs
+                                                |> List.filterMap
+                                                    (\(Src.At _ d) ->
+                                                        case d of
+                                                            Src.Define (Src.At _ n) a _ _ ->
+                                                                if List.isEmpty a then Just n else Nothing
+
+                                                            _ ->
+                                                                Nothing
+                                                    )
+
+                                        -- Collect names of other local functions in this let block
+                                        localFuncNames =
+                                            defs
+                                                |> List.filterMap
+                                                    (\(Src.At _ d) ->
+                                                        case d of
+                                                            Src.Define (Src.At _ n) a _ _ ->
+                                                                if not (List.isEmpty a) then Just n else Nothing
+
+                                                            _ ->
+                                                                Nothing
+                                                    )
+
+                                        -- Standard library names that aren't captured
+                                        stdlibNames =
+                                            [ "String", "List", "Maybe", "Result", "Debug", "Basics" ]
+
+                                        -- Captured = refs that are NOT:
+                                        -- - the local function's own args
+                                        -- - other local functions in this let block
+                                        -- - stdlib module names
+                                        -- This includes both let bindings AND outer function parameters
+                                        capturedVars =
+                                            allRefs
+                                                |> List.filter
+                                                    (\v ->
+                                                        not (List.member v argNames)
+                                                            && not (List.member v localFuncNames)
+                                                            && not (List.member v stdlibNames)
+                                                    )
+                                    in
+                                    Just { name = name, numArgs = List.length args, capturedVars = capturedVars }
+
+                                else
+                                    Nothing
+
+                            Src.Destruct _ _ ->
+                                Nothing
+                    )
+
         generateDef (Src.At _ def) =
             case def of
                 Src.Define (Src.At _ name) args defBody _ ->
@@ -5322,45 +5732,75 @@ generateStandaloneLet defs body =
                         varType ++ " elm_" ++ name ++ " = " ++ varInit ++ ";"
 
                     else
-                        -- Local function - create alias to lifted function
-                        -- The actual function is lifted to module level as elm_main_<name>
-                        -- We create a function pointer alias so local calls work
+                        -- Local function - generate a macro that maps local calls to lifted function
+                        -- with captured variables appended
                         let
-                            numArgs =
-                                List.length args
+                            funcInfo =
+                                localFuncInfo
+                                    |> List.filter (\f -> f.name == name)
+                                    |> List.head
 
-                            argTypes =
-                                List.repeat numArgs "int" |> String.join ", "
+                            capturedVars =
+                                funcInfo
+                                    |> Maybe.map .capturedVars
+                                    |> Maybe.withDefault []
+
+                            -- Generate macro: #define elm_name(args) elm_prefix_name(args, captured1, captured2, ...)
+                            -- Use __VA_ARGS__ for flexibility
+                            capturedArgs =
+                                if List.isEmpty capturedVars then
+                                    ""
+                                else
+                                    ", " ++ (capturedVars |> List.map (\v -> "elm_" ++ v) |> String.join ", ")
                         in
-                        "int (*elm_" ++ name ++ ")(" ++ argTypes ++ ") = elm_main_" ++ name ++ ";"
+                        "#define elm_" ++ name ++ "(...) elm_" ++ prefix ++ "_" ++ name ++ "(__VA_ARGS__" ++ capturedArgs ++ ")"
 
                 Src.Destruct _ _ ->
                     "/* pattern destructuring not supported */"
 
+        -- Generate #undef for each local function after the body
+        undefMacros =
+            localFuncInfo
+                |> List.map (\f -> "#undef elm_" ++ f.name)
+
         defStrs =
             List.map generateDef defs
 
+        -- Use context-aware generation for the body to handle nested lets correctly
         bodyStr =
-            generateStandaloneExpr body
+            generateStandaloneExprWithCtx { funcPrefix = prefix } body
+
+        undefStrs =
+            if List.isEmpty undefMacros then
+                ""
+            else
+                "\n        " ++ String.join "\n        " undefMacros
     in
-    "({\n        " ++ String.join "\n        " defStrs ++ "\n        " ++ bodyStr ++ ";\n    })"
+    "({\n        " ++ String.join "\n        " defStrs ++ "\n        " ++ bodyStr ++ ";" ++ undefStrs ++ "\n    })"
 
 
 {-| Generate standalone C code for if/else expressions using ternary operator
 -}
 generateStandaloneIf : List ( Src.Expr, Src.Expr ) -> Src.Expr -> String
 generateStandaloneIf branches elseExpr =
+    generateStandaloneIfWithCtx defaultExprCtx branches elseExpr
+
+
+{-| Generate if/else with function context
+-}
+generateStandaloneIfWithCtx : ExprCtx -> List ( Src.Expr, Src.Expr ) -> Src.Expr -> String
+generateStandaloneIfWithCtx ctx branches elseExpr =
     case branches of
         [] ->
-            generateStandaloneExpr elseExpr
+            generateStandaloneExprWithCtx ctx elseExpr
 
         ( condition, thenExpr ) :: rest ->
             "("
-                ++ generateStandaloneExpr condition
+                ++ generateStandaloneExprWithCtx ctx condition
                 ++ " ? "
-                ++ generateStandaloneExpr thenExpr
+                ++ generateStandaloneExprWithCtx ctx thenExpr
                 ++ " : "
-                ++ generateStandaloneIf rest elseExpr
+                ++ generateStandaloneIfWithCtx ctx rest elseExpr
                 ++ ")"
 
 
