@@ -2762,9 +2762,19 @@ isStringValue exprStr =
         || String.contains "elm_str_append" exprStr
 
 
+{-| Check if an expression generates a record/struct value
+-}
+isRecordValue : String -> Bool
+isRecordValue exprStr =
+    String.startsWith "((struct " exprStr
+        || String.startsWith "{." exprStr
+        || String.startsWith "elm_" exprStr && String.contains "struct" exprStr
+
+
 {-| Wrap a value for use in elm_union_t constructor
     - Union values use .child with elm_alloc_union
     - String values use .str
+    - Record values use .child with heap allocation
     - Primitive values use .num
 -}
 wrapUnionData : String -> String
@@ -2773,6 +2783,9 @@ wrapUnionData valueStr =
         "{.child = elm_alloc_union(" ++ valueStr ++ ")}"
     else if isStringValue valueStr then
         "{.str = " ++ valueStr ++ "}"
+    else if isRecordValue valueStr then
+        -- Records need special handling - allocate on heap
+        "{.child = (elm_union_t*)malloc(sizeof(elm_union_t))}"
     else
         "{.num = " ++ valueStr ++ "}"
 
@@ -4090,11 +4103,16 @@ generateStandaloneCall fn args =
                                         _ ->
                                             "/* unsupported lambda pattern in Maybe.map */ 0"
 
+                                Src.At _ (Src.Accessor fieldName) ->
+                                    -- Accessor function: .field extracts field from record in Maybe
+                                    -- The record is stored via data.child pointer
+                                    "((__maybe_val.data.child)->" ++ fieldName ++ ")"
+
                                 _ ->
                                     -- Regular function call
                                     generateStandaloneExpr fnExpr ++ "(__maybe_val.data)"
                     in
-                    "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; __maybe_val.tag == TAG_Just ? ((elm_union_t){TAG_Just, " ++ fnAppStr ++ "}) : ((elm_union_t){TAG_Nothing, 0}); })"
+                    "({ elm_union_t __maybe_val = " ++ maybeStr ++ "; __maybe_val.tag == TAG_Just ? ((elm_union_t){TAG_Just, {.str = " ++ fnAppStr ++ "}}) : ((elm_union_t){TAG_Nothing, 0}); })"
 
                 _ ->
                     "/* Maybe.map wrong arity */ 0"
@@ -4788,6 +4806,26 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* List.filter wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "List" "partition") ->
+            -- List.partition pred list = split into (trues, falses) tuple
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __trues, __falses; __trues.length = 0; __falses.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __trues.data[__trues.length++] = __lst.data[__i]; else __falses.data[__falses.length++] = __lst.data[__i]; } ((elm_tuple2_t){__trues, __falses}); })"
+
+                _ ->
+                    "/* List.partition wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "List" "foldl") ->
             -- List.foldl f init list = fold from left
@@ -6229,6 +6267,14 @@ inferCTypeAndInit locatedExpr =
             -- String module function call returns string
             ( "const char *", generateStandaloneExpr locatedExpr )
 
+        Src.Call (Src.At _ (Src.VarQual _ "List" "partition")) _ ->
+            -- List.partition returns (List a, List a) tuple
+            ( "elm_tuple2_t", generateStandaloneExpr locatedExpr )
+
+        Src.Call (Src.At _ (Src.VarQual _ "List" "unzip")) _ ->
+            -- List.unzip returns (List a, List b) tuple
+            ( "elm_tuple2_t", generateStandaloneExpr locatedExpr )
+
         Src.Call (Src.At _ (Src.Var _ funcName)) _ ->
             -- Check if function call result is a string or record
             let
@@ -6399,8 +6445,8 @@ generateStandaloneLetWithPrefix prefix defs body =
                         in
                         "#define elm_" ++ name ++ "(...) elm_" ++ prefix ++ "_" ++ name ++ "(__VA_ARGS__" ++ capturedArgs ++ ")"
 
-                Src.Destruct _ _ ->
-                    "/* pattern destructuring not supported */"
+                Src.Destruct pattern expr ->
+                    generateDestructuring pattern expr
 
         -- Generate #undef for each local function after the body
         undefMacros =
@@ -6421,6 +6467,122 @@ generateStandaloneLetWithPrefix prefix defs body =
                 "\n        " ++ String.join "\n        " undefMacros
     in
     "({\n        " ++ String.join "\n        " defStrs ++ "\n        " ++ bodyStr ++ ";" ++ undefStrs ++ "\n    })"
+
+
+{-| Generate C code for pattern destructuring in let bindings.
+
+    Handles: let (a, b) = expr in ...
+    Generates:
+        elm_tuple2_t __destruct_N = <expr>;
+        double elm_a = __destruct_N._0.d;
+        double elm_b = __destruct_N._1.d;
+-}
+generateDestructuring : Src.Pattern -> Src.Expr -> String
+generateDestructuring pattern expr =
+    let
+        exprStr =
+            generateStandaloneExpr expr
+
+        -- Generate unique temp variable name based on pattern hash
+        tempName =
+            "__destruct_" ++ String.fromInt (String.length exprStr |> modBy 1000)
+    in
+    case pattern of
+        Src.At _ (Src.PTuple first second rest) ->
+            let
+                numElements =
+                    2 + List.length rest
+
+                tupleType =
+                    if numElements == 2 then
+                        "elm_tuple2_t"
+                    else if numElements == 3 then
+                        "elm_tuple3_t"
+                    else
+                        "elm_tuple" ++ String.fromInt numElements ++ "_t"
+
+                -- Generate the temp tuple variable
+                tupleDecl =
+                    tupleType ++ " " ++ tempName ++ " = " ++ exprStr ++ ";"
+
+                -- Generate bindings for each element
+                allPatterns =
+                    first :: second :: rest
+
+                generateBinding idx pat =
+                    case pat of
+                        Src.At _ (Src.PVar name) ->
+                            -- Determine element type from context
+                            -- Default to double, but could be enhanced
+                            Just ("double elm_" ++ name ++ " = " ++ tempName ++ "._" ++ String.fromInt idx ++ ".d;")
+
+                        Src.At _ Src.PAnything ->
+                            -- Wildcard, skip
+                            Nothing
+
+                        Src.At _ (Src.PTuple innerFirst innerSecond innerRest) ->
+                            -- Nested tuple - generate intermediate variable and recurse
+                            let
+                                innerNumElements =
+                                    2 + List.length innerRest
+
+                                innerTupleType =
+                                    if innerNumElements == 2 then
+                                        "elm_tuple2_t"
+                                    else
+                                        "elm_tuple3_t"
+
+                                innerTempName =
+                                    tempName ++ "_" ++ String.fromInt idx
+
+                                innerDecl =
+                                    innerTupleType ++ " " ++ innerTempName ++ " = " ++ tempName ++ "._" ++ String.fromInt idx ++ ";"
+
+                                innerBindings =
+                                    (innerFirst :: innerSecond :: innerRest)
+                                        |> List.indexedMap (generateNestedBinding innerTempName)
+                                        |> List.filterMap identity
+                            in
+                            Just (innerDecl ++ " " ++ String.join " " innerBindings)
+
+                        _ ->
+                            -- Other patterns not yet supported
+                            Just ("/* unsupported pattern in tuple position " ++ String.fromInt idx ++ " */")
+
+                generateNestedBinding parentTemp idx pat =
+                    case pat of
+                        Src.At _ (Src.PVar name) ->
+                            Just ("double elm_" ++ name ++ " = " ++ parentTemp ++ "._" ++ String.fromInt idx ++ ".d;")
+
+                        Src.At _ Src.PAnything ->
+                            Nothing
+
+                        _ ->
+                            Just "/* deeply nested pattern not supported */"
+
+                bindings =
+                    allPatterns
+                        |> List.indexedMap generateBinding
+                        |> List.filterMap identity
+            in
+            tupleDecl ++ " " ++ String.join " " bindings
+
+        Src.At _ (Src.PVar name) ->
+            -- Simple variable binding (shouldn't happen via Destruct, but handle it)
+            "double elm_" ++ name ++ " = " ++ exprStr ++ ";"
+
+        Src.At _ (Src.PRecord fields) ->
+            -- Record destructuring: let { x, y } = expr
+            let
+                fieldBindings =
+                    fields
+                        |> List.map (\(Src.At _ fieldName) ->
+                            "double elm_" ++ fieldName ++ " = (" ++ exprStr ++ ")." ++ fieldName ++ ";")
+            in
+            String.join " " fieldBindings
+
+        _ ->
+            "/* unsupported destructuring pattern */"
 
 
 {-| Generate standalone C code for if/else expressions using ternary operator
