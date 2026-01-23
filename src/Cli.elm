@@ -1265,9 +1265,22 @@ generateTccCode ast =
                 |> Maybe.map (\(Src.At _ n) -> n)
                 |> Maybe.withDefault "Main"
 
+        -- Check if module has a main function
+        hasMain =
+            ast.values
+                |> List.any (\(Src.At _ v) ->
+                    case v.name of
+                        Src.At _ "main" -> True
+                        _ -> False
+                )
+
         -- Dead Code Elimination: only keep functions reachable from main
+        -- Only apply DCE if module has main (library modules keep all functions)
         values =
-            filterReachableValues ast.values
+            if hasMain then
+                filterReachableValues ast.values
+            else
+                ast.values  -- Keep all for library modules
 
         -- Process imports to generate includes and extern declarations
         importCode =
