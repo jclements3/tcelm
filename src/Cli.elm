@@ -7768,6 +7768,15 @@ generateDestructuring pattern expr =
                 Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ->
                     "typeof(((elm_union_t)" ++ exprStr ++ ").data) elm_" ++ innerName ++ " = ((elm_union_t)" ++ exprStr ++ ").data;"
 
+                -- Constructor pattern with two bound variables: let (Src.At region x) = expr
+                Src.At _ (Src.PCtor _ "At" [ Src.At _ (Src.PVar regionName), Src.At _ (Src.PVar innerName) ]) ->
+                    -- For At patterns, region is the tag-related field and innerName is the data
+                    "elm_union_t __at_tmp = (elm_union_t)" ++ exprStr ++ "; typeof(__at_tmp.tag) elm_" ++ regionName ++ " = __at_tmp.tag; typeof(__at_tmp.data) elm_" ++ innerName ++ " = __at_tmp.data;"
+
+                -- Qualified constructor pattern with two bound variables
+                Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ (Src.PVar regionName), Src.At _ (Src.PVar innerName) ]) ->
+                    "elm_union_t __at_tmp = (elm_union_t)" ++ exprStr ++ "; typeof(__at_tmp.tag) elm_" ++ regionName ++ " = __at_tmp.tag; typeof(__at_tmp.data) elm_" ++ innerName ++ " = __at_tmp.data;"
+
                 -- Constructor pattern extracting inner value: let (Just x) = expr
                 Src.At _ (Src.PCtor _ ctorName [ Src.At _ (Src.PVar innerName) ]) ->
                     "typeof(((elm_union_t)" ++ exprStr ++ ").data.child->data.num) elm_" ++ innerName ++ " = ((elm_union_t)" ++ exprStr ++ ").data.child->data.num;"
