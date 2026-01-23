@@ -1876,7 +1876,7 @@ generateTccCode ast =
             , "/* Built-in List functions */"
             , "static elm_union_t elm_List_head(elm_list_t lst) {"
             , "    if (lst.length > 0) {"
-            , "        elm_union_t inner = { .tag = 0, .data = lst.data[0], .data2 = 0 };"
+            , "        elm_union_t inner = { .tag = 0, .data = {.num = lst.data[0].d}, .data2 = 0 };"
             , "        return elm_Just(inner);"
             , "    }"
             , "    return elm_Nothing();"
@@ -3429,14 +3429,26 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
                             String.contains "Type" name
                         _ -> False
 
+                -- Check if expression is a record
+                isRecordExpr (Src.At _ e) =
+                    case e of
+                        Src.Record _ -> True
+                        _ -> False
+
                 wrapDataElement elemExpr =
                     let
                         genExpr = generateStandaloneExpr elemExpr
-                        isUnion = isUnionExpr elemExpr ||
+                        -- Check for record first (struct) - it may contain union fields but is not a union
+                        isRecord = isRecordExpr elemExpr || String.startsWith "((struct {" genExpr
+                        -- Only check for union if not a record
+                        isUnion = not isRecord && (isUnionExpr elemExpr ||
                                   String.startsWith "((elm_union_t)" genExpr ||
-                                  String.contains "elm_union_t" genExpr
+                                  String.contains "elm_union_t" genExpr)
                     in
-                    if isUnion then
+                    if isRecord then
+                        -- Records stored via u field but need to be explicitly typed
+                        "{.u = (elm_union_t){0, {.ptr = (void*)&" ++ genExpr ++ "}}}"
+                    else if isUnion then
                         "{.u = " ++ genExpr ++ "}"
                     else if String.startsWith "\"" genExpr then
                         "{.str = " ++ genExpr ++ "}"
@@ -3902,6 +3914,15 @@ generateStandaloneCall fn args =
 
                 _ ->
                     "/* String.fromInt wrong arity */ 0"
+
+        Src.At _ (Src.VarQual _ "String" "fromFloat") ->
+            -- String.fromFloat f = string representation
+            case args of
+                [ f ] ->
+                    "elm_from_float(" ++ generateStandaloneExpr f ++ ")"
+
+                _ ->
+                    "/* String.fromFloat wrong arity */ 0"
 
         Src.At _ (Src.VarQual _ "String" "toFloat") ->
             -- String.toFloat s = Maybe Float (returns integer part)
@@ -4982,7 +5003,7 @@ generateStandaloneCall fn args =
                     let
                         listStr = generateStandaloneExpr listExpr
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; int __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i]; __sum; })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; double __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i].d; __sum; })"
 
                 _ ->
                     "/* List.sum wrong arity */ 0"
@@ -4994,7 +5015,7 @@ generateStandaloneCall fn args =
                     let
                         listStr = generateStandaloneExpr listExpr
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; int __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i]; __prod; })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; double __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i].d; __prod; })"
 
                 _ ->
                     "/* List.product wrong arity */ 0"
@@ -5056,7 +5077,7 @@ generateStandaloneCall fn args =
                         loStr = generateStandaloneExpr loExpr
                         hiStr = generateStandaloneExpr hiExpr
                     in
-                    "({ int __lo = " ++ loStr ++ ", __hi = " ++ hiStr ++ "; elm_list_t __lst; __lst.length = __hi >= __lo ? __hi - __lo + 1 : 0; if (__lst.length > ELM_LIST_MAX) __lst.length = ELM_LIST_MAX; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i] = __lo + __i; __lst; })"
+                    "({ int __lo = " ++ loStr ++ ", __hi = " ++ hiStr ++ "; elm_list_t __lst; __lst.length = __hi >= __lo ? __hi - __lo + 1 : 0; if (__lst.length > ELM_LIST_MAX) __lst.length = ELM_LIST_MAX; for (int __i = 0; __i < __lst.length; __i++) __lst.data[__i].d = __lo + __i; __lst; })"
 
                 _ ->
                     "/* List.range wrong arity */ 0"
@@ -5159,19 +5180,19 @@ generateStandaloneCall fn args =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 -- Lambda with Located pattern: \(Src.At _ x) -> ...
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
-                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i].u).data.num; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 -- Lambda with qualified Located pattern: \(Src.At _ x) -> ...
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
-                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i].u).data.num; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 -- Lambda with tuple pattern: \(a, b) -> ...
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
-                                    "({ elm_tuple2_t __elem = __lst.data[__i]; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ elm_tuple2_t __elem = __lst.data[__i].t2; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 -- Accessor function: .fieldName
                                 Src.At _ (Src.Accessor fieldName) ->
@@ -5179,12 +5200,12 @@ generateStandaloneCall fn args =
 
                                 -- Generic lambda with any pattern - use helper
                                 Src.At _ (Src.Lambda patterns lambdaBody) ->
-                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i].d"
 
                                 _ ->
-                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i].d)"
                     in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i].d = " ++ fnAppStr ++ "; __result; })"
 
                 _ ->
                     "/* List.map wrong arity */ 0"
@@ -5857,19 +5878,19 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                         fnAppStr =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
-                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
                                 Src.At _ (Src.Accessor fieldName) ->
                                     "(__lst.data[__i]." ++ fieldName ++ ")"
 
                                 -- Generic lambda with any pattern - use helper
                                 Src.At _ (Src.Lambda patterns lambdaBody) ->
-                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i].d"
 
                                 _ ->
-                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i].d)"
                     in
-                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i].d = " ++ fnAppStr ++ "; __result; })"
 
                 _ ->
                     "/* List.map partial wrong arity */ 0"
@@ -6128,6 +6149,30 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
 
                 _ ->
                     "/* List.partition partial wrong arity */ 0"
+
+        -- List.sum with pipe arg (list) - no partial args expected
+        Src.At _ (Src.VarQual _ "List" "sum") ->
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; double __sum = 0; for (int __i = 0; __i < __lst.length; __i++) __sum += __lst.data[__i].d; __sum; })"
+
+        -- List.product with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "product") ->
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; double __prod = 1; for (int __i = 0; __i < __lst.length; __i++) __prod *= __lst.data[__i].d; __prod; })"
+
+        -- List.reverse with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "reverse") ->
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __rev; __rev.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __rev.data[__i] = __lst.data[__lst.length - 1 - __i]; __rev; })"
+
+        -- List.length with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "length") ->
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length; })"
+
+        -- List.head with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "head") ->
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.num = __lst.data[0].d}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
+
+        -- List.last with pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "last") ->
+            "({ elm_list_t __lst = " ++ pipeArg ++ "; __lst.length > 0 ? ((elm_union_t){TAG_Just, {.num = __lst.data[__lst.length - 1].d}}) : ((elm_union_t){TAG_Nothing, {.num = 0}}); })"
 
         -- Default: just generate a simple function call with all args
         _ ->
