@@ -32,11 +32,11 @@ using callback patterns to delegate to the Codegen modules.
 -}
 
 import AST.Source as Src
-import Codegen.Builtins as Builtins
+import Codegen.Builtins as Builtins exposing (isRecordValue, isStringValue, isUnionValue, makeUnionCtor, wrapUnionData)
 import Codegen.Expr as Expr
 import Codegen.Lambda as Lambda exposing (LiftedFunc)
 import Codegen.Pattern as Pattern
-import Codegen.Shared as Shared exposing (ExprCtx, MainValue(..), escapeC, isSimpleLiteral, patternVars)
+import Codegen.Shared as Shared exposing (ExprCtx, MainValue(..), collectAllFunctionNames, collectUserFunctionNames, escapeC, getModuleName, getModulePrefix, isSimpleLiteral, patternVars)
 import Codegen.Union as Union
 import Generate.C as C
 import Json.Decode as Decode
@@ -160,12 +160,10 @@ generateRtemsCode : Src.Module -> String
 generateRtemsCode ast =
     let
         moduleName =
-            ast.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName ast
 
         modulePrefix =
-            String.replace "." "_" moduleName
+            getModulePrefix ast
 
         -- Process imports to generate includes
         importCode =
@@ -176,18 +174,7 @@ generateRtemsCode ast =
 
         -- Collect user function names for context
         userFunctionNames =
-            ast.values
-                |> List.filterMap
-                    (\(Src.At _ value) ->
-                        let
-                            (Src.At _ name) =
-                                value.name
-                        in
-                        if name /= "main" && not (List.isEmpty value.args) then
-                            Just name
-                        else
-                            Nothing
-                    )
+            collectUserFunctionNames ast.values
 
         -- Generate user-defined functions (non-main values with arguments)
         userFunctions =
@@ -789,9 +776,7 @@ generateNativeCode : Src.Module -> String
 generateNativeCode ast =
     let
         moduleName =
-            ast.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName ast
 
         -- Process imports to generate includes
         importCode =
@@ -874,27 +859,14 @@ generateTccCode : Src.Module -> String
 generateTccCode ast =
     let
         moduleName =
-            ast.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName ast
 
         modulePrefix =
-            String.replace "." "_" moduleName
+            getModulePrefix ast
 
         -- Collect user function names for context (used for module-prefixed function calls)
         userFunctionNames =
-            ast.values
-                |> List.filterMap
-                    (\(Src.At _ value) ->
-                        let
-                            (Src.At _ name) =
-                                value.name
-                        in
-                        if name /= "main" && not (List.isEmpty value.args) then
-                            Just name
-                        else
-                            Nothing
-                    )
+            collectUserFunctionNames ast.values
 
         -- Check if module has a main function
         hasMain =
@@ -1386,13 +1358,11 @@ generateTccLibCode : Src.Module -> String
 generateTccLibCode ast =
     let
         moduleName =
-            ast.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName ast
 
         -- Convert module name to C identifier (replace dots with underscores)
         cModuleName =
-            String.replace "." "_" moduleName
+            getModulePrefix ast
 
         -- Process imports
         importCode =
@@ -1445,17 +1415,7 @@ generateTccLibCode ast =
 
         -- Collect user function names for context
         userFunctionNames =
-            ast.values
-                |> List.filterMap
-                    (\(Src.At _ value) ->
-                        let
-                            (Src.At _ name) = value.name
-                        in
-                        if not (List.isEmpty value.args) then
-                            Just name
-                        else
-                            Nothing
-                    )
+            collectAllFunctionNames ast.values
 
         -- Generate user-defined functions with qualified names
         userFunctions =
@@ -1549,26 +1509,14 @@ generateTccHeader : Src.Module -> String
 generateTccHeader ast =
     let
         moduleName =
-            ast.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName ast
 
         cModuleName =
-            String.replace "." "_" moduleName
+            getModulePrefix ast
 
         -- Collect user function names for context
         userFunctionNames =
-            ast.values
-                |> List.filterMap
-                    (\(Src.At _ value) ->
-                        let
-                            (Src.At _ name) = value.name
-                        in
-                        if not (List.isEmpty value.args) then
-                            Just name
-                        else
-                            Nothing
-                    )
+            collectAllFunctionNames ast.values
 
         -- Get exported names
         (Src.At _ exports) = ast.exports
@@ -2448,64 +2396,6 @@ generateStandaloneBinopsImpl ctx pairs finalExpr =
                         "(" ++ buildExpr terms ++ ")"
             else
                 "(" ++ buildExpr terms ++ ")"
-
-
-{-| Helper to determine if an expression generates a union value
--}
-isUnionValue : String -> Bool
-isUnionValue exprStr =
-    String.startsWith "((elm_union_t)" exprStr
-        || String.startsWith "elm_alloc_union" exprStr
-        || String.contains "elm_union_t" exprStr
-
-
-{-| Check if an expression generates a string value
--}
-isStringValue : String -> Bool
-isStringValue exprStr =
-    String.startsWith "\"" exprStr
-        || String.startsWith "elm_str_" exprStr
-        || String.startsWith "elm_from_int" exprStr
-        || String.startsWith "elm_from_float" exprStr
-        || String.contains "elm_str_append" exprStr
-
-
-{-| Check if an expression generates a record/struct value
--}
-isRecordValue : String -> Bool
-isRecordValue exprStr =
-    String.startsWith "((struct " exprStr
-        || String.startsWith "{." exprStr
-        || String.startsWith "elm_" exprStr && String.contains "struct" exprStr
-
-
-{-| Wrap a value for use in elm_union_t constructor
-    - Union values use .child with elm_alloc_union
-    - String values use .str
-    - Record values use .child with heap allocation
-    - Primitive values use .num
--}
-wrapUnionData : String -> String
-wrapUnionData valueStr =
-    if isUnionValue valueStr then
-        "{.child = elm_alloc_union(" ++ valueStr ++ ")}"
-    else if isStringValue valueStr then
-        "{.str = " ++ valueStr ++ "}"
-    else if isRecordValue valueStr then
-        -- Records need special handling - allocate on heap
-        "{.child = (elm_union_t*)malloc(sizeof(elm_union_t))}"
-    else
-        "{.num = " ++ valueStr ++ "}"
-
-
-{-| Generate a union constructor expression
--}
-makeUnionCtor : String -> String -> String
-makeUnionCtor tag dataValue =
-    if dataValue == "0" || dataValue == "" then
-        "((elm_union_t){" ++ tag ++ ", {.num = 0}})"
-    else
-        "((elm_union_t){" ++ tag ++ ", " ++ wrapUnionData dataValue ++ "})"
 
 
 {-| Generate standalone C code for a single expression (no runtime)

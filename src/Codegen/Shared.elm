@@ -1,11 +1,15 @@
 module Codegen.Shared exposing
     ( ExprCtx
     , MainValue(..)
+    , collectUserFunctionNames
+    , collectAllFunctionNames
     , ctorListHasData
     , defaultExprCtx
     , escapeC
     , extractCtorName
     , generateCharPredCall
+    , getModuleName
+    , getModulePrefix
     , isSimpleLiteral
     , mainTypeIsString
     , mangle
@@ -180,6 +184,23 @@ ctorListHasData ctors =
                 True
 
 
+{-| Extract the module name from an AST module, defaulting to "Main"
+-}
+getModuleName : Src.Module -> String
+getModuleName ast =
+    ast.name
+        |> Maybe.map (\(Src.At _ n) -> n)
+        |> Maybe.withDefault "Main"
+
+
+{-| Get the module prefix for C identifiers (module name with dots replaced by underscores)
+E.g., "AST.Source" -> "AST_Source"
+-}
+getModulePrefix : Src.Module -> String
+getModulePrefix ast =
+    String.replace "." "_" (getModuleName ast)
+
+
 {-| Check if a type annotation represents String type
 -}
 mainTypeIsString : Maybe Src.Type -> Bool
@@ -285,3 +306,37 @@ isSimpleLiteral (Src.At _ e) =
         Src.Float _ -> True
         Src.Chr _ -> True
         _ -> False
+
+
+{-| Collect user-defined function names from module values (excludes "main")
+-}
+collectUserFunctionNames : List (Src.Located Src.Value) -> List String
+collectUserFunctionNames values =
+    values
+        |> List.filterMap
+            (\(Src.At _ value) ->
+                let
+                    (Src.At _ name) = value.name
+                in
+                if name /= "main" && not (List.isEmpty value.args) then
+                    Just name
+                else
+                    Nothing
+            )
+
+
+{-| Collect all function names from module values (includes "main")
+-}
+collectAllFunctionNames : List (Src.Located Src.Value) -> List String
+collectAllFunctionNames values =
+    values
+        |> List.filterMap
+            (\(Src.At _ value) ->
+                let
+                    (Src.At _ name) = value.name
+                in
+                if not (List.isEmpty value.args) then
+                    Just name
+                else
+                    Nothing
+            )

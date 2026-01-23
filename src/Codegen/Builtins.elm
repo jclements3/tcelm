@@ -1,6 +1,11 @@
 module Codegen.Builtins exposing
     ( generateBuiltinCall
     , generateBuiltinCallWithPipeArg
+    , isUnionValue
+    , isStringValue
+    , isRecordValue
+    , wrapUnionData
+    , makeUnionCtor
     )
 
 {-| Built-in function code generation.
