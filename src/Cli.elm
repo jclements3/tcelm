@@ -3967,19 +3967,39 @@ generateStandaloneCall fn args =
                     "/* Maybe.map5 wrong arity */ 0"
 
         Src.At _ (Src.Var _ "Ok") ->
-            -- Ok constructor
+            -- Result Ok constructor - call the generated constructor function
             case args of
                 [ value ] ->
-                    "((elm_union_t){TAG_Ok, " ++ generateStandaloneExpr value ++ "})"
+                    let
+                        valueStr = generateStandaloneExpr value
+                        wrappedValue =
+                            if isUnionValue valueStr then
+                                valueStr
+                            else if isStringValue valueStr then
+                                "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                            else
+                                "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
+                    in
+                    "elm_Ok(" ++ wrappedValue ++ ")"
 
                 _ ->
                     "/* Ok wrong arity */ 0"
 
         Src.At _ (Src.Var _ "Err") ->
-            -- Err constructor
+            -- Result Err constructor - call the generated constructor function
             case args of
                 [ value ] ->
-                    "((elm_union_t){TAG_Err, " ++ generateStandaloneExpr value ++ "})"
+                    let
+                        valueStr = generateStandaloneExpr value
+                        wrappedValue =
+                            if isUnionValue valueStr then
+                                valueStr
+                            else if isStringValue valueStr then
+                                "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                            else
+                                "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
+                    in
+                    "elm_Err(" ++ wrappedValue ++ ")"
 
                 _ ->
                     "/* Err wrong arity */ 0"
@@ -4812,8 +4832,22 @@ generateStandaloneCall fn args =
                                 _ ->
                                     "/* complex fn */" ++ generateStandaloneExpr fn
 
+                        -- Expand record literal arguments to individual field values
+                        -- This matches functions with record patterns that take individual field params
+                        expandCallArg : Src.Expr -> List String
+                        expandCallArg arg =
+                            case arg of
+                                Src.At _ (Src.Record fields) ->
+                                    -- Expand record to field values in alphabetical order by field name
+                                    fields
+                                        |> List.sortBy (\( Src.At _ fieldName, _ ) -> fieldName)
+                                        |> List.map (\( _, fieldValue ) -> generateStandaloneExpr fieldValue)
+
+                                _ ->
+                                    [ generateStandaloneExpr arg ]
+
                         argStrs =
-                            List.map generateStandaloneExpr args
+                            List.concatMap expandCallArg args
                     in
                     fnName ++ "(" ++ String.join ", " argStrs ++ ")"
 
@@ -5231,8 +5265,63 @@ generateUserFunction name args body =
         "typedef " ++ recordType ++ " " ++ typedefName ++ ";\n" ++
         "static " ++ typedefName ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return (" ++ typedefName ++ "){" ++ initializer ++ "};\n}"
     else if not (String.isEmpty recordPreamble) then
-        -- Has record pattern - wrap body with preamble bindings
-        "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    " ++ recordPreamble ++ "\n    return " ++ bodyExpr ++ ";\n}"
+        -- Has record pattern - extract fields directly from parameter
+        -- Use individual parameters for each field to avoid anonymous struct incompatibility
+        let
+            -- Generate parameters for all args, expanding record patterns to individual fields
+            allParams =
+                args
+                    |> List.concatMap
+                        (\(Src.At _ pat) ->
+                            case pat of
+                                Src.PRecord fields ->
+                                    -- Expand record to individual field parameters (sorted alphabetically)
+                                    fields
+                                        |> List.sortBy (\(Src.At _ fieldName) -> fieldName)
+                                        |> List.map
+                                            (\(Src.At _ fieldName) ->
+                                                let
+                                                    isStringField =
+                                                        String.contains ("elm_str_append(elm_" ++ fieldName ++ ",") bodyExpr
+                                                            || String.contains ("elm_str_append(elm_" ++ fieldName ++ ")") bodyExpr
+
+                                                    fieldType =
+                                                        if isStringField then
+                                                            "const char *"
+                                                        else
+                                                            "double"
+                                                in
+                                                fieldType ++ " elm_" ++ fieldName
+                                            )
+
+                                Src.PVar varName ->
+                                    -- Regular variable parameter
+                                    let
+                                        isStringVar =
+                                            String.contains ("elm_str_append(elm_" ++ varName ++ ",") bodyExpr
+                                                || String.contains ("elm_str_append(elm_" ++ varName ++ ")") bodyExpr
+
+                                        varType =
+                                            if isStringVar then
+                                                "const char *"
+                                            else
+                                                "double"
+                                    in
+                                    [ varType ++ " elm_" ++ varName ]
+
+                                Src.PAnything ->
+                                    [ "double __unused" ]
+
+                                Src.PUnit ->
+                                    []
+
+                                _ ->
+                                    [ "double /* unsupported pattern */" ]
+                        )
+                    |> String.join ", "
+        in
+        -- No preamble needed since fields are passed directly as parameters
+        "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ allParams ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
     else
         "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
