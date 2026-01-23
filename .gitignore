@@ -22,6 +22,21 @@ runtime/test_rtems
 runtime/test_shell_ops
 runtime/test_runtime_tcc
 runtime/test_rtems_tcc
+runtime/test_taos
+runtime/test_taos_gcc
+runtime/test_matrix
+runtime/test_matrix_gpu
+runtime/test_parity
+runtime/test_csv_output
+runtime/test_pmap
+runtime/test_worker
+runtime/*.csv
+
+# Generated C files (from Elm compilation)
+bin/tcelm.c
+tests/ripitt_*.c
+runtime/test_*.c
+!runtime/tcelm_matrix_gpu.c
 
 # Editor
 *.swp
@@ -30,6 +45,16 @@ runtime/test_rtems_tcc
 
 # Build directories
 build/
+output/
+
+# Example binaries
+examples/sensor_monitor
+examples/sensor_monitor_tcc
+examples/simple_test
+
+# Misc build artifacts
+a.out
+tests/ripitt_output/
 
 # External repos (submodules or separate)
 elm-compiler-src/
