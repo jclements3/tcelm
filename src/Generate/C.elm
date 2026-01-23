@@ -10,7 +10,7 @@ For RTEMS targets, generates task definitions and shell registration.
 
 import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
 import Codegen.Lambda exposing (LambdaState, LiftedLambda)
-import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix, patternVars)
+import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix, patternVars, uniqueStrings)
 
 
 
@@ -215,7 +215,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                 captures =
                     collectFreeVars lambdaLocals body
                         |> List.filter (\v -> List.member v locals)
-                        |> unique
+                        |> uniqueStrings
 
                 numCaptures =
                     List.length captures
@@ -296,7 +296,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                             captures =
                                                 collectFreeVars defLocals defBody
                                                     |> List.filter (\v -> List.member v allLocals)
-                                                    |> unique
+                                                    |> uniqueStrings
 
                                             numCaptures =
                                                 List.length captures
@@ -796,20 +796,6 @@ generateCaseExprWithLiftedLambdas scrutineeCode branches =
     "({\n        tcelm_value_t *__case_subject = " ++ scrutineeCode ++ ";\n        " ++ branchCode ++ "\n        TCELM_UNIT; /* unreachable */\n    })"
 
 
-{-| Remove duplicates from a list
--}
-unique : List String -> List String
-unique list =
-    List.foldl
-        (\item acc ->
-            if List.member item acc then
-                acc
-
-            else
-                acc ++ [ item ]
-        )
-        []
-        list
 
 
 {-| Generate if/else chain from pre-generated condition and body code strings
@@ -1066,7 +1052,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                 -- Captures are free vars that come from outer scope
                 captures =
                     List.filter (\v -> List.member v outerLocals) freeVars
-                        |> unique
+                        |> uniqueStrings
 
                 newLambda =
                     { id = state.nextId
@@ -1129,7 +1115,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                                             -- Captures are free vars that come from outer scope
                                             captures =
                                                 List.filter (\v -> List.member v allLocals) freeVars
-                                                    |> unique
+                                                    |> uniqueStrings
 
                                             newLambda =
                                                 { id = st.nextId
