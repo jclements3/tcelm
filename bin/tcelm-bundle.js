@@ -179,12 +179,82 @@ function compileModule(Elm, source, target) {
 }
 
 /**
- * Extract just the module-specific code (skip headers/runtime)
+ * Extract type tags from compiled C code
+ */
+function extractTypeTags(cCode) {
+    const tags = [];
+    const tagRegex = /#define\s+(TAG_\w+)\s+(\d+)/g;
+    let match;
+    while ((match = tagRegex.exec(cCode)) !== null) {
+        tags.push({ name: match[1], value: parseInt(match[2]), line: match[0] });
+    }
+    return tags;
+}
+
+/**
+ * Extract custom type constructor functions from compiled C code.
+ * These appear after the "Custom type definitions" section and before "Forward declarations".
+ */
+function extractConstructorFunctions(cCode, moduleName) {
+    const customTypeStart = cCode.indexOf('/* Custom type definitions */');
+    const forwardDeclStart = cCode.indexOf('/* Forward declarations */');
+
+    if (customTypeStart === -1) {
+        return '';
+    }
+
+    // End at forward declarations if present, otherwise look for other section starts
+    let end = forwardDeclStart;
+    if (end === -1) {
+        const constantsStart = cCode.indexOf('/* Simple constants */');
+        const userFuncsStart = cCode.indexOf('/* User-defined functions */');
+        end = Math.min(
+            constantsStart !== -1 ? constantsStart : cCode.length,
+            userFuncsStart !== -1 ? userFuncsStart : cCode.length
+        );
+    }
+
+    if (customTypeStart >= end) {
+        return '';
+    }
+
+    // Extract the section content, but skip TAG_* definitions (already merged)
+    const section = cCode.substring(customTypeStart, end);
+
+    // Filter out #define TAG_* lines (they're in the merged tags section)
+    // Keep typedef and static elm_union_t constructor functions
+    const lines = section.split('\n').filter(line => {
+        const trimmed = line.trim();
+        // Keep comments, typedefs, and static functions
+        if (trimmed.startsWith('/*') || trimmed.startsWith('typedef') ||
+            trimmed.startsWith('static elm_union_t') || trimmed.startsWith('elm_union_t') ||
+            trimmed.startsWith('}') || trimmed.startsWith('return') ||
+            trimmed.startsWith('.') || trimmed === '') {
+            return true;
+        }
+        // Skip #define TAG_* lines
+        if (trimmed.startsWith('#define TAG_')) {
+            return false;
+        }
+        // Keep other lines (function bodies, etc.)
+        return true;
+    });
+
+    const content = lines.join('\n').trim();
+    if (!content || content === '/* Custom type definitions */') {
+        return '';
+    }
+
+    return `/* === Constructors from ${moduleName} === */\n` + content + '\n';
+}
+
+/**
+ * Extract just the module-specific code (skip headers/runtime and type tags)
+ * Type tags are extracted separately and merged
  */
 function extractModuleCode(cCode, moduleName) {
-    // Find where module-specific content starts
-    // Priority order: Type tags, Forward declarations, Constants, User functions
-    const typeTagsStart = cCode.indexOf('/* Type tags for');
+    // Find where module-specific content starts (AFTER type tags)
+    // Priority order: Forward declarations, Constants, User functions
     const forwardDeclStart = cCode.indexOf('/* Forward declarations */');
     const constantsStart = cCode.indexOf('/* Simple constants */');
     const computedConstStart = cCode.indexOf('/* Computed constants');
@@ -192,8 +262,8 @@ function extractModuleCode(cCode, moduleName) {
     const mainStart = cCode.indexOf('/* Elm main value */');
     const cMainStart = cCode.indexOf('int main(void)');
 
-    // Find earliest module content
-    const candidates = [typeTagsStart, forwardDeclStart, constantsStart, computedConstStart, userFuncsStart]
+    // Find earliest module content (excluding type tags which are merged separately)
+    const candidates = [forwardDeclStart, constantsStart, computedConstStart, userFuncsStart]
         .filter(x => x !== -1);
     let start = candidates.length > 0 ? Math.min(...candidates) : -1;
 
@@ -304,8 +374,52 @@ async function bundle(sourceFile, target) {
     const headers = extractHeadersAndRuntime(mainCode.code);
 
     // Collect all type tags from all modules (avoid duplicates)
-    const allTypeTags = new Set();
-    const typeTagLines = [];
+    const allTypeTags = new Map(); // name -> { value, line }
+    for (const name of sortedNames) {
+        const compiled = compiledModules.get(name);
+        if (compiled) {
+            const tags = extractTypeTags(compiled.code);
+            for (const tag of tags) {
+                // Keep first occurrence (dependency order ensures correct values)
+                if (!allTypeTags.has(tag.name)) {
+                    allTypeTags.set(tag.name, { value: tag.value, line: tag.line });
+                }
+            }
+        }
+    }
+
+    // Generate merged type tags section
+    const typeTagsSection = allTypeTags.size > 0
+        ? '/* ========== MERGED TYPE TAGS ========== */\n' +
+          Array.from(allTypeTags.values()).map(t => t.line).join('\n') + '\n\n'
+        : '';
+
+    // Collect constructor functions from all modules (in dependency order)
+    const allConstructors = [];
+    const seenConstructors = new Set();
+    for (const name of sortedNames) {
+        const compiled = compiledModules.get(name);
+        if (compiled) {
+            const constructors = extractConstructorFunctions(compiled.code, name);
+            if (constructors) {
+                // Deduplicate by checking if elm_ConstructorName function already exists
+                const funcMatch = constructors.match(/static elm_union_t (elm_\w+)/g);
+                if (funcMatch) {
+                    const newFuncs = funcMatch.filter(f => !seenConstructors.has(f));
+                    if (newFuncs.length > 0) {
+                        newFuncs.forEach(f => seenConstructors.add(f));
+                        allConstructors.push(constructors);
+                    }
+                } else {
+                    allConstructors.push(constructors);
+                }
+            }
+        }
+    }
+
+    const constructorsSection = allConstructors.length > 0
+        ? '\n/* ========== CONSTRUCTOR FUNCTIONS ========== */\n' + allConstructors.join('\n')
+        : '';
 
     // Extract module code for dependencies (in order)
     const depCode = [];
@@ -325,6 +439,8 @@ async function bundle(sourceFile, target) {
     // Combine everything
     return [
         headers,
+        typeTagsSection,
+        constructorsSection,
         '\n/* ========== BUNDLED MODULES ========== */\n',
         depCode.join('\n'),
         '\n/* ========== MAIN MODULE ========== */\n',

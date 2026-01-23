@@ -44,27 +44,29 @@ type Located a
 
 at : Position -> Position -> a -> Located a
 at start end value =
-    At (Region start end) value
+    At { start = start, end = end } value
 
 
 merge : Located a -> Located b -> c -> Located c
-merge (At r1 _) (At r2 _) value =
-    At (mergeRegions r1 r2) value
+merge loc1 loc2 value =
+    At (mergeRegions (toRegion loc1) (toRegion loc2)) value
 
 
 mergeRegions : Region -> Region -> Region
 mergeRegions r1 r2 =
-    Region r1.start r2.end
+    { start = r1.start, end = r2.end }
 
 
 toValue : Located a -> a
-toValue (At _ value) =
-    value
+toValue loc =
+    case loc of
+        At _ value -> value
 
 
 toRegion : Located a -> Region
-toRegion (At region _) =
-    region
+toRegion loc =
+    case loc of
+        At r _ -> r
 
 
 

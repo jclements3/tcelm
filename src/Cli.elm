@@ -5925,16 +5925,38 @@ generateStandaloneCallImpl ctx fn args =
                 Src.At _ (Src.Var Src.CapVar ctorName) ->
                     -- Unqualified constructor call: Ctor arg1 arg2
                     let
+                        -- Check if AST expression is a record literal or call to function returning record
+                        isRecordLikeExpr (Src.At _ e) =
+                            case e of
+                                Src.Record _ -> True
+                                -- Function call might return a record if name ends with known patterns
+                                Src.Call (Src.At _ (Src.Var Src.LowVar name)) _ ->
+                                    -- Check for common record-returning function name patterns
+                                    String.contains "Region" name || String.contains "region" name
+                                        || String.contains "Position" name || String.contains "position" name
+                                Src.Call (Src.At _ (Src.VarQual Src.LowVar _ name)) _ ->
+                                    String.contains "Region" name || String.contains "region" name
+                                        || String.contains "Position" name || String.contains "position" name
+                                _ -> False
+
+                        -- Check if generated expression is a struct value
+                        isStructValue exprStr =
+                            String.startsWith "((struct {" exprStr
+
                         -- Wrap each argument as elm_union_t if it's a primitive or string
                         wrapAsUnion argExpr =
                             let
-                                argStr = generateStandaloneExpr argExpr
+                                argStr = generateStandaloneExprWithCtx ctx argExpr
                             in
                             if isUnionValue argStr then
                                 argStr
                             else if isStringValue argStr then
                                 -- Wrap string as union with tag 0 (generic)
                                 "((elm_union_t){0, {.str = " ++ argStr ++ "}, 0})"
+                            else if isRecordLikeExpr argExpr || isStructValue argStr then
+                                -- Wrap struct/record as union using .ptr field
+                                -- Need to allocate on heap since struct is a temporary
+                                "((elm_union_t){0, {.ptr = (void*)&((" ++ argStr ++ "))}, 0})"
                             else
                                 -- Wrap primitive as union with tag 0 (generic)
                                 "((elm_union_t){0, {.num = " ++ argStr ++ "}, 0})"
@@ -5959,16 +5981,36 @@ generateStandaloneCallImpl ctx fn args =
                 Src.At _ (Src.VarQual Src.CapVar moduleName ctorName) ->
                     -- Qualified constructor call: Module.Ctor arg1 arg2
                     let
+                        -- Check if AST expression is a record literal or call to function returning record
+                        isRecordLikeExpr (Src.At _ e) =
+                            case e of
+                                Src.Record _ -> True
+                                -- Function call might return a record if name ends with known patterns
+                                Src.Call (Src.At _ (Src.Var Src.LowVar name)) _ ->
+                                    String.contains "Region" name || String.contains "region" name
+                                        || String.contains "Position" name || String.contains "position" name
+                                Src.Call (Src.At _ (Src.VarQual Src.LowVar _ name)) _ ->
+                                    String.contains "Region" name || String.contains "region" name
+                                        || String.contains "Position" name || String.contains "position" name
+                                _ -> False
+
+                        -- Check if generated expression is a struct value
+                        isStructValue exprStr =
+                            String.startsWith "((struct {" exprStr
+
                         -- Wrap each argument as elm_union_t if it's a primitive or string
                         wrapAsUnion argExpr =
                             let
-                                argStr = generateStandaloneExpr argExpr
+                                argStr = generateStandaloneExprWithCtx ctx argExpr
                             in
                             if isUnionValue argStr then
                                 argStr
                             else if isStringValue argStr then
                                 -- Wrap string as union with tag 0 (generic)
                                 "((elm_union_t){0, {.str = " ++ argStr ++ "}, 0})"
+                            else if isRecordLikeExpr argExpr || isStructValue argStr then
+                                -- Wrap struct/record as union using .ptr field
+                                "((elm_union_t){0, {.ptr = (void*)&((" ++ argStr ++ "))}, 0})"
                             else
                                 -- Wrap primitive as union with tag 0 (generic)
                                 "((elm_union_t){0, {.num = " ++ argStr ++ "}, 0})"
@@ -6870,6 +6912,7 @@ generateUserFunction modulePrefix userFunctions name args body =
                 || String.contains "elm_Nothing(" bodyExpr
                 || String.contains "elm_Ok(" bodyExpr
                 || String.contains "elm_Err(" bodyExpr
+                || String.contains "elm_At(" bodyExpr
 
         -- Check for typeof-based list returns (typed record lists)
         -- Pattern: ({ typeof(elm_varname) __lst = elm_varname; typeof(__lst) __result; ... __result; })
