@@ -4165,6 +4165,42 @@ mapStdLibFunction modulePath name =
         ( "List", "partition" ) ->
             "tcelm_list_partition"
 
+        ( "List", "sort" ) ->
+            "tcelm_list_sort"
+
+        ( "List", "sortBy" ) ->
+            "tcelm_list_sortBy"
+
+        ( "List", "sortWith" ) ->
+            "tcelm_list_sortWith"
+
+        ( "List", "last" ) ->
+            "tcelm_list_last"
+
+        ( "List", "sum" ) ->
+            "tcelm_list_sum"
+
+        ( "List", "product" ) ->
+            "tcelm_list_product"
+
+        ( "List", "maximum" ) ->
+            "tcelm_list_maximum"
+
+        ( "List", "minimum" ) ->
+            "tcelm_list_minimum"
+
+        ( "List", "singleton" ) ->
+            "tcelm_list_singleton"
+
+        ( "List", "intersperse" ) ->
+            "tcelm_list_intersperse"
+
+        ( "List", "unzip" ) ->
+            "tcelm_list_unzip"
+
+        ( "List", "append" ) ->
+            "tcelm_list_append"
+
         -- Maybe module
         ( "Maybe", "map" ) ->
             "tcelm_maybe_map"
@@ -4358,6 +4394,42 @@ getStdLibArity modulePath name =
             Just 2
 
         ( "List", "partition" ) ->
+            Just 2
+
+        ( "List", "sort" ) ->
+            Just 1
+
+        ( "List", "sortBy" ) ->
+            Just 2
+
+        ( "List", "sortWith" ) ->
+            Just 2
+
+        ( "List", "last" ) ->
+            Just 1
+
+        ( "List", "sum" ) ->
+            Just 1
+
+        ( "List", "product" ) ->
+            Just 1
+
+        ( "List", "maximum" ) ->
+            Just 1
+
+        ( "List", "minimum" ) ->
+            Just 1
+
+        ( "List", "singleton" ) ->
+            Just 1
+
+        ( "List", "intersperse" ) ->
+            Just 2
+
+        ( "List", "unzip" ) ->
+            Just 1
+
+        ( "List", "append" ) ->
             Just 2
 
         ( "Basics", "identity" ) ->

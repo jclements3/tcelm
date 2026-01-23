@@ -609,6 +609,296 @@ static bool values_equal(tcelm_value_t *a, tcelm_value_t *b) {
 }
 
 /* =========================================================================
+ * Sorting Functions
+ * ========================================================================= */
+
+/*
+ * Helper: Compare two values (returns -1, 0, or 1)
+ * Supports Int, Float, Char, String
+ */
+static int values_compare(tcelm_value_t *a, tcelm_value_t *b) {
+    /* Handle different types - compare by tag first */
+    if (a->tag != b->tag) {
+        return (a->tag < b->tag) ? -1 : 1;
+    }
+
+    switch (a->tag) {
+        case TCELM_TAG_INT: {
+            int64_t av = TCELM_AS_INT(a);
+            int64_t bv = TCELM_AS_INT(b);
+            return (av < bv) ? -1 : (av > bv) ? 1 : 0;
+        }
+        case TCELM_TAG_FLOAT: {
+            double av = TCELM_AS_FLOAT(a);
+            double bv = TCELM_AS_FLOAT(b);
+            return (av < bv) ? -1 : (av > bv) ? 1 : 0;
+        }
+        case TCELM_TAG_CHAR: {
+            uint32_t av = TCELM_AS_CHAR(a);
+            uint32_t bv = TCELM_AS_CHAR(b);
+            return (av < bv) ? -1 : (av > bv) ? 1 : 0;
+        }
+        case TCELM_TAG_STRING:
+            return strcmp(TCELM_AS_STRING(a)->data, TCELM_AS_STRING(b)->data);
+        default:
+            /* For other types, compare by pointer */
+            return (a < b) ? -1 : (a > b) ? 1 : 0;
+    }
+}
+
+/*
+ * Helper: Merge two sorted lists
+ */
+static tcelm_value_t *merge_lists(tcelm_arena_t *arena, tcelm_value_t *left, tcelm_value_t *right) {
+    if (tcelm_is_nil(left)) return right;
+    if (tcelm_is_nil(right)) return left;
+
+    tcelm_value_t *result = TCELM_NIL;
+    tcelm_value_t **tail_ptr = &result;
+
+    while (!tcelm_is_nil(left) && !tcelm_is_nil(right)) {
+        tcelm_value_t *left_head = tcelm_list_head(left);
+        tcelm_value_t *right_head = tcelm_list_head(right);
+
+        if (values_compare(left_head, right_head) <= 0) {
+            *tail_ptr = tcelm_cons(arena, left_head, TCELM_NIL);
+            tail_ptr = &((*tail_ptr)->data.list.tail);
+            left = tcelm_list_tail(left);
+        } else {
+            *tail_ptr = tcelm_cons(arena, right_head, TCELM_NIL);
+            tail_ptr = &((*tail_ptr)->data.list.tail);
+            right = tcelm_list_tail(right);
+        }
+    }
+
+    /* Append remaining elements */
+    *tail_ptr = tcelm_is_nil(left) ? right : left;
+
+    return result;
+}
+
+/*
+ * Helper: Merge two sorted lists with custom comparison function
+ */
+static tcelm_value_t *merge_lists_with(tcelm_arena_t *arena, tcelm_value_t *cmp,
+                                        tcelm_value_t *left, tcelm_value_t *right) {
+    if (tcelm_is_nil(left)) return right;
+    if (tcelm_is_nil(right)) return left;
+
+    tcelm_value_t *result = TCELM_NIL;
+    tcelm_value_t **tail_ptr = &result;
+
+    while (!tcelm_is_nil(left) && !tcelm_is_nil(right)) {
+        tcelm_value_t *left_head = tcelm_list_head(left);
+        tcelm_value_t *right_head = tcelm_list_head(right);
+
+        /* Apply comparison function: cmp a b returns Order (LT=0, EQ=1, GT=2) */
+        tcelm_value_t *cmp_with_a = tcelm_apply(arena, cmp, left_head);
+        tcelm_value_t *order = tcelm_apply(arena, cmp_with_a, right_head);
+        int cmp_result = (int)tcelm_custom_ctor(order);  /* LT=0, EQ=1, GT=2 */
+
+        if (cmp_result <= 1) {  /* LT or EQ */
+            *tail_ptr = tcelm_cons(arena, left_head, TCELM_NIL);
+            tail_ptr = &((*tail_ptr)->data.list.tail);
+            left = tcelm_list_tail(left);
+        } else {
+            *tail_ptr = tcelm_cons(arena, right_head, TCELM_NIL);
+            tail_ptr = &((*tail_ptr)->data.list.tail);
+            right = tcelm_list_tail(right);
+        }
+    }
+
+    *tail_ptr = tcelm_is_nil(left) ? right : left;
+    return result;
+}
+
+/*
+ * Helper: Split list in half for merge sort
+ */
+static void split_list(tcelm_value_t *list, tcelm_value_t **left, tcelm_value_t **right) {
+    if (tcelm_is_nil(list) || tcelm_is_nil(tcelm_list_tail(list))) {
+        *left = list;
+        *right = TCELM_NIL;
+        return;
+    }
+
+    /* Use slow/fast pointer technique */
+    tcelm_value_t *slow = list;
+    tcelm_value_t *fast = tcelm_list_tail(list);
+
+    while (!tcelm_is_nil(fast) && !tcelm_is_nil(tcelm_list_tail(fast))) {
+        slow = tcelm_list_tail(slow);
+        fast = tcelm_list_tail(tcelm_list_tail(fast));
+    }
+
+    *left = list;
+    *right = tcelm_list_tail(slow);
+
+    /* Cut the list */
+    slow->data.list.tail = TCELM_NIL;
+}
+
+/*
+ * Helper: Merge sort implementation
+ */
+static tcelm_value_t *merge_sort(tcelm_arena_t *arena, tcelm_value_t *list) {
+    if (tcelm_is_nil(list) || tcelm_is_nil(tcelm_list_tail(list))) {
+        return list;
+    }
+
+    tcelm_value_t *left, *right;
+    split_list(list, &left, &right);
+
+    left = merge_sort(arena, left);
+    right = merge_sort(arena, right);
+
+    return merge_lists(arena, left, right);
+}
+
+/*
+ * Helper: Merge sort with custom comparison
+ */
+static tcelm_value_t *merge_sort_with(tcelm_arena_t *arena, tcelm_value_t *cmp, tcelm_value_t *list) {
+    if (tcelm_is_nil(list) || tcelm_is_nil(tcelm_list_tail(list))) {
+        return list;
+    }
+
+    tcelm_value_t *left, *right;
+    split_list(list, &left, &right);
+
+    left = merge_sort_with(arena, cmp, left);
+    right = merge_sort_with(arena, cmp, right);
+
+    return merge_lists_with(arena, cmp, left, right);
+}
+
+/*
+ * List.sort : List comparable -> List comparable
+ *
+ * Sort a list of comparable values (Int, Float, Char, String).
+ * Uses stable merge sort - O(n log n).
+ */
+tcelm_value_t *tcelm_list_sort(tcelm_arena_t *arena, tcelm_value_t *list) {
+    if (tcelm_is_nil(list)) {
+        return TCELM_NIL;
+    }
+
+    /* Make a copy to avoid mutating original during sort */
+    tcelm_value_t *copy = TCELM_NIL;
+    tcelm_value_t *curr = list;
+    while (!tcelm_is_nil(curr)) {
+        copy = tcelm_cons(arena, tcelm_list_head(curr), copy);
+        curr = tcelm_list_tail(curr);
+    }
+    copy = tcelm_list_reverse_fn(arena, copy);
+
+    return merge_sort(arena, copy);
+}
+
+/*
+ * List.sortBy : (a -> comparable) -> List a -> List a
+ *
+ * Sort a list by a derived comparable value.
+ */
+tcelm_value_t *tcelm_list_sortBy(tcelm_arena_t *arena, tcelm_value_t *fn, tcelm_value_t *list) {
+    if (tcelm_is_nil(list)) {
+        return TCELM_NIL;
+    }
+
+    /* Convert to list of (key, value) pairs */
+    tcelm_value_t *pairs = TCELM_NIL;
+    tcelm_value_t *curr = list;
+    while (!tcelm_is_nil(curr)) {
+        tcelm_value_t *elem = tcelm_list_head(curr);
+        tcelm_value_t *key = tcelm_apply(arena, fn, elem);
+        pairs = tcelm_cons(arena, tcelm_tuple2(arena, key, elem), pairs);
+        curr = tcelm_list_tail(curr);
+    }
+    pairs = tcelm_list_reverse_fn(arena, pairs);
+
+    /* Sort by first element of tuple */
+    /* Use sortWith with a custom comparator that compares first elements */
+    tcelm_value_t *sorted = TCELM_NIL;
+    tcelm_value_t **tail_ptr = &sorted;
+
+    /* Simple insertion sort for sortBy - stable */
+    curr = pairs;
+    while (!tcelm_is_nil(curr)) {
+        tcelm_value_t *pair = tcelm_list_head(curr);
+        tcelm_value_t *key = tcelm_tuple2_first(pair);
+        tcelm_value_t *val = tcelm_tuple2_second(pair);
+
+        /* Find insertion point */
+        tcelm_value_t **insert_ptr = &sorted;
+        while (*insert_ptr != TCELM_NIL) {
+            tcelm_value_t *other_key = tcelm_tuple2_first(tcelm_list_head(*insert_ptr));
+            if (values_compare(key, other_key) < 0) {
+                break;
+            }
+            insert_ptr = &((*insert_ptr)->data.list.tail);
+        }
+
+        /* Insert */
+        tcelm_value_t *new_node = tcelm_cons(arena, tcelm_tuple2(arena, key, val), *insert_ptr);
+        *insert_ptr = new_node;
+
+        curr = tcelm_list_tail(curr);
+    }
+
+    /* Extract values from sorted pairs */
+    tcelm_value_t *result = TCELM_NIL;
+    curr = sorted;
+    while (!tcelm_is_nil(curr)) {
+        tcelm_value_t *pair = tcelm_list_head(curr);
+        result = tcelm_cons(arena, tcelm_tuple2_second(pair), result);
+        curr = tcelm_list_tail(curr);
+    }
+
+    return tcelm_list_reverse_fn(arena, result);
+}
+
+/*
+ * List.sortWith : (a -> a -> Order) -> List a -> List a
+ *
+ * Sort a list with a custom comparison function.
+ * The comparison function returns Order (LT, EQ, GT).
+ */
+tcelm_value_t *tcelm_list_sortWith(tcelm_arena_t *arena, tcelm_value_t *cmp, tcelm_value_t *list) {
+    if (tcelm_is_nil(list)) {
+        return TCELM_NIL;
+    }
+
+    /* Make a copy */
+    tcelm_value_t *copy = TCELM_NIL;
+    tcelm_value_t *curr = list;
+    while (!tcelm_is_nil(curr)) {
+        copy = tcelm_cons(arena, tcelm_list_head(curr), copy);
+        curr = tcelm_list_tail(curr);
+    }
+    copy = tcelm_list_reverse_fn(arena, copy);
+
+    return merge_sort_with(arena, cmp, copy);
+}
+
+/*
+ * List.last : List a -> Maybe a
+ *
+ * Get the last element of a list.
+ */
+tcelm_value_t *tcelm_list_last(tcelm_arena_t *arena, tcelm_value_t *list) {
+    if (tcelm_is_nil(list)) {
+        return tcelm_custom(arena, 0, "Nothing", 0);
+    }
+
+    tcelm_value_t *curr = list;
+    while (!tcelm_is_nil(tcelm_list_tail(curr))) {
+        curr = tcelm_list_tail(curr);
+    }
+
+    return tcelm_custom(arena, 1, "Just", 1, tcelm_list_head(curr));
+}
+
+/* =========================================================================
  * Parallel Map (pmap) Implementation
  * ========================================================================= */
 
@@ -902,4 +1192,20 @@ tcelm_value_t *tcelm_list_partition_impl(tcelm_arena_t *arena, tcelm_value_t **a
 
 tcelm_value_t *tcelm_list_concat_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
     return tcelm_list_concat_fn(arena, args[0]);
+}
+
+tcelm_value_t *tcelm_list_sort_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_sort(arena, args[0]);
+}
+
+tcelm_value_t *tcelm_list_sortBy_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_sortBy(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_sortWith_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_sortWith(arena, args[0], args[1]);
+}
+
+tcelm_value_t *tcelm_list_last_impl(tcelm_arena_t *arena, tcelm_value_t **args) {
+    return tcelm_list_last(arena, args[0]);
 }

@@ -52,6 +52,14 @@ tcelm_value_t *tcelm_list_unzip(tcelm_arena_t *arena, tcelm_value_t *list);
 /* List testing */
 tcelm_value_t *tcelm_list_isEmpty(tcelm_arena_t *arena, tcelm_value_t *list);
 
+/* Sorting */
+tcelm_value_t *tcelm_list_sort(tcelm_arena_t *arena, tcelm_value_t *list);
+tcelm_value_t *tcelm_list_sortBy(tcelm_arena_t *arena, tcelm_value_t *fn, tcelm_value_t *list);
+tcelm_value_t *tcelm_list_sortWith(tcelm_arena_t *arena, tcelm_value_t *cmp, tcelm_value_t *list);
+
+/* Additional utilities */
+tcelm_value_t *tcelm_list_last(tcelm_arena_t *arena, tcelm_value_t *list);
+
 /* Parallel operations */
 
 /*
@@ -100,5 +108,9 @@ tcelm_value_t *tcelm_list_filterMap_impl(tcelm_arena_t *arena, tcelm_value_t **a
 tcelm_value_t *tcelm_list_partition_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 tcelm_value_t *tcelm_list_concat_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 tcelm_value_t *tcelm_list_indexedMap_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_sort_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_sortBy_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_sortWith_impl(tcelm_arena_t *arena, tcelm_value_t **args);
+tcelm_value_t *tcelm_list_last_impl(tcelm_arena_t *arena, tcelm_value_t **args);
 
 #endif /* TCELM_LIST_H */

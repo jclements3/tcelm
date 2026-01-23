@@ -1,5 +1,19 @@
 module Main exposing (main)
 
+-- Test List.last
+
 main : Int
 main =
-    Maybe.withDefault 0 (List.last [1, 2, 3, 4, 5])
+    let
+        items =
+            [ 10, 20, 30, 40, 50 ]
+    in
+    case List.last items of
+        Just 50 ->
+            50  -- Correct
+
+        Just _ ->
+            -1  -- Wrong value
+
+        Nothing ->
+            -2  -- Should not be Nothing
