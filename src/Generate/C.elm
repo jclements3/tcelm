@@ -9,6 +9,7 @@ For RTEMS targets, generates task definitions and shell registration.
 -}
 
 import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
+import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix)
 
 
 {-| Lifted lambda for TCC compatibility
@@ -702,7 +703,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
             )
 
         Str s ->
-            ( counter, "tcelm_string(arena, \"" ++ escapeString s ++ "\")" )
+            ( counter, "tcelm_string(arena, \"" ++ escapeC s ++ "\")" )
 
         Var varType name ->
             ( counter
@@ -1516,7 +1517,7 @@ generateExprInContextWithPrefix modulePrefix locals (Src.At _ expr) =
                     "tcelm_char(arena, 0)"
 
         Str s ->
-            "tcelm_string(arena, \"" ++ escapeString s ++ "\")"
+            "tcelm_string(arena, \"" ++ escapeC s ++ "\")"
 
         Var varType name ->
             case varType of
@@ -1923,7 +1924,7 @@ generateExprInContext locals (Src.At _ expr) =
                     "tcelm_char(arena, 0)"
 
         Str s ->
-            "tcelm_string(arena, \"" ++ escapeString s ++ "\")"
+            "tcelm_string(arena, \"" ++ escapeC s ++ "\")"
 
         Var varType name ->
             case varType of
@@ -2968,7 +2969,7 @@ generateExpr (Src.At _ expr) =
                     "tcelm_char(arena, 0)"
 
         Str s ->
-            "tcelm_string(arena, \"" ++ escapeString s ++ "\")"
+            "tcelm_string(arena, \"" ++ escapeC s ++ "\")"
 
         Var varType name ->
             case varType of
@@ -3655,7 +3656,7 @@ generatePatternMatch subject (Src.At _ pattern) =
             "TCELM_AS_INT(" ++ subject ++ ") == " ++ String.fromInt n
 
         PStr s ->
-            "strcmp(TCELM_AS_STRING(" ++ subject ++ ")->data, \"" ++ escapeString s ++ "\") == 0"
+            "strcmp(TCELM_AS_STRING(" ++ subject ++ ")->data, \"" ++ escapeC s ++ "\") == 0"
 
         PChr c ->
             case String.uncons c of
@@ -4486,102 +4487,6 @@ stdLibNeedsArena modulePath name =
             True
 
 
-{-| Mangle an Elm identifier to a valid C identifier (for top-level names)
--}
-mangle : String -> String
-mangle name =
-    let
-        replaceChar c =
-            case c of
-                '\'' ->
-                    "_prime"
-
-                '.' ->
-                    "_"
-
-                _ ->
-                    String.fromChar c
-    in
-    "elm_" ++ String.concat (List.map replaceChar (String.toList name))
-
-
-{-| Mangle an Elm identifier with module prefix for cross-module linking
-    E.g., mangleWithPrefix "AST_Source" "at" -> "elm_AST_Source_at"
--}
-mangleWithPrefix : String -> String -> String
-mangleWithPrefix modulePrefix name =
-    let
-        replaceChar c =
-            case c of
-                '\'' ->
-                    "_prime"
-
-                '.' ->
-                    "_"
-
-                _ ->
-                    String.fromChar c
-    in
-    "elm_" ++ modulePrefix ++ "_" ++ String.concat (List.map replaceChar (String.toList name))
-
-
-{-| Mangle a local variable name (from pattern bindings)
-    Local variables get a different prefix to distinguish from top-level functions.
--}
-mangleLocal : String -> String
-mangleLocal name =
-    let
-        replaceChar c =
-            case c of
-                '\'' ->
-                    "_prime"
-
-                _ ->
-                    String.fromChar c
-    in
-    "_lv_" ++ String.concat (List.map replaceChar (String.toList name))
-
-
-{-| Extract the constructor name from a potentially qualified name.
-    E.g., "AST.Source.At" -> "At", "Just" -> "Just"
--}
-extractCtorName : String -> String
-extractCtorName name =
-    case List.reverse (String.split "." name) of
-        lastPart :: _ ->
-            lastPart
-
-        [] ->
-            name
-
-
-{-| Escape a string for C
--}
-escapeString : String -> String
-escapeString s =
-    String.toList s
-        |> List.map
-            (\c ->
-                case c of
-                    '"' ->
-                        "\\\""
-
-                    '\\' ->
-                        "\\\\"
-
-                    '\n' ->
-                        "\\n"
-
-                    '\t' ->
-                        "\\t"
-
-                    '\u{000D}' ->
-                        "\\r"
-
-                    _ ->
-                        String.fromChar c
-            )
-        |> String.concat
 
 
 

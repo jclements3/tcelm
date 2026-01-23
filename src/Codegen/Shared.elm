@@ -4,9 +4,14 @@ module Codegen.Shared exposing
     , ctorListHasData
     , defaultExprCtx
     , escapeC
+    , extractCtorName
     , generateCharPredCall
     , mainTypeIsString
+    , mangle
+    , mangleLocal
+    , mangleWithPrefix
     , patternVars
+    , sanitizeForCIdent
     , uniqueStrings
     )
 
@@ -184,3 +189,86 @@ mainTypeIsString maybeType =
 
         _ ->
             False
+
+
+
+-- NAME MANGLING
+
+
+{-| Mangle an Elm identifier for C (adds elm\_ prefix, handles primes and dots)
+-}
+mangle : String -> String
+mangle name =
+    "elm_" ++ String.concat (List.map mangleChar (String.toList name))
+
+
+{-| Mangle an Elm identifier with module prefix for cross-module linking
+E.g., mangleWithPrefix "AST\_Source" "at" -> "elm\_AST\_Source\_at"
+-}
+mangleWithPrefix : String -> String -> String
+mangleWithPrefix modulePrefix name =
+    "elm_" ++ modulePrefix ++ "_" ++ String.concat (List.map mangleChar (String.toList name))
+
+
+{-| Mangle a local variable name (from pattern bindings)
+Local variables get a different prefix to distinguish from top-level functions.
+-}
+mangleLocal : String -> String
+mangleLocal name =
+    "_lv_" ++ String.concat (List.map mangleCharLocal (String.toList name))
+
+
+{-| Replace special characters for C identifiers
+-}
+mangleChar : Char -> String
+mangleChar c =
+    case c of
+        '\'' ->
+            "_prime"
+
+        '.' ->
+            "_"
+
+        _ ->
+            String.fromChar c
+
+
+{-| Replace special characters for local variables (no dot replacement needed)
+-}
+mangleCharLocal : Char -> String
+mangleCharLocal c =
+    case c of
+        '\'' ->
+            "_prime"
+
+        _ ->
+            String.fromChar c
+
+
+{-| Extract the constructor name from a potentially qualified name.
+E.g., "AST.Source.At" -> "At", "Just" -> "Just"
+-}
+extractCtorName : String -> String
+extractCtorName name =
+    case List.reverse (String.split "." name) of
+        lastPart :: _ ->
+            lastPart
+
+        [] ->
+            name
+
+
+{-| Sanitize a string for use as a C identifier
+-}
+sanitizeForCIdent : String -> String
+sanitizeForCIdent s =
+    String.toList s
+        |> List.map
+            (\c ->
+                if Char.isAlphaNum c then
+                    String.fromChar c
+
+                else
+                    "_"
+            )
+        |> String.concat
