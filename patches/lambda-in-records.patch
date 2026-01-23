@@ -1,0 +1,263 @@
+--- Lambda in Records and Maybe.andThen with Tuple Patterns ---
+
+This patch adds support for:
+1. Lambda functions in record fields (lifted to static functions)
+2. Maybe.andThen with tuple patterns like: \( a, b ) -> ...
+
+=== CHANGE 1: Maybe.andThen tuple pattern support ===
+Location: Around line 4205 in generateStandaloneCall, inside Maybe.andThen handling
+
+FIND:
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar varName) ] ->
+                                            "({ double elm_" ++ varName ++ " = __maybe_val.data; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.andThen */ ((elm_union_t){TAG_Nothing, 0})"
+
+REPLACE WITH:
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar varName) ] ->
+                                            "({ double elm_" ++ varName ++ " = __maybe_val.data.child->data.num; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        -- Tuple pattern: \( a, b ) -> ...
+                                        [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] ->
+                                            let
+                                                -- Extract bindings from pattern
+                                                extractBinding idx pat =
+                                                    case pat of
+                                                        Src.PVar vn -> "double elm_" ++ vn ++ " = __tuple._" ++ String.fromInt idx ++ ".d;"
+                                                        Src.PAnything -> ""
+                                                        _ -> "/* unsupported nested pattern */"
+
+                                                firstBinding = extractBinding 0 first
+                                                secondBinding = extractBinding 1 second
+                                                restBindings = rest |> List.indexedMap (\i (Src.At _ p) -> extractBinding (i + 2) p)
+
+                                                allBindings = [ firstBinding, secondBinding ] ++ restBindings
+                                                    |> List.filter (\s -> s /= "")
+                                                    |> String.join " "
+
+                                                tupleType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                            in
+                                            "({ " ++ tupleType ++ " __tuple = *(" ++ tupleType ++ "*)&(__maybe_val.data.child->data.num); " ++ allBindings ++ " " ++ generateStandaloneExpr body ++ "; })"
+
+                                        -- Record pattern: \{ x, y } -> ...
+                                        [ Src.At _ (Src.PRecord fieldNames) ] ->
+                                            let
+                                                bindings = fieldNames
+                                                    |> List.map (\(Src.At _ fn) -> "double elm_" ++ fn ++ " = __rec." ++ fn ++ ";")
+                                                    |> String.join " "
+                                            in
+                                            "({ typeof(__maybe_val.data.child->data.num) __rec = __maybe_val.data.child->data.num; " ++ bindings ++ " " ++ generateStandaloneExpr body ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.andThen */ ((elm_union_t){TAG_Nothing, 0})"
+
+
+=== CHANGE 2: Add lambda extraction helpers ===
+Location: After isSimpleExpr function (around line 1282), before "Generate module-level constants" comment
+
+INSERT AFTER "_ -> False" line of isSimpleExpr:
+
+        -- Extract lambdas from record fields and generate static functions
+        extractRecordLambdas : String -> Src.Expr -> List ( String, String )
+        extractRecordLambdas recordName (Src.At _ expr) =
+            case expr of
+                Src.Record fields ->
+                    fields
+                        |> List.filterMap
+                            (\( Src.At _ fieldName, fieldValue ) ->
+                                case fieldValue of
+                                    Src.At _ (Src.Lambda patterns body) ->
+                                        let
+                                            funcName = "elm_" ++ recordName ++ "_" ++ fieldName
+                                            params = patterns
+                                                |> List.map
+                                                    (\(Src.At _ p) ->
+                                                        case p of
+                                                            Src.PVar vn -> "double elm_" ++ vn
+                                                            Src.PRecord fns ->
+                                                                fns |> List.map (\(Src.At _ fn) -> "double elm_" ++ fn) |> String.join ", "
+                                                            _ -> "double __arg"
+                                                    )
+                                                |> String.join ", "
+                                            bodyStr = generateStandaloneExpr body
+                                            returnType =
+                                                if String.contains "elm_str_" bodyStr || String.startsWith "\"" bodyStr then
+                                                    "const char *"
+                                                else if String.contains "elm_union_t" bodyStr || String.contains "TAG_" bodyStr then
+                                                    "elm_union_t"
+                                                else
+                                                    "double"
+                                            funcDef = "static " ++ returnType ++ " " ++ funcName ++ "(" ++ params ++ ") {\n    return " ++ bodyStr ++ ";\n}"
+                                        in
+                                        Just ( fieldName, funcDef )
+                                    _ ->
+                                        Nothing
+                            )
+                _ ->
+                    []
+
+        -- Collect all lambdas from complex constants that are records
+        recordLambdaFunctions =
+            ast.values
+                |> List.filterMap
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) = value.name
+                        in
+                        if name /= "main" && List.isEmpty value.args then
+                            let
+                                lambdas = extractRecordLambdas name value.body
+                            in
+                            if List.isEmpty lambdas then
+                                Nothing
+                            else
+                                Just ( name, lambdas )
+                        else
+                            Nothing
+                    )
+
+        -- Generate all lambda functions as static functions
+        recordLambdaFunctionsCode =
+            recordLambdaFunctions
+                |> List.concatMap (\( _, lambdas ) -> List.map (\( _, funcDef ) -> funcDef) lambdas)
+                |> String.join "\n\n"
+
+        -- Build lookup for which record fields are lambdas
+        recordLambdaFieldsLookup : List ( String, List String )
+        recordLambdaFieldsLookup =
+            recordLambdaFunctions
+                |> List.map (\( recName, lambdas ) -> ( recName, List.map (\( fieldName, _ ) -> fieldName) lambdas ))
+
+
+=== CHANGE 3: Add replaceLambdaMarkers function ===
+Location: After fixComplexConstantRefs (around line 1390)
+
+INSERT AFTER "fixComplexConstantRefs code = code":
+
+        -- Replace __LAMBDA_fieldName__ markers with actual function names
+        replaceLambdaMarkers : String -> String -> String
+        replaceLambdaMarkers recName code =
+            let
+                lambdaFields =
+                    recordLambdaFieldsLookup
+                        |> List.filter (\( rn, _ ) -> rn == recName)
+                        |> List.concatMap (\( _, fields ) -> fields)
+                replaceOne fieldName codeStr =
+                    String.replace ("__LAMBDA_" ++ fieldName ++ "__") ("elm_" ++ recName ++ "_" ++ fieldName) codeStr
+            in
+            List.foldl replaceOne code lambdaFields
+
+
+=== CHANGE 4: Use replaceLambdaMarkers in record generation ===
+Location: In complexConstantsCode, inside "if isRecord then" block (around line 1428)
+
+FIND:
+                                initializer = String.left initEndIdx afterInitStart
+                            in
+                            "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ initializer ++ "};"
+
+REPLACE WITH:
+                                initializer = String.left initEndIdx afterInitStart
+                                -- Replace lambda markers with function names
+                                fixedInitializer = replaceLambdaMarkers name initializer
+                            in
+                            "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ fixedInitializer ++ "};"
+
+
+=== CHANGE 5: Include lambda functions in output ===
+Location: In moduleConstantsCode (around line 1437)
+
+FIND:
+            let
+                simple = if String.isEmpty simpleConstantsCode then "" else "/* Simple constants */\n" ++ simpleConstantsCode ++ "\n\n"
+                complex = if String.isEmpty complexConstantsCode then "" else "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
+            in
+            simple ++ complex
+
+REPLACE WITH:
+            let
+                lambdas = if String.isEmpty recordLambdaFunctionsCode then "" else "/* Lambda functions lifted from records */\n" ++ recordLambdaFunctionsCode ++ "\n\n"
+                simple = if String.isEmpty simpleConstantsCode then "" else "/* Simple constants */\n" ++ simpleConstantsCode ++ "\n\n"
+                complex = if String.isEmpty complexConstantsCode then "" else "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
+            in
+            lambdas ++ simple ++ complex
+
+
+=== CHANGE 6: Handle lambda fields in Src.Record ===
+Location: In generateStandaloneExprWithCtx, Src.Record case (around line 3096)
+
+FIND the entire Src.Record -> block and REPLACE WITH:
+
+        Src.Record fields ->
+            -- Generate record as compound struct literal with named fields
+            let
+                -- Check if field value is a lambda
+                isLambdaField : Src.Expr -> Bool
+                isLambdaField (Src.At _ fv) =
+                    case fv of
+                        Src.Lambda _ _ -> True
+                        _ -> False
+
+                -- Count parameters in lambda
+                lambdaParamCount : Src.Expr -> Int
+                lambdaParamCount (Src.At _ fv) =
+                    case fv of
+                        Src.Lambda patterns _ -> List.length patterns
+                        _ -> 0
+
+                -- Infer field type from the value expression
+                inferFieldType : Src.Expr -> String
+                inferFieldType fieldValue =
+                    if isLambdaField fieldValue then
+                        -- Generate function pointer type
+                        let
+                            numParams = lambdaParamCount fieldValue
+                            paramTypes = List.repeat numParams "double" |> String.join ", "
+                        in
+                        "double (*" ++ ")(" ++ paramTypes ++ ")"
+                    else
+                        let
+                            valueStr = generateStandaloneExpr fieldValue
+                        in
+                        if String.startsWith "\"" valueStr then
+                            "const char *"
+                        else if String.contains "elm_str_" valueStr || String.contains "elm_from_" valueStr then
+                            "const char *"
+                        else
+                            "double"
+
+                -- Generate field type (name goes in the middle for function pointers)
+                generateFieldDef : ( Src.At String, Src.Expr ) -> String
+                generateFieldDef ( Src.At _ fieldName, fieldValue ) =
+                    if isLambdaField fieldValue then
+                        let
+                            numParams = lambdaParamCount fieldValue
+                            paramTypes = List.repeat numParams "double" |> String.join ", "
+                        in
+                        "double (*" ++ fieldName ++ ")(" ++ paramTypes ++ ")"
+                    else
+                        inferFieldType fieldValue ++ " " ++ fieldName
+
+                fieldDefs =
+                    fields
+                        |> List.map generateFieldDef
+                        |> String.join "; "
+
+                -- Generate field value - for lambdas, generate __LAMBDA_recordName_fieldName__ marker
+                generateFieldValue : ( Src.At String, Src.Expr ) -> String
+                generateFieldValue ( Src.At _ fieldName, fieldValue ) =
+                    if isLambdaField fieldValue then
+                        "." ++ fieldName ++ " = __LAMBDA_" ++ fieldName ++ "__"
+                    else
+                        "." ++ fieldName ++ " = " ++ generateStandaloneExpr fieldValue
+
+                fieldValues =
+                    fields
+                        |> List.map generateFieldValue
+                        |> String.join ", "
+            in
+            "((struct { " ++ fieldDefs ++ "; }){" ++ fieldValues ++ "})"
+

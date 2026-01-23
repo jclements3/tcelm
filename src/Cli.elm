@@ -1389,13 +1389,29 @@ generateTccCode ast =
         fixComplexConstantRefs code =
             code
 
+        -- Replace __LAMBDA_fieldName__ markers with actual function names
+        replaceLambdaMarkers : String -> String -> String
+        replaceLambdaMarkers recName code =
+            let
+                lambdaFields =
+                    recordLambdaFieldsLookup
+                        |> List.filter (\( rn, _ ) -> rn == recName)
+                        |> List.concatMap (\( _, fields ) -> fields)
+                replaceOne fieldName codeStr =
+                    String.replace ("__LAMBDA_" ++ fieldName ++ "__") ("elm_" ++ recName ++ "_" ++ fieldName) codeStr
+            in
+            List.foldl replaceOne code lambdaFields
+
         complexConstantsCode =
             complexConstants
                 |> List.map
                     (\( name, body, _ ) ->
                         let
                             cExpr = generateStandaloneExpr body
-                            isString = String.contains "elm_str_" cExpr || String.contains "\"" cExpr
+                            -- Check for union type (Maybe, Result, etc.) - contains TAG_ usage or elm_union_t
+                            isUnion = String.contains "TAG_" cExpr || String.contains "elm_union_t" cExpr || String.contains "elm_Just" cExpr || String.contains "elm_Nothing" cExpr
+                            -- String detection - only if it's a string expression, not just contains a string literal argument
+                            isString = not isUnion && (String.contains "elm_str_" cExpr || (String.startsWith "\"" cExpr && String.endsWith "\"" cExpr))
                             isRecord = String.contains "((struct {" cExpr
                             -- Extract record type from the expression
                             recordType =
@@ -1412,7 +1428,8 @@ generateTccCode ast =
                                 else
                                     ""
                             cType =
-                                if isString then "const char *"
+                                if isUnion then "elm_union_t"
+                                else if isString then "const char *"
                                 else if isRecord then recordType
                                 else "double"
                         in
@@ -1426,8 +1443,10 @@ generateTccCode ast =
                                 afterInitStart = String.dropLeft (initStartIdx + String.length initStartMarker) cExpr
                                 initEndIdx = String.length afterInitStart - 2
                                 initializer = String.left initEndIdx afterInitStart
+                                -- Replace lambda markers with function names
+                                fixedInitializer = replaceLambdaMarkers name initializer
                             in
-                            "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ initializer ++ "};"
+                            "static " ++ recordType ++ " elm_" ++ name ++ " = {" ++ fixedInitializer ++ "};"
                         else
                             "static " ++ cType ++ " elm_" ++ name ++ "(void) {\n    return " ++ fixComplexConstantRefs cExpr ++ ";\n}"
                     )
@@ -2663,22 +2682,9 @@ generateStandaloneBinops pairs finalExpr =
                                 -- Check for partial application (Call with args that needs pipe arg)
                                 case first of
                                     Src.At pos (Src.Call fn partialArgs) ->
-                                        -- Partial application: add pipe arg to the call
-                                        -- Generate as complete call with all args
+                                        -- Partial application: use specialized handler that knows about pipe arg
                                         let
-                                            -- Create a synthetic expression for the piped argument
-                                            -- We use a string literal wrapped in an Src.Str as a placeholder
-                                            -- that will be replaced with the actual arg value
-                                            pipeArgExpr = Src.At pos (Src.Str ("__PIPE_ARG__" ++ arg ++ "__PIPE_ARG__"))
-
-                                            -- Full argument list with the pipe arg at the end
-                                            fullArgs = partialArgs ++ [ pipeArgExpr ]
-
-                                            -- Re-generate the full call - this handles Maybe.map, List.filter, etc. correctly
-                                            fullCall =
-                                                generateStandaloneCall fn fullArgs
-                                                    -- Replace the placeholder with the actual arg
-                                                    |> String.replace ("\"__PIPE_ARG__" ++ arg ++ "__PIPE_ARG__\"") arg
+                                            fullCall = generateStandaloneCallWithPipeArg fn partialArgs arg
                                         in
                                         buildPipe fullCall rest
 
@@ -3110,11 +3116,19 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
                         Src.Lambda _ _ -> True
                         _ -> False
 
-                -- Count parameters in lambda
+                -- Count parameters in lambda (including record field expansion)
                 lambdaParamCount : Src.Expr -> Int
                 lambdaParamCount (Src.At _ fv) =
                     case fv of
-                        Src.Lambda patterns _ -> List.length patterns
+                        Src.Lambda patterns _ ->
+                            patterns
+                                |> List.map
+                                    (\(Src.At _ p) ->
+                                        case p of
+                                            Src.PRecord recFields -> List.length recFields
+                                            _ -> 1
+                                    )
+                                |> List.sum
                         _ -> 0
 
                 -- Infer field type from the value expression
@@ -5570,6 +5584,47 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                 _ ->
                     "/* List.take partial wrong arity */ 0"
 
+        -- Maybe.andThen with function and pipe arg (Maybe)
+        Src.At _ (Src.VarQual _ "Maybe" "andThen") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    -- fnExpr is the function (returns Maybe), pipeArg is the Maybe value
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda patterns body) ->
+                                    case patterns of
+                                        [ Src.At _ (Src.PVar varName) ] ->
+                                            "({ double elm_" ++ varName ++ " = __maybe_val.data.child->data.num; " ++ generateStandaloneExpr body ++ "; })"
+
+                                        [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] ->
+                                            let
+                                                extractBinding idx pat =
+                                                    case pat of
+                                                        Src.PVar vn -> "double elm_" ++ vn ++ " = __tuple._" ++ String.fromInt idx ++ ".d;"
+                                                        Src.PAnything -> ""
+                                                        _ -> "/* unsupported nested pattern */"
+                                                firstBinding = extractBinding 0 first
+                                                secondBinding = extractBinding 1 second
+                                                restBindings = rest |> List.indexedMap (\i (Src.At _ p) -> extractBinding (i + 2) p)
+                                                allBindings = [ firstBinding, secondBinding ] ++ restBindings
+                                                    |> List.filter (\s -> s /= "")
+                                                    |> String.join " "
+                                                tupleType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                            in
+                                            "({ " ++ tupleType ++ " __tuple = *(" ++ tupleType ++ "*)&(__maybe_val.data.child->data.num); " ++ allBindings ++ " " ++ generateStandaloneExpr body ++ "; })"
+
+                                        _ ->
+                                            "/* unsupported lambda pattern in Maybe.andThen pipe */ ((elm_union_t){TAG_Nothing, 0})"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__maybe_val.data.child->data.num)"
+                    in
+                    "({ elm_union_t __maybe_val = " ++ pipeArg ++ "; __maybe_val.tag == TAG_Just ? " ++ fnAppStr ++ " : ((elm_union_t){TAG_Nothing, 0}); })"
+
+                _ ->
+                    "/* Maybe.andThen partial wrong arity */ 0"
+
         -- Default: just generate a simple function call with all args
         _ ->
             let
@@ -5623,6 +5678,8 @@ generateUserFunction name args body =
                                             || String.contains ("elm_str_ends_with(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("elm_str_contains(") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("strlen(elm_" ++ varName ++ ")") bodyExpr
+                                            || String.contains ("strcmp(elm_" ++ varName ++ ", ") bodyExpr
+                                            || String.contains ("strcmp(elm_" ++ varName ++ ",") bodyExpr
 
                                     -- Check if parameter is used as a record (field access like .name, .value)
                                     -- Exclude .tag, .data, .length which are for unions/lists
@@ -6521,6 +6578,8 @@ generateLiftedFunction prefix funcName args body capturedVars =
                                             || String.contains ("elm_str_ends_with(" ++ "\"") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("elm_str_contains(" ++ "\"") bodyExpr && String.contains (", elm_" ++ varName ++ ")") bodyExpr
                                             || String.contains ("strlen(elm_" ++ varName) bodyExpr
+                                            || String.contains ("strcmp(elm_" ++ varName ++ ", ") bodyExpr
+                                            || String.contains ("strcmp(elm_" ++ varName ++ ",") bodyExpr
 
                                     -- Check if parameter is used as a list (has .length or .data access, or is bound as elm_list_t)
                                     isListType =
