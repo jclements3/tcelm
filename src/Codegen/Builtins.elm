@@ -144,6 +144,90 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Char" fnName) ->
             generateCharPredicate genExpr fnName args
 
+        -- String module
+        Src.At _ (Src.VarQual _ "String" "fromChar") ->
+            Just (generateStringFromChar genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "cons") ->
+            Just (generateStringCons genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "length") ->
+            Just (generateStringLength genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "isEmpty") ->
+            Just (generateStringIsEmpty genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "reverse") ->
+            Just (generateStringReverse genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "toInt") ->
+            Just (generateStringToInt genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "fromInt") ->
+            Just (generateStringFromInt genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "fromFloat") ->
+            Just (generateStringFromFloat genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "toFloat") ->
+            Just (generateStringToFloat genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "left") ->
+            Just (generateStringLeft genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "right") ->
+            Just (generateStringRight genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "append") ->
+            Just (generateStringAppend genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "contains") ->
+            Just (generateStringContains genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "startsWith") ->
+            Just (generateStringStartsWith genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "endsWith") ->
+            Just (generateStringEndsWith genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "toUpper") ->
+            Just (generateStringToUpper genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "toLower") ->
+            Just (generateStringToLower genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "trim") ->
+            Just (generateStringTrim genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "trimLeft") ->
+            Just (generateStringTrimLeft genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "trimRight") ->
+            Just (generateStringTrimRight genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "repeat") ->
+            Just (generateStringRepeat genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "slice") ->
+            Just (generateStringSlice genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "dropLeft") ->
+            Just (generateStringDropLeft genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "dropRight") ->
+            Just (generateStringDropRight genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "padLeft") ->
+            Just (generateStringPadLeft genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "padRight") ->
+            Just (generateStringPadRight genExpr args)
+
+        Src.At _ (Src.VarQual _ "String" "replace") ->
+            Just (generateStringReplace genExpr args)
+
+        -- Note: String.join has inline implementation in Cli.elm, not handled here
+
         -- Not a builtin we handle here
         _ ->
             Nothing
@@ -468,3 +552,291 @@ generateCharPredicate genExpr fnName args =
 
         _ ->
             Just ("/* Char." ++ fnName ++ " wrong arity */ 0")
+
+
+
+-- STRING MODULE HANDLERS
+
+
+generateStringFromChar : GenExpr -> List Src.Expr -> String
+generateStringFromChar genExpr args =
+    case args of
+        [ c ] ->
+            "elm_str_from_char(" ++ genExpr c ++ ")"
+
+        _ ->
+            "/* String.fromChar wrong arity */ 0"
+
+
+generateStringCons : GenExpr -> List Src.Expr -> String
+generateStringCons genExpr args =
+    case args of
+        [ c, s ] ->
+            "elm_str_cons(" ++ genExpr c ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.cons wrong arity */ 0"
+
+
+generateStringLength : GenExpr -> List Src.Expr -> String
+generateStringLength genExpr args =
+    case args of
+        [ s ] ->
+            "elm_strlen(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.length wrong arity */ 0"
+
+
+generateStringIsEmpty : GenExpr -> List Src.Expr -> String
+generateStringIsEmpty genExpr args =
+    case args of
+        [ s ] ->
+            "(*(" ++ genExpr s ++ ") == '\\0')"
+
+        _ ->
+            "/* String.isEmpty wrong arity */ 0"
+
+
+generateStringReverse : GenExpr -> List Src.Expr -> String
+generateStringReverse genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_reverse(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.reverse wrong arity */ 0"
+
+
+generateStringToInt : GenExpr -> List Src.Expr -> String
+generateStringToInt genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_to_int(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.toInt wrong arity */ 0"
+
+
+generateStringFromInt : GenExpr -> List Src.Expr -> String
+generateStringFromInt genExpr args =
+    case args of
+        [ n ] ->
+            "elm_from_int(" ++ genExpr n ++ ")"
+
+        _ ->
+            "/* String.fromInt wrong arity */ 0"
+
+
+generateStringFromFloat : GenExpr -> List Src.Expr -> String
+generateStringFromFloat genExpr args =
+    case args of
+        [ f ] ->
+            "elm_from_float(" ++ genExpr f ++ ")"
+
+        _ ->
+            "/* String.fromFloat wrong arity */ 0"
+
+
+generateStringToFloat : GenExpr -> List Src.Expr -> String
+generateStringToFloat genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_to_float(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.toFloat wrong arity */ 0"
+
+
+generateStringLeft : GenExpr -> List Src.Expr -> String
+generateStringLeft genExpr args =
+    case args of
+        [ n, s ] ->
+            "elm_str_left(" ++ genExpr n ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.left wrong arity */ 0"
+
+
+generateStringRight : GenExpr -> List Src.Expr -> String
+generateStringRight genExpr args =
+    case args of
+        [ n, s ] ->
+            "elm_str_right(" ++ genExpr n ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.right wrong arity */ 0"
+
+
+generateStringAppend : GenExpr -> List Src.Expr -> String
+generateStringAppend genExpr args =
+    case args of
+        [ a, b ] ->
+            "elm_str_append(" ++ genExpr a ++ ", " ++ genExpr b ++ ")"
+
+        _ ->
+            "/* String.append wrong arity */ 0"
+
+
+generateStringContains : GenExpr -> List Src.Expr -> String
+generateStringContains genExpr args =
+    case args of
+        [ needle, haystack ] ->
+            "elm_str_contains(" ++ genExpr needle ++ ", " ++ genExpr haystack ++ ")"
+
+        _ ->
+            "/* String.contains wrong arity */ 0"
+
+
+generateStringStartsWith : GenExpr -> List Src.Expr -> String
+generateStringStartsWith genExpr args =
+    case args of
+        [ prefix, s ] ->
+            "elm_str_starts_with(" ++ genExpr prefix ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.startsWith wrong arity */ 0"
+
+
+generateStringEndsWith : GenExpr -> List Src.Expr -> String
+generateStringEndsWith genExpr args =
+    case args of
+        [ suffix, s ] ->
+            "elm_str_ends_with(" ++ genExpr suffix ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.endsWith wrong arity */ 0"
+
+
+generateStringToUpper : GenExpr -> List Src.Expr -> String
+generateStringToUpper genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_to_upper(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.toUpper wrong arity */ 0"
+
+
+generateStringToLower : GenExpr -> List Src.Expr -> String
+generateStringToLower genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_to_lower(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.toLower wrong arity */ 0"
+
+
+generateStringTrim : GenExpr -> List Src.Expr -> String
+generateStringTrim genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_trim(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.trim wrong arity */ 0"
+
+
+generateStringTrimLeft : GenExpr -> List Src.Expr -> String
+generateStringTrimLeft genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_trim_left(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.trimLeft wrong arity */ 0"
+
+
+generateStringTrimRight : GenExpr -> List Src.Expr -> String
+generateStringTrimRight genExpr args =
+    case args of
+        [ s ] ->
+            "elm_str_trim_right(" ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.trimRight wrong arity */ 0"
+
+
+generateStringRepeat : GenExpr -> List Src.Expr -> String
+generateStringRepeat genExpr args =
+    case args of
+        [ n, s ] ->
+            "elm_str_repeat(" ++ genExpr n ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.repeat wrong arity */ 0"
+
+
+generateStringSlice : GenExpr -> List Src.Expr -> String
+generateStringSlice genExpr args =
+    case args of
+        [ start, end, s ] ->
+            "elm_str_slice(" ++ genExpr start ++ ", " ++ genExpr end ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.slice wrong arity */ 0"
+
+
+generateStringDropLeft : GenExpr -> List Src.Expr -> String
+generateStringDropLeft genExpr args =
+    case args of
+        [ n, s ] ->
+            let
+                nStr =
+                    genExpr n
+
+                sStr =
+                    genExpr s
+            in
+            "elm_str_slice(" ++ nStr ++ ", elm_strlen(" ++ sStr ++ "), " ++ sStr ++ ")"
+
+        _ ->
+            "/* String.dropLeft wrong arity */ 0"
+
+
+generateStringDropRight : GenExpr -> List Src.Expr -> String
+generateStringDropRight genExpr args =
+    case args of
+        [ n, s ] ->
+            let
+                nStr =
+                    genExpr n
+
+                sStr =
+                    genExpr s
+            in
+            "elm_str_slice(0, elm_strlen(" ++ sStr ++ ") - " ++ nStr ++ ", " ++ sStr ++ ")"
+
+        _ ->
+            "/* String.dropRight wrong arity */ 0"
+
+
+generateStringPadLeft : GenExpr -> List Src.Expr -> String
+generateStringPadLeft genExpr args =
+    case args of
+        [ n, c, s ] ->
+            "elm_str_pad_left(" ++ genExpr n ++ ", " ++ genExpr c ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.padLeft wrong arity */ 0"
+
+
+generateStringPadRight : GenExpr -> List Src.Expr -> String
+generateStringPadRight genExpr args =
+    case args of
+        [ n, c, s ] ->
+            "elm_str_pad_right(" ++ genExpr n ++ ", " ++ genExpr c ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.padRight wrong arity */ 0"
+
+
+generateStringReplace : GenExpr -> List Src.Expr -> String
+generateStringReplace genExpr args =
+    case args of
+        [ from, to, s ] ->
+            "elm_str_replace(" ++ genExpr from ++ ", " ++ genExpr to ++ ", " ++ genExpr s ++ ")"
+
+        _ ->
+            "/* String.replace wrong arity */ 0"
