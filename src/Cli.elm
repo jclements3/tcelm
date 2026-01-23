@@ -5151,6 +5151,13 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
                                     "({ double elm_" ++ pname1 ++ " = __lstA.data[__i], elm_" ++ pname2 ++ " = __lstB.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
+                                -- Constructor pattern in first position: \(Src.At _ pat) arg -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar pname1) ]), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ elm_union_t __elem1 = (elm_union_t)__lstA.data[__i].d; typeof(__elem1.data) elm_" ++ pname1 ++ " = __elem1.data; typeof(__lstB.data[__i].d) elm_" ++ pname2 ++ " = __lstB.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar pname1) ]), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ elm_union_t __elem1 = (elm_union_t)__lstA.data[__i].d; typeof(__elem1.data) elm_" ++ pname1 ++ " = __elem1.data; typeof(__lstB.data[__i].d) elm_" ++ pname2 ++ " = __lstB.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lstA.data[__i], __lstB.data[__i])"
                     in
@@ -6279,6 +6286,13 @@ generateUserFunction name args body =
                             Src.PTuple (Src.At _ (Src.PVar v1)) (Src.At _ (Src.PVar v2)) [ Src.At _ (Src.PVar v3) ] ->
                                 "double elm_" ++ v1 ++ ", double elm_" ++ v2 ++ ", double elm_" ++ v3
 
+                            -- Handle tuple with constructor pattern in first position: ( Src.At _ fieldName, fieldValue )
+                            Src.PTuple (Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar v1) ])) (Src.At _ (Src.PVar v2)) [] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2
+
+                            Src.PTuple (Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar v1) ])) (Src.At _ (Src.PVar v2)) [] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2
+
                             -- Handle record pattern { x, y, ... }
                             -- Generate a struct parameter - the field extractions happen in preamble
                             Src.PRecord fields ->
@@ -7172,6 +7186,13 @@ generateLiftedFunction prefix funcName args body capturedVars =
 
                             -- Handle 2-tuple pattern
                             Src.PTuple (Src.At _ (Src.PVar v1)) (Src.At _ (Src.PVar v2)) [] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2
+
+                            -- Handle tuple with constructor pattern: ( Src.At _ fieldName, fieldValue )
+                            Src.PTuple (Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar v1) ])) (Src.At _ (Src.PVar v2)) [] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2
+
+                            Src.PTuple (Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar v1) ])) (Src.At _ (Src.PVar v2)) [] ->
                                 "double elm_" ++ v1 ++ ", double elm_" ++ v2
 
                             _ ->
@@ -8403,12 +8424,40 @@ generateStandaloneCase scrutinee branches =
                                     pats
                                         |> List.indexedMap
                                             (\i (Src.At _ elemPat) ->
+                                                let
+                                                    elemExpr = "elm_case_scrutinee.data[" ++ String.fromInt i ++ "].d"
+                                                in
                                                 case elemPat of
                                                     Src.PVar vName ->
-                                                        "double elm_" ++ vName ++ " = elm_case_scrutinee.data[" ++ String.fromInt i ++ "].d;"
+                                                        "double elm_" ++ vName ++ " = " ++ elemExpr ++ ";"
 
                                                     Src.PAnything ->
                                                         ""
+
+                                                    -- Tuple pattern: (a, b)
+                                                    Src.PTuple (Src.At _ first) (Src.At _ second) extraPats ->
+                                                        let
+                                                            elemType = if List.isEmpty extraPats then "elm_tuple2_t" else "elm_tuple3_t"
+                                                            tupleDecl = elemType ++ " __elem_" ++ String.fromInt i ++ " = *(" ++ elemType ++ "*)&(" ++ elemExpr ++ ");"
+                                                            bindOne idx pat =
+                                                                case pat of
+                                                                    Src.PVar vn ->
+                                                                        "typeof(__elem_" ++ String.fromInt i ++ "._" ++ String.fromInt idx ++ ".d) elm_" ++ vn ++ " = __elem_" ++ String.fromInt i ++ "._" ++ String.fromInt idx ++ ".d;"
+                                                                    Src.PAnything -> ""
+                                                                    _ -> ""
+                                                            allBindings = [ tupleDecl, bindOne 0 first, bindOne 1 second ]
+                                                                ++ (extraPats |> List.indexedMap (\idx (Src.At _ p) -> bindOne (idx + 2) p))
+                                                                |> List.filter (\s -> s /= "")
+                                                                |> String.join " "
+                                                        in
+                                                        allBindings
+
+                                                    -- Constructor pattern: (Src.At _ x)
+                                                    Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ] ->
+                                                        "elm_union_t __elem_" ++ String.fromInt i ++ " = (elm_union_t)" ++ elemExpr ++ "; typeof(__elem_" ++ String.fromInt i ++ ".data) elm_" ++ innerName ++ " = __elem_" ++ String.fromInt i ++ ".data;"
+
+                                                    Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ] ->
+                                                        "elm_union_t __elem_" ++ String.fromInt i ++ " = (elm_union_t)" ++ elemExpr ++ "; typeof(__elem_" ++ String.fromInt i ++ ".data) elm_" ++ innerName ++ " = __elem_" ++ String.fromInt i ++ ".data;"
 
                                                     _ ->
                                                         "/* unsupported list element pattern */"
