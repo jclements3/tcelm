@@ -1,0 +1,214 @@
+# Tail Call Optimization (TCO) Patch for tcelm
+#
+# This patch adds tail call optimization to convert tail-recursive functions
+# into loops, preventing stack overflow for deeply recursive functions.
+#
+# To apply: Add this code to src/Cli.elm in the generateUserFunction function,
+# right before the final function generation (around line 5862).
+
+## 1. Replace the final else branch in generateUserFunction with:
+
+```elm
+        -- Check for tail recursion and apply TCO if possible
+        let
+            -- Extract parameter names for TCO
+            paramNames =
+                args
+                    |> List.filterMap
+                        (\(Src.At _ pat) ->
+                            case pat of
+                                Src.PVar varName -> Just varName
+                                _ -> Nothing
+                        )
+
+            -- Check if the function is tail-recursive
+            isTailRecursive =
+                hasTailCall name body
+
+            -- Generate TCO loop body if tail-recursive
+            tcoBody =
+                if isTailRecursive && not (List.isEmpty paramNames) then
+                    generateTCOBody name paramNames body
+                else
+                    Nothing
+        in
+        case tcoBody of
+            Just loopCode ->
+                "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    while (1) {\n" ++ loopCode ++ "\n    }\n}"
+
+            Nothing ->
+                "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
+```
+
+## 2. Add these helper functions before the LiftedFunc type definition:
+
+```elm
+{-| Check if an expression contains a tail call to the given function name.
+    A tail call is a call that is the last thing evaluated before returning.
+-}
+hasTailCall : String -> Src.Expr -> Bool
+hasTailCall funcName (Src.At _ expr) =
+    case expr of
+        -- Direct call to the function in tail position
+        Src.Call (Src.At _ (Src.Var _ callee)) _ ->
+            callee == funcName
+
+        -- If expression: check if either branch has tail call
+        Src.If branches elseExpr ->
+            List.any (\( _, thenExpr ) -> hasTailCall funcName thenExpr) branches
+                || hasTailCall funcName elseExpr
+
+        -- Case expression: check if any branch has tail call
+        Src.Case _ branches ->
+            List.any (\( _, _, branchExpr ) -> hasTailCall funcName branchExpr) branches
+
+        -- Let expression: check the body (the "in" part)
+        Src.Let _ inExpr ->
+            hasTailCall funcName inExpr
+
+        _ ->
+            False
+
+
+{-| Generate TCO loop body for a tail-recursive function.
+    Returns Nothing if TCO transformation is not possible.
+-}
+generateTCOBody : String -> List String -> Src.Expr -> Maybe String
+generateTCOBody funcName paramNames body =
+    generateTCOExpr funcName paramNames body
+
+
+{-| Generate TCO code for an expression.
+    Non-recursive branches return; recursive branches reassign parameters and continue.
+-}
+generateTCOExpr : String -> List String -> Src.Expr -> Maybe String
+generateTCOExpr funcName paramNames (Src.At _ expr) =
+    let
+        dummyRegion = { start = { row = 1, col = 1 }, end = { row = 1, col = 1 } }
+    in
+    case expr of
+        -- If expression
+        Src.If branches elseExpr ->
+            let
+                generateBranch ( condExpr, thenExpr ) =
+                    let
+                        condStr = generateStandaloneExpr condExpr
+                        thenCode = generateTCOExpr funcName paramNames thenExpr
+                    in
+                    Maybe.map (\code -> "        if (" ++ condStr ++ ") {\n" ++ code ++ "\n        }") thenCode
+
+                branchCodes = List.filterMap generateBranch branches
+                elseCode = generateTCOExpr funcName paramNames elseExpr
+            in
+            case ( branchCodes, elseCode ) of
+                ( [], _ ) ->
+                    Nothing
+
+                ( firstBranch :: restBranches, Just elseStr ) ->
+                    Just (firstBranch ++ String.concat (List.map (\b -> " else " ++ String.dropLeft 8 b) restBranches) ++ " else {\n" ++ elseStr ++ "\n        }")
+
+                _ ->
+                    Nothing
+
+        -- Case expression - fall back to normal code generation for now
+        Src.Case _ _ ->
+            Nothing
+
+        -- Let expression: generate the bindings then the TCO body
+        Src.Let defs inExpr ->
+            let
+                defsCode = defs
+                    |> List.map (\(Src.At _ def) ->
+                        case def of
+                            Src.Define (Src.At _ defName) defArgs defBody _ ->
+                                if List.isEmpty defArgs then
+                                    let
+                                        ( varType, varInit ) = inferCTypeAndInit defBody
+                                    in
+                                    "            " ++ varType ++ " elm_" ++ defName ++ " = " ++ varInit ++ ";"
+                                else
+                                    "            /* local function not supported in TCO */"
+
+                            Src.Destruct pattern defExpr ->
+                                "            " ++ generateDestructuring pattern defExpr
+                        )
+                    |> String.join "\n"
+
+                bodyCode = generateTCOExpr funcName paramNames inExpr
+            in
+            Maybe.map (\b -> defsCode ++ "\n" ++ b) bodyCode
+
+        -- Direct tail call to the function
+        Src.Call (Src.At _ (Src.Var _ callee)) callArgs ->
+            if callee == funcName && List.length callArgs == List.length paramNames then
+                let
+                    -- Generate temp variables for new parameter values
+                    tempAssignments =
+                        List.map2
+                            (\pName argExpr ->
+                                "            double __tco_" ++ pName ++ " = " ++ generateStandaloneExpr argExpr ++ ";"
+                            )
+                            paramNames
+                            callArgs
+                        |> String.join "\n"
+
+                    -- Reassign parameters from temps
+                    paramReassignments =
+                        paramNames
+                            |> List.map (\pName -> "            elm_" ++ pName ++ " = __tco_" ++ pName ++ ";")
+                            |> String.join "\n"
+                in
+                Just (tempAssignments ++ "\n" ++ paramReassignments ++ "\n            continue;")
+            else
+                -- Non-recursive call or wrong arity - return the result
+                Just ("            return " ++ generateStandaloneExpr (Src.At dummyRegion expr) ++ ";")
+
+        -- Any other expression - not a tail call, just return it
+        _ ->
+            Just ("            return " ++ generateStandaloneExpr (Src.At dummyRegion expr) ++ ";")
+```
+
+## 3. Also fix modBy/remainderBy to use int casts (separate fix):
+
+In generateStandaloneCall, find the modBy case and change:
+```elm
+"((" ++ generateStandaloneExpr dividend ++ " % " ++ generateStandaloneExpr divisor ++ " + " ++ generateStandaloneExpr divisor ++ ") % " ++ generateStandaloneExpr divisor ++ ")"
+```
+To:
+```elm
+"((((int)" ++ generateStandaloneExpr dividend ++ " % (int)" ++ generateStandaloneExpr divisor ++ " + (int)" ++ generateStandaloneExpr divisor ++ ") % (int)" ++ generateStandaloneExpr divisor ++ "))"
+```
+
+And for remainderBy:
+```elm
+"((int)" ++ generateStandaloneExpr dividend ++ " % (int)" ++ generateStandaloneExpr divisor ++ ")"
+```
+
+## Example: Tail-recursive factorial
+
+Input Elm:
+```elm
+factorial : Int -> Int -> Int
+factorial n acc =
+    if n <= 1 then
+        acc
+    else
+        factorial (n - 1) (n * acc)
+```
+
+Generated C with TCO:
+```c
+static double elm_factorial(double elm_n, double elm_acc) {
+    while (1) {
+        if (elm_n <= 1) {
+            return elm_acc;
+        } else {
+            double __tco_n = (elm_n - 1);
+            double __tco_acc = (elm_n * elm_acc);
+            elm_n = __tco_n;
+            elm_acc = __tco_acc;
+            continue;
+        }
+    }
+}
+```

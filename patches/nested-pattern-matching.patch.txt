@@ -1,0 +1,123 @@
+# Nested Pattern Matching Fix for tcelm
+#
+# This patch fixes pattern matching on nested constructors like `Just North`, `Just South`.
+# Without this fix, all `Just X` branches generate the same condition (just TAG_Just check)
+# without comparing the inner constructor.
+#
+# LOCATION: src/Cli.elm in generateStandaloneCase function, inside generateBranches
+#
+# There are TWO places that need this fix:
+# 1. PCtor case (around line 7785) - for unqualified constructors like `Just`
+# 2. PCtorQual case (around line 7945) - for qualified constructors like `Src.At`
+
+## Fix 1: PCtor with data (already applied)
+## In the `else` branch of `Src.PCtor _ ctorName ctorPatterns ->` where `not (List.isEmpty ctorPatterns)`
+
+Add this code BEFORE the `bindings` definition:
+
+```elm
+                                            -- Generate conditions for nested constructor patterns (e.g., Just North -> check inner tag)
+                                            innerConditions =
+                                                ctorPatterns
+                                                    |> List.indexedMap
+                                                        (\patIdx (Src.At _ pat) ->
+                                                            let
+                                                                accessor =
+                                                                    if patIdx == 0 then
+                                                                        "elm_case_scrutinee.data.child"
+                                                                    else
+                                                                        "elm_case_scrutinee.data2"
+                                                            in
+                                                            case pat of
+                                                                Src.PCtor _ innerCtorName [] ->
+                                                                    -- Nested nullary constructor (e.g., Just North)
+                                                                    Just (accessor ++ "->tag == TAG_" ++ innerCtorName)
+
+                                                                Src.PCtorQual _ innerModName innerCtorName [] ->
+                                                                    -- Nested qualified nullary constructor
+                                                                    Just (accessor ++ "->tag == TAG_" ++ innerModName ++ "_" ++ innerCtorName)
+
+                                                                _ ->
+                                                                    Nothing
+                                                        )
+                                                    |> List.filterMap identity
+```
+
+Then add this AFTER the `guardedResultStr` definition but BEFORE the `in`:
+
+```elm
+                                            -- Combine outer tag condition with inner conditions
+                                            fullCondition =
+                                                ("elm_case_scrutinee.tag == TAG_" ++ ctorName)
+                                                    :: innerConditions
+                                                    |> String.join " && "
+```
+
+Then change the final output from:
+```elm
+                                        "(elm_case_scrutinee.tag == TAG_"
+                                            ++ ctorName
+                                            ++ " ? ({ "
+```
+
+To:
+```elm
+                                        "(" ++ fullCondition
+                                            ++ " ? ({ "
+```
+
+## Fix 2: PCtorQual with data (NOT YET APPLIED)
+## In the `else` branch of `Src.PCtorQual _ moduleName ctorName ctorPatterns ->` where constructors have data
+
+Same pattern as Fix 1. Add `innerConditions` before `bindings`, add `fullCondition` after `guardedResultStr`,
+and change the output to use `fullCondition` instead of just the outer tag.
+
+The full condition becomes:
+```elm
+                                            fullCondition =
+                                                ("elm_case_scrutinee.tag == TAG_" ++ fullCtorName)
+                                                    :: innerConditions
+                                                    |> String.join " && "
+```
+
+And the output becomes:
+```elm
+                                        "(" ++ fullCondition
+                                            ++ " ? ({ "
+                                            ++ bindings
+                                            ++ " "
+                                            ++ guardedResultStr
+                                            ++ "; }) : "
+                                            ++ generateBranches rest
+                                            ++ ")"
+```
+
+## Example transformation
+
+Input Elm:
+```elm
+directionStr : Maybe Direction -> String
+directionStr dir =
+    case dir of
+        Just North -> "from/north"
+        Just South -> "from/south"
+        Nothing -> "any"
+```
+
+Before fix (WRONG):
+```c
+(elm_case_scrutinee.tag == TAG_Just ? ({ "from/north"; }) :
+ (elm_case_scrutinee.tag == TAG_Just ? ({ "from/south"; }) :
+  (elm_case_scrutinee.tag == TAG_Nothing ? ({ "any"; }) : 0)))
+```
+
+After fix (CORRECT):
+```c
+(elm_case_scrutinee.tag == TAG_Just && elm_case_scrutinee.data.child->tag == TAG_North ? ({ "from/north"; }) :
+ (elm_case_scrutinee.tag == TAG_Just && elm_case_scrutinee.data.child->tag == TAG_South ? ({ "from/south"; }) :
+  (elm_case_scrutinee.tag == TAG_Nothing ? ({ "any"; }) : 0)))
+```
+
+## Status
+- Fix 1 (PCtor): APPLIED to Cli.elm
+- Fix 2 (PCtorQual): NOT YET APPLIED - waiting for other chat to finish editing Cli.elm

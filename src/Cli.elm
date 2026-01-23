@@ -2592,6 +2592,145 @@ generateArgsString exprs =
             generateStandaloneExpr first ++ ", " ++ generateArgsString rest
 
 
+{-| Generate C bindings from a lambda pattern.
+    Returns (bindings, element accessor) where:
+    - bindings: C code to bind pattern variables (e.g., "double elm_x = __elem._0;")
+    - element accessor: how to access the element (e.g., "__lst.data[__i]")
+
+    elemExpr is the C expression for the current element (e.g., "__lst.data[__i]")
+-}
+generateLambdaPatternBindings : String -> Src.Pattern -> ( String, String )
+generateLambdaPatternBindings elemExpr locatedPattern =
+    let
+        (Src.At _ pattern) = locatedPattern
+    in
+    case pattern of
+        -- Simple variable: \x -> ...
+        Src.PVar varName ->
+            ( "typeof(" ++ elemExpr ++ ") elm_" ++ varName ++ " = " ++ elemExpr ++ ";", elemExpr )
+
+        -- Wildcard: \_ -> ...
+        Src.PAnything ->
+            ( "", elemExpr )
+
+        -- Tuple pattern: \(a, b) -> ...
+        Src.PTuple (Src.At _ first) (Src.At _ second) rest ->
+            let
+                elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                tupleDecl = elemType ++ " __telem = *(" ++ elemType ++ "*)&(" ++ elemExpr ++ ");"
+
+                bindOne idx pat =
+                    case pat of
+                        Src.PVar vn ->
+                            "double elm_" ++ vn ++ " = __telem._" ++ String.fromInt idx ++ ".d;"
+                        Src.PAnything ->
+                            ""
+                        -- Nested constructor: \(_, Src.At _ x) -> ...
+                        Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ] ->
+                            "double elm_" ++ innerName ++ " = ((elm_union_t*)&__telem._" ++ String.fromInt idx ++ ")->data.num;"
+                        Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ] ->
+                            "double elm_" ++ innerName ++ " = ((elm_union_t*)&__telem._" ++ String.fromInt idx ++ ")->data.num;"
+                        _ ->
+                            "/* unsupported tuple element pattern */"
+
+                firstBinding = bindOne 0 first
+                secondBinding = bindOne 1 second
+                restBindings = rest
+                    |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p)
+
+                allBindings = [ tupleDecl, firstBinding, secondBinding ] ++ restBindings
+                    |> List.filter (\s -> s /= "")
+                    |> String.join " "
+            in
+            ( allBindings, elemExpr )
+
+        -- Constructor pattern: \(Src.At _ x) -> ...
+        Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ] ->
+            ( "typeof(((elm_union_t)" ++ elemExpr ++ ").data) elm_" ++ innerName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;", elemExpr )
+
+        -- Qualified constructor pattern: \(Src.At _ x) -> ...
+        Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ] ->
+            ( "typeof(((elm_union_t)" ++ elemExpr ++ ").data) elm_" ++ innerName ++ " = ((elm_union_t)" ++ elemExpr ++ ").data;", elemExpr )
+
+        -- Record pattern: \{ x, y } -> ...
+        Src.PRecord fieldNames ->
+            let
+                bindings = fieldNames
+                    |> List.map (\(Src.At _ fn) -> "typeof(" ++ elemExpr ++ "." ++ fn ++ ") elm_" ++ fn ++ " = " ++ elemExpr ++ "." ++ fn ++ ";")
+                    |> String.join " "
+            in
+            ( bindings, elemExpr )
+
+        _ ->
+            ( "/* unsupported lambda pattern */", elemExpr )
+
+
+{-| Generate inline lambda body with bindings.
+    Used for List.map, List.filter, etc. when the lambda pattern is complex.
+
+    patterns: the lambda's pattern list
+    body: the lambda body expression
+    elemExpr: C expression for the current element
+-}
+generateInlineLambdaBody : List Src.Pattern -> Src.Expr -> String -> String
+generateInlineLambdaBody patterns body elemExpr =
+    case patterns of
+        [ pat ] ->
+            let
+                ( bindings, _ ) = generateLambdaPatternBindings elemExpr pat
+                bodyCode = generateStandaloneExpr body
+            in
+            if bindings == "" then
+                bodyCode
+            else
+                "({ " ++ bindings ++ " " ++ bodyCode ++ "; })"
+
+        -- Two patterns (e.g., \i x -> ... for indexedMap)
+        [ pat1, pat2 ] ->
+            let
+                ( bindings1, _ ) = generateLambdaPatternBindings "__idx" pat1
+                ( bindings2, _ ) = generateLambdaPatternBindings elemExpr pat2
+                bodyCode = generateStandaloneExpr body
+                allBindings = [ bindings1, bindings2 ]
+                    |> List.filter (\s -> s /= "" && not (String.contains "unsupported" s))
+                    |> String.join " "
+            in
+            if allBindings == "" then
+                bodyCode
+            else
+                "({ " ++ allBindings ++ " " ++ bodyCode ++ "; })"
+
+        _ ->
+            "/* unsupported multi-pattern lambda */ 0"
+
+
+{-| Generate inline lambda body with bindings for indexed iteration (List.indexedMap).
+    patterns: the lambda's pattern list (should be 2: index pattern and element pattern)
+    body: the lambda body expression
+    idxExpr: C expression for the current index (e.g., "__i")
+    elemExpr: C expression for the current element (e.g., "__lst.data[__i]")
+-}
+generateInlineLambdaBodyIndexed : List Src.Pattern -> Src.Expr -> String -> String -> String
+generateInlineLambdaBodyIndexed patterns body idxExpr elemExpr =
+    case patterns of
+        [ pat1, pat2 ] ->
+            let
+                ( bindings1, _ ) = generateLambdaPatternBindings idxExpr pat1
+                ( bindings2, _ ) = generateLambdaPatternBindings elemExpr pat2
+                bodyCode = generateStandaloneExpr body
+                allBindings = [ bindings1, bindings2 ]
+                    |> List.filter (\s -> s /= "" && not (String.contains "unsupported" s))
+                    |> String.join " "
+            in
+            if allBindings == "" then
+                bodyCode
+            else
+                "({ " ++ allBindings ++ " " ++ bodyCode ++ "; })"
+
+        _ ->
+            "/* unsupported indexedMap pattern count */ 0"
+
+
 {-| Generate binary operations with function context (for nested Let handling)
 -}
 generateStandaloneBinopsWithCtx : ExprCtx -> List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
@@ -4982,6 +5121,10 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Accessor fieldName) ->
                                     "(__lst.data[__i]." ++ fieldName ++ ")"
 
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
@@ -5053,6 +5196,10 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Binops [ ( Src.At _ (Src.Var _ "not"), Src.At _ "<<" ) ] innerFn) ->
                                     "!(" ++ generateStandaloneExpr innerFn ++ "((const char *)(long)__lst.data[__i]))"
 
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
@@ -5072,6 +5219,10 @@ generateStandaloneCall fn args =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
                                     "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
@@ -5139,6 +5290,10 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ (Src.PVar pname2)) []) ] lambdaBody) ->
                                     "({ elm_tuple2_t __elem = __lst.data[__i].t2; double elm_" ++ pname1 ++ " = __elem._0; double elm_" ++ pname2 ++ " = __elem._1; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i].d)"
                     in
@@ -5170,6 +5325,10 @@ generateStandaloneCall fn args =
                                 -- Lambda with tuple pattern with wildcard second: \(a, _) -> ...
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ (Src.PVar pname1)) (Src.At _ Src.PAnything) []) ] lambdaBody) ->
                                     "({ elm_tuple2_t __elem = __lst.data[__i].t2; elm_elem_t elm_" ++ pname1 ++ " = __elem._0; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i].d)"
@@ -5227,6 +5386,10 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Lambda [ Src.At _ Src.PAnything, Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
                                     "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
+                                -- Generic lambda with any patterns - use helper (handles 2-arg lambdas for indexedMap)
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBodyIndexed patterns lambdaBody "__i" "__lst.data[__i]"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__i, __lst.data[__i])"
                     in
@@ -5279,6 +5442,10 @@ generateStandaloneCall fn args =
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
                                     "({ elm_union_t __elem = __lst.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
 
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
@@ -5307,6 +5474,10 @@ generateStandaloneCall fn args =
                                 -- Lambda with qualified Located pattern (Src.At _ x)
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
                                     "({ elm_union_t __elem = __src.data[__i]; double elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__src.data[__i]"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__src.data[__i])"
@@ -7617,6 +7788,32 @@ generateStandaloneCase scrutinee branches =
                                         let
                                             resultStr = generateStandaloneExpr resultExpr
 
+                                            -- Generate conditions for nested constructor patterns (e.g., Just North -> check inner tag)
+                                            innerConditions =
+                                                ctorPatterns
+                                                    |> List.indexedMap
+                                                        (\patIdx (Src.At _ pat) ->
+                                                            let
+                                                                accessor =
+                                                                    if patIdx == 0 then
+                                                                        "elm_case_scrutinee.data.child"
+                                                                    else
+                                                                        "elm_case_scrutinee.data2"
+                                                            in
+                                                            case pat of
+                                                                Src.PCtor _ innerCtorName [] ->
+                                                                    -- Nested nullary constructor (e.g., Just North)
+                                                                    Just (accessor ++ "->tag == TAG_" ++ innerCtorName)
+
+                                                                Src.PCtorQual _ innerModName innerCtorName [] ->
+                                                                    -- Nested qualified nullary constructor
+                                                                    Just (accessor ++ "->tag == TAG_" ++ innerModName ++ "_" ++ innerCtorName)
+
+                                                                _ ->
+                                                                    Nothing
+                                                        )
+                                                    |> List.filterMap identity
+
                                             bindings =
                                                 ctorPatterns
                                                     |> List.indexedMap
@@ -7696,9 +7893,14 @@ generateStandaloneCase scrutinee branches =
 
                                                     Just guardExpr ->
                                                         "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
+
+                                            -- Combine outer tag condition with inner conditions
+                                            fullCondition =
+                                                ("elm_case_scrutinee.tag == TAG_" ++ ctorName)
+                                                    :: innerConditions
+                                                    |> String.join " && "
                                         in
-                                        "(elm_case_scrutinee.tag == TAG_"
-                                            ++ ctorName
+                                        "(" ++ fullCondition
                                             ++ " ? ({ "
                                             ++ bindings
                                             ++ " "
