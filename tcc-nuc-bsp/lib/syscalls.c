@@ -31,7 +31,9 @@ extern int close(int);
 extern int lseek(int, int, int);
 extern void rtems_task_delete(int);
 extern int rtems_task_ident(int, int, uint32_t*);
-extern int errno;
+
+/* Global errno variable (for standalone builds) */
+int errno = 0;
 
 #else
 /* Real RTEMS build */

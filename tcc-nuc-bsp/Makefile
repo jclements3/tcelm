@@ -37,7 +37,7 @@ BUILD_DIR = build
 BSP_NAME = tcc-nuc-bsp
 
 .PHONY: all
-all: crt lib
+all: crt lib fdlibm
 
 # Create build directory
 $(BUILD_DIR):
@@ -68,18 +68,25 @@ $(BUILD_DIR)/syscalls.o: lib/syscalls.c | $(BUILD_DIR)
 $(BUILD_DIR)/libsyscalls.a: $(BUILD_DIR)/syscalls.o
 	$(AR) rcs $@ $^
 
+# Build FDLIBM math library
+.PHONY: fdlibm
+fdlibm:
+	$(MAKE) -C lib/fdlibm
+	cp lib/fdlibm/build/libfdlibm.a $(BUILD_DIR)/
+
 # Install to TCC lib directory
 .PHONY: install
-install: crt lib
+install: crt lib fdlibm
 	mkdir -p $(TCC_LIBDIR)/$(BSP_NAME)
 	mkdir -p $(TCC_LIBDIR)/$(BSP_NAME)/include
 	cp $(BUILD_DIR)/crt0.o $(TCC_LIBDIR)/$(BSP_NAME)/
 	cp $(BUILD_DIR)/crti.o $(TCC_LIBDIR)/$(BSP_NAME)/
 	cp $(BUILD_DIR)/crtn.o $(TCC_LIBDIR)/$(BSP_NAME)/
 	cp $(BUILD_DIR)/libsyscalls.a $(TCC_LIBDIR)/$(BSP_NAME)/
+	cp $(BUILD_DIR)/libfdlibm.a $(TCC_LIBDIR)/$(BSP_NAME)/
 	cp linkcmds.nuc $(TCC_LIBDIR)/$(BSP_NAME)/
 	cp config.h $(TCC_LIBDIR)/$(BSP_NAME)/
-	cp include/tcc_nuc.h $(TCC_LIBDIR)/$(BSP_NAME)/include/
+	cp include/*.h $(TCC_LIBDIR)/$(BSP_NAME)/include/
 	@echo "Installed to $(TCC_LIBDIR)/$(BSP_NAME)"
 
 # Create a tcc wrapper script
@@ -107,6 +114,7 @@ $(BUILD_DIR)/tcc-nuc: | $(BUILD_DIR)
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
+	$(MAKE) -C lib/fdlibm clean
 
 # Help
 .PHONY: help
@@ -114,8 +122,10 @@ help:
 	@echo "TCC-NUC-BSP Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make          - Build C runtime objects"
+	@echo "  make          - Build everything (crt, lib, fdlibm)"
 	@echo "  make crt      - Build C runtime objects"
+	@echo "  make lib      - Build syscalls library"
+	@echo "  make fdlibm   - Build FDLIBM math library"
 	@echo "  make install  - Install to TCC lib directory"
 	@echo "  make wrapper  - Create tcc-nuc wrapper script"
 	@echo "  make clean    - Clean build artifacts"

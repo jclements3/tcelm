@@ -13,6 +13,8 @@ COMMON_SRCS = tcelm_arena.c tcelm_types.c tcelm_basics.c
 STDLIB_SRCS = tcelm_string.c tcelm_list.c tcelm_char.c tcelm_maybe.c
 # Math/Matrix library
 MATH_SRCS = tcelm_matrix.c
+# GPU-accelerated matrix (OpenCL)
+GPU_SRCS = tcelm_matrix_gpu.c
 # TAOS trajectory simulation
 TAOS_SRCS = tcelm_taos.c
 # New RTEMS integration layer (Task, Channel, MVar, Semaphore, Barrier, Budget, Protected, Timer, IO, Worker, Platform)
@@ -38,8 +40,10 @@ HOST_CFLAGS = -Wall -Wextra -g -O0
 # -lrt is needed on Linux for clock_gettime, not on macOS
 ifeq ($(shell uname),Darwin)
 HOST_LDFLAGS = -lm -lpthread
+OPENCL_LDFLAGS = -framework OpenCL
 else
 HOST_LDFLAGS = -lm -lpthread -lrt
+OPENCL_LDFLAGS = -lOpenCL
 endif
 
 # TCC (Tiny C Compiler) - for fast iteration
@@ -75,7 +79,7 @@ objs: $(CORE_OBJS)
 
 # Host build
 .PHONY: host
-host: test_runtime test_rtems test_shell_ops test_pmap test_worker test_matrix test_taos
+host: test_runtime test_rtems test_shell_ops test_pmap test_worker test_matrix test_matrix_gpu test_taos
 
 test_runtime: $(TEST_RUNTIME_SRC) $(COMMON_SRCS) $(STDLIB_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
@@ -94,6 +98,9 @@ test_worker: test_worker.c $(COMMON_SRCS) $(STDLIB_SRCS) tcelm_worker.c
 
 test_matrix: test_matrix.c $(COMMON_SRCS) $(STDLIB_SRCS) $(MATH_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS)
+
+test_matrix_gpu: test_matrix_gpu.c $(COMMON_SRCS) $(STDLIB_SRCS) $(MATH_SRCS) $(GPU_SRCS)
+	$(HOST_CC) $(HOST_CFLAGS) -DHAVE_OPENCL -o $@ $^ $(HOST_LDFLAGS) $(OPENCL_LDFLAGS)
 
 test_taos: test_taos.c $(COMMON_SRCS) $(STDLIB_SRCS) $(TAOS_SRCS)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ $^ $(HOST_LDFLAGS) -ldl
