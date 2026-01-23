@@ -6298,6 +6298,78 @@ collectVarRefs (Src.At _ expr) =
             []
 
 
+{-| Dead Code Elimination: compute the set of reachable function names from main.
+    Returns a list of function names that are transitively called from main.
+-}
+computeReachableFunctions : List (Src.Located Src.Value) -> List String
+computeReachableFunctions values =
+    let
+        -- Build a map from function name to its body expression
+        funcBodies : List ( String, Src.Expr )
+        funcBodies =
+            values
+                |> List.map
+                    (\(Src.At _ value) ->
+                        let
+                            (Src.At _ name) = value.name
+                        in
+                        ( name, value.body )
+                    )
+
+        -- Get all function names defined in this module
+        definedFuncs : List String
+        definedFuncs =
+            List.map (\( name, _ ) -> name) funcBodies
+
+        -- Get references from a function body, filtered to only include defined functions
+        getCallees : String -> List String
+        getCallees funcName =
+            funcBodies
+                |> List.filter (\( name, _ ) -> name == funcName)
+                |> List.head
+                |> Maybe.map (\( _, body ) -> collectVarRefs body)
+                |> Maybe.withDefault []
+                |> List.filter (\ref -> List.member ref definedFuncs)
+                |> uniqueStrings
+
+        -- Compute transitive closure starting from "main"
+        computeClosure : List String -> List String -> List String
+        computeClosure frontier visited =
+            case frontier of
+                [] ->
+                    visited
+
+                current :: rest ->
+                    if List.member current visited then
+                        computeClosure rest visited
+                    else
+                        let
+                            callees = getCallees current
+                            newFrontier = rest ++ List.filter (\c -> not (List.member c visited)) callees
+                        in
+                        computeClosure newFrontier (current :: visited)
+    in
+    computeClosure [ "main" ] []
+
+
+{-| Filter values to only include reachable functions (Dead Code Elimination).
+    Always includes "main" and all functions transitively called from main.
+-}
+filterReachableValues : List (Src.Located Src.Value) -> List (Src.Located Src.Value)
+filterReachableValues values =
+    let
+        reachable = computeReachableFunctions values
+    in
+    values
+        |> List.filter
+            (\(Src.At _ value) ->
+                let
+                    (Src.At _ name) = value.name
+                in
+                List.member name reachable
+            )
+
+
 {-| Extract variable names bound by a pattern
 -}
 patternVars : Src.Pattern -> List String
