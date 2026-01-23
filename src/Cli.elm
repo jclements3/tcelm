@@ -417,9 +417,29 @@ generateRtemsCode ast =
                 , "#define TAG_Nothing 0"
                 , "#define TAG_Just 1"
                 , ""
+                , "/* Built-in Maybe constructor functions */"
+                , "static elm_union_t elm_Nothing(void) {"
+                , "    elm_union_t result = { .tag = TAG_Nothing, .data = {.num = 0}, .data2 = 0 };"
+                , "    return result;"
+                , "}"
+                , "static elm_union_t elm_Just(elm_union_t v1) {"
+                , "    elm_union_t result = { .tag = TAG_Just, .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };"
+                , "    return result;"
+                , "}"
+                , ""
                 , "/* Built-in Result type tags */"
                 , "#define TAG_Err 0"
                 , "#define TAG_Ok 1"
+                , ""
+                , "/* Built-in Result constructor functions */"
+                , "static elm_union_t elm_Ok(elm_union_t v1) {"
+                , "    elm_union_t result = { .tag = TAG_Ok, .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };"
+                , "    return result;"
+                , "}"
+                , "static elm_union_t elm_Err(elm_union_t v1) {"
+                , "    elm_union_t result = { .tag = TAG_Err, .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };"
+                , "    return result;"
+                , "}"
                 , ""
                 , "/* Built-in List type - fixed-size array (max 16 elements) */"
                 , "#define ELM_LIST_MAX 16"
@@ -1647,9 +1667,29 @@ generateTccCode ast =
             , "#define TAG_Nothing 0"
             , "#define TAG_Just 1"
             , ""
+            , "/* Built-in Maybe constructor functions */"
+            , "static elm_union_t elm_Nothing(void) {"
+            , "    elm_union_t result = { .tag = TAG_Nothing, .data = {.num = 0}, .data2 = 0 };"
+            , "    return result;"
+            , "}"
+            , "static elm_union_t elm_Just(elm_union_t v1) {"
+            , "    elm_union_t result = { .tag = TAG_Just, .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };"
+            , "    return result;"
+            , "}"
+            , ""
             , "/* Built-in Result type tags */"
             , "#define TAG_Err 0"
             , "#define TAG_Ok 1"
+            , ""
+            , "/* Built-in Result constructor functions */"
+            , "static elm_union_t elm_Ok(elm_union_t v1) {"
+            , "    elm_union_t result = { .tag = TAG_Ok, .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };"
+            , "    return result;"
+            , "}"
+            , "static elm_union_t elm_Err(elm_union_t v1) {"
+            , "    elm_union_t result = { .tag = TAG_Err, .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };"
+            , "    return result;"
+            , "}"
             , ""
             , "/* Built-in Order type tags */"
             , "#define TAG_LT 0"
@@ -3704,10 +3744,21 @@ generateStandaloneCall fn args =
                     "/* isOdd wrong arity */ 0"
 
         Src.At _ (Src.Var Src.CapVar "Just") ->
-            -- Built-in Maybe Just constructor
+            -- Maybe Just constructor - call the generated constructor function
+            -- The constructor wraps the value in a heap-allocated union
             case args of
                 [ value ] ->
-                    "((elm_union_t){TAG_Just, " ++ generateStandaloneExpr value ++ "})"
+                    let
+                        valueStr = generateStandaloneExpr value
+                        wrappedValue =
+                            if isUnionValue valueStr then
+                                valueStr
+                            else if isStringValue valueStr then
+                                "((elm_union_t){0, {.str = " ++ valueStr ++ "}, 0})"
+                            else
+                                "((elm_union_t){0, {.num = " ++ valueStr ++ "}, 0})"
+                    in
+                    "elm_Just(" ++ wrappedValue ++ ")"
 
                 _ ->
                     "/* Just wrong arity */ 0"
@@ -5016,10 +5067,78 @@ generateUserFunction name args body =
                             Src.PTuple (Src.At _ (Src.PVar v1)) (Src.At _ (Src.PVar v2)) [] ->
                                 "double elm_" ++ v1 ++ ", double elm_" ++ v2
 
+                            -- Handle 3-tuple pattern
+                            Src.PTuple (Src.At _ (Src.PVar v1)) (Src.At _ (Src.PVar v2)) [ Src.At _ (Src.PVar v3) ] ->
+                                "double elm_" ++ v1 ++ ", double elm_" ++ v2 ++ ", double elm_" ++ v3
+
+                            -- Handle record pattern { x, y, ... }
+                            -- Generate a struct parameter - the field extractions happen in preamble
+                            Src.PRecord fields ->
+                                let
+                                    fieldDefs =
+                                        fields
+                                            |> List.map
+                                                (\(Src.At _ fieldName) ->
+                                                    let
+                                                        isStringField =
+                                                            String.contains ("elm_str_append(elm_" ++ fieldName ++ ",") bodyExpr
+                                                                || String.contains ("elm_str_append(elm_" ++ fieldName ++ ")") bodyExpr
+
+                                                        fieldType =
+                                                            if isStringField then
+                                                                "const char *"
+                                                            else
+                                                                "double"
+                                                    in
+                                                    fieldType ++ " " ++ fieldName
+                                                )
+                                            |> String.join "; "
+                                in
+                                "struct { " ++ fieldDefs ++ "; } __rec"
+
+                            -- Handle unit pattern ()
+                            Src.PUnit ->
+                                ""
+
+                            -- Handle wildcard pattern _
+                            Src.PAnything ->
+                                "double __unused"
+
                             _ ->
                                 "double /* unsupported pattern */"
                     )
                 |> String.join ", "
+
+        -- Generate preamble bindings for record patterns (extract fields from __rec)
+        recordPreamble =
+            args
+                |> List.filterMap
+                    (\(Src.At _ pat) ->
+                        case pat of
+                            Src.PRecord fields ->
+                                Just (
+                                    fields
+                                        |> List.map
+                                            (\(Src.At _ fieldName) ->
+                                                let
+                                                    isStringField =
+                                                        String.contains ("elm_str_append(elm_" ++ fieldName ++ ",") bodyExpr
+                                                            || String.contains ("elm_str_append(elm_" ++ fieldName ++ ")") bodyExpr
+
+                                                    fieldType =
+                                                        if isStringField then
+                                                            "const char *"
+                                                        else
+                                                            "double"
+                                                in
+                                                fieldType ++ " elm_" ++ fieldName ++ " = __rec." ++ fieldName ++ ";"
+                                            )
+                                        |> String.join " "
+                                )
+                            _ ->
+                                Nothing
+                    )
+                |> String.join " "
 
         -- Infer return type from body expression
         -- Check for string returns, including in case expressions (ternary with string literals)
@@ -5111,6 +5230,9 @@ generateUserFunction name args body =
         in
         "typedef " ++ recordType ++ " " ++ typedefName ++ ";\n" ++
         "static " ++ typedefName ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return (" ++ typedefName ++ "){" ++ initializer ++ "};\n}"
+    else if not (String.isEmpty recordPreamble) then
+        -- Has record pattern - wrap body with preamble bindings
+        "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    " ++ recordPreamble ++ "\n    return " ++ bodyExpr ++ ";\n}"
     else
         "static " ++ returnType ++ " elm_" ++ name ++ "(" ++ params ++ ") {\n    return " ++ bodyExpr ++ ";\n}"
 
@@ -6393,6 +6515,35 @@ generateStandaloneCase scrutinee branches =
                                 ++ generateBranches rest
                                 ++ ")"
 
+                        -- Non-empty list pattern [x], [x, y], etc.
+                        Src.PList pats ->
+                            let
+                                patLen =
+                                    List.length pats
+
+                                -- Generate bindings for each element
+                                bindings =
+                                    pats
+                                        |> List.indexedMap
+                                            (\i (Src.At _ elemPat) ->
+                                                case elemPat of
+                                                    Src.PVar vName ->
+                                                        "double elm_" ++ vName ++ " = elm_case_scrutinee.data[" ++ String.fromInt i ++ "].d;"
+
+                                                    Src.PAnything ->
+                                                        ""
+
+                                                    _ ->
+                                                        "/* unsupported list element pattern */"
+                                            )
+                                        |> List.filter (not << String.isEmpty)
+                                        |> String.join " "
+
+                                condition =
+                                    "elm_case_scrutinee.length == " ++ String.fromInt patLen
+                            in
+                            "(" ++ condition ++ " ? ({ " ++ bindings ++ " " ++ generateStandaloneExpr resultExpr ++ "; }) : " ++ generateBranches rest ++ ")"
+
                         -- Cons pattern (head :: tail)
                         -- NOTE: PCons stores (tail, head) due to how the parser builds cons chains
                         Src.PCons (Src.At _ tailPat) (Src.At _ headPat) ->
@@ -6649,6 +6800,57 @@ generateStandaloneCase scrutinee branches =
                                 ++ "; }) : "
                                 ++ generateBranches rest
                                 ++ ")"
+
+                        -- As pattern: (pattern as name)
+                        Src.PAlias (Src.At _ innerPat) (Src.At _ aliasName) ->
+                            let
+                                -- Determine type based on case context
+                                aliasType =
+                                    if isListCase then
+                                        "elm_list_t"
+                                    else if isCustomTypeCase then
+                                        "elm_union_t"
+                                    else
+                                        "double"
+
+                                aliasBinding =
+                                    aliasType ++ " elm_" ++ aliasName ++ " = elm_case_scrutinee;"
+
+                                -- Generate inner pattern handling
+                                innerResult =
+                                    case innerPat of
+                                        Src.PVar vName ->
+                                            -- Inner variable binding
+                                            aliasType ++ " elm_" ++ vName ++ " = elm_case_scrutinee; " ++ generateStandaloneExpr resultExpr
+
+                                        Src.PCons (Src.At _ tailPat) (Src.At _ headPat) ->
+                                            -- List cons pattern: (first :: _) as whole
+                                            let
+                                                headBinding =
+                                                    case headPat of
+                                                        Src.PVar hName ->
+                                                            "double elm_" ++ hName ++ " = elm_case_scrutinee.data[0].d; "
+                                                        _ ->
+                                                            ""
+
+                                                tailBinding =
+                                                    case tailPat of
+                                                        Src.PVar tName ->
+                                                            "elm_list_t elm_" ++ tName ++ " = { .length = elm_case_scrutinee.length - 1 }; for (int __i = 1; __i < elm_case_scrutinee.length; __i++) elm_" ++ tName ++ ".data[__i - 1] = elm_case_scrutinee.data[__i]; "
+                                                        Src.PAnything ->
+                                                            ""
+                                                        _ ->
+                                                            ""
+                                            in
+                                            headBinding ++ tailBinding ++ generateStandaloneExpr resultExpr
+
+                                        Src.PAnything ->
+                                            generateStandaloneExpr resultExpr
+
+                                        _ ->
+                                            "/* unsupported inner pattern in as */ " ++ generateStandaloneExpr resultExpr
+                            in
+                            "(elm_case_scrutinee.length > 0 ? ({ " ++ aliasBinding ++ " " ++ innerResult ++ "; }) : " ++ generateBranches rest ++ ")"
 
                         _ ->
                             "/* unsupported pattern */ " ++ generateBranches rest
