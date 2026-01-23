@@ -6397,9 +6397,10 @@ generateUserFunction name args body =
                 || String.contains "elm_list_t __" bodyExpr
 
         -- Check for record returns - generates ((struct { ... }){...})
+        -- Must START with the record pattern - not just contain it (e.g., inside a case expression)
         -- Must contain struct literal pattern }){ not struct cast pattern } *)
         isRecordReturn =
-            String.contains "((struct {" bodyExpr
+            String.startsWith "((struct {" bodyExpr
                 && String.contains "}){" bodyExpr
                 && not (String.contains "} *)" bodyExpr)
 
@@ -7216,9 +7217,10 @@ generateLiftedFunction prefix funcName args body capturedVars =
         -- Detect return type based on the final expression in the body
         -- Be careful to check what's actually being returned, not just what's used in the body
         -- Check for record returns - generates ((struct { ... }){...})
+        -- Must START with the record pattern - not just contain it (e.g., inside a case expression)
         -- Must contain struct literal pattern }){ not struct cast pattern } *)
         isRecordReturn =
-            String.contains "((struct {" bodyExpr
+            String.startsWith "((struct {" bodyExpr
                 && String.contains "}){" bodyExpr
                 && not (String.contains "} *)" bodyExpr)
 
@@ -8835,8 +8837,99 @@ generateStandaloneCase scrutinee branches =
 
                         _ ->
                             "/* unsupported pattern */ " ++ generateBranches rest
+
+        -- Check for large string-pattern case (optimization to avoid stack overflow)
+        isAllStringOrWildcard =
+            branches
+                |> List.all
+                    (\( Src.At _ pat, _, _ ) ->
+                        case pat of
+                            Src.PStr _ -> True
+                            Src.PAnything -> True
+                            Src.PVar _ -> True
+                            _ -> False
+                    )
+
+        isLargeCase =
+            List.length branches > 50
+
+        -- Generate iterative if-else chain for large string cases
+        generateLargeStringCase : String -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+        generateLargeStringCase scrut bs =
+            let
+                -- Split into string patterns and the final wildcard/var
+                stringBranches =
+                    bs |> List.filter (\( Src.At _ p, _, _ ) ->
+                        case p of
+                            Src.PStr _ -> True
+                            _ -> False
+                    )
+
+                wildcardBranch =
+                    bs |> List.filter (\( Src.At _ p, _, _ ) ->
+                        case p of
+                            Src.PAnything -> True
+                            Src.PVar _ -> True
+                            _ -> False
+                    ) |> List.head
+
+                -- Generate if-else chain iteratively (no recursion)
+                ifElseChain =
+                    stringBranches
+                        |> List.map
+                            (\( Src.At _ pat, maybeGuard, resultExpr ) ->
+                                case pat of
+                                    Src.PStr s ->
+                                        let
+                                            cond = "strcmp(__str_scrutinee, \"" ++ escapeC s ++ "\") == 0"
+                                            body = generateStandaloneExpr resultExpr
+                                            guardedBody =
+                                                case maybeGuard of
+                                                    Nothing -> body
+                                                    Just g -> "(" ++ generateStandaloneExpr g ++ " ? " ++ body ++ " : __default_result)"
+                                        in
+                                        "if (" ++ cond ++ ") __result = " ++ guardedBody ++ ";"
+
+                                    _ ->
+                                        ""
+                            )
+                        |> List.filter (not << String.isEmpty)
+                        |> String.join "\n        else "
+
+                defaultResult =
+                    case wildcardBranch of
+                        Just ( Src.At _ (Src.PVar vn), maybeGuard, resultExpr ) ->
+                            let
+                                body = generateStandaloneExpr resultExpr
+                            in
+                            case maybeGuard of
+                                Nothing -> body
+                                Just g -> "(" ++ generateStandaloneExpr g ++ " ? " ++ body ++ " : " ++ fallbackValue ++ ")"
+
+                        Just ( _, maybeGuard, resultExpr ) ->
+                            let
+                                body = generateStandaloneExpr resultExpr
+                            in
+                            case maybeGuard of
+                                Nothing -> body
+                                Just g -> "(" ++ generateStandaloneExpr g ++ " ? " ++ body ++ " : " ++ fallbackValue ++ ")"
+
+                        Nothing ->
+                            fallbackValue
+            in
+            "({\n        const char *__str_scrutinee = " ++ scrut ++ ";\n        "
+                ++ (if returnsUnion then "elm_union_t" else "typeof(" ++ defaultResult ++ ")")
+                ++ " __default_result = " ++ defaultResult ++ ";\n        "
+                ++ (if returnsUnion then "elm_union_t" else "typeof(__default_result)")
+                ++ " __result = __default_result;\n        "
+                ++ ifElseChain
+                ++ "\n        __result;\n    })"
     in
-    if hasVarBinding || hasCtorWithData || isListCase || isTupleCase then
+    if isAllStringOrWildcard && isLargeCase then
+        -- Use iterative if-else chain to avoid stack overflow
+        generateLargeStringCase scrutineeStr branches
+
+    else if hasVarBinding || hasCtorWithData || isListCase || isTupleCase then
         -- Use compound statement to bind scrutinee to a variable
         let
             scrutineeType =
