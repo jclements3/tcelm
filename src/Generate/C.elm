@@ -9,28 +9,10 @@ For RTEMS targets, generates task definitions and shell registration.
 -}
 
 import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
+import Codegen.Lambda exposing (LambdaState, LiftedLambda)
 import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix)
 
 
-{-| Lifted lambda for TCC compatibility
-    Instead of GCC nested functions, lambdas are lifted to module level.
--}
-type alias LiftedLambda =
-    { id : Int
-    , modulePrefix : String
-    , captures : List String -- Variables captured from enclosing scope
-    , args : List Pattern -- Lambda parameters
-    , body : Expr
-    , outerLocals : List String -- All locals visible in enclosing scope
-    }
-
-
-{-| State for lambda collection - tracks current ID and collected lambdas
--}
-type alias LambdaState =
-    { nextId : Int
-    , lambdas : List LiftedLambda
-    }
 
 
 {-| Generate C code for an entire module
