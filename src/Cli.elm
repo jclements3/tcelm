@@ -3336,6 +3336,11 @@ generateStandaloneExprWithCtx ctx (Src.At _ expr) =
             -- but if it does, generate a placeholder
             "/* accessor ." ++ fieldName ++ " */"
 
+        Src.Op opName ->
+            -- Operator used as a value - generate a lambda-like placeholder
+            -- e.g., (+) becomes a function that adds two numbers
+            "/* op " ++ opName ++ " */"
+
         Src.Update (Src.At _ recordName) updates ->
             -- Record update: { record | field = value, ... }
             -- In C, we need to copy the original and update specific fields
@@ -5232,6 +5237,56 @@ generateStandaloneCall fn args =
                 _ ->
                     "/* List.partition wrong arity */ 0"
 
+        Src.At _ (Src.VarQual _ "List" "sortBy") ->
+            -- List.sortBy f list = sort list by key function f
+            -- Using insertion sort for simplicity (stable, O(n^2) but simple)
+            case args of
+                [ fnExpr, listExpr ] ->
+                    let
+                        listStr = generateStandaloneExpr listExpr
+
+                        fnAppStr elemVar =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = " ++ elemVar ++ "; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                                    let
+                                        elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                        bindOne idx pat =
+                                            case pat of
+                                                Src.PVar vn ->
+                                                    "double elm_" ++ vn ++ " = __sort_telem._" ++ String.fromInt idx ++ ".d;"
+                                                Src.PAnything -> ""
+                                                _ -> ""
+                                        bindings = [ bindOne 0 first, bindOne 1 second ]
+                                            ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                            |> List.filter (\s -> s /= "")
+                                            |> String.join " "
+                                    in
+                                    "({ " ++ elemType ++ " __sort_telem = *(" ++ elemType ++ "*)&(" ++ elemVar ++ "); " ++ bindings ++ " " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Constructor pattern: \(Src.At _ n) -> n
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Qualified constructor pattern
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody elemVar
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(" ++ elemVar ++ ")"
+                    in
+                    -- Insertion sort implementation
+                    "({ elm_list_t __lst = " ++ listStr ++ "; elm_list_t __sorted; __sorted.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __sorted.data[__i] = __lst.data[__i]; for (int __i = 1; __i < __sorted.length; __i++) { elm_data_t __key = __sorted.data[__i]; typeof(" ++ fnAppStr "__sorted.data[__i].d" ++ ") __key_val = " ++ fnAppStr "__key.d" ++ "; int __j = __i - 1; while (__j >= 0 && strcmp(" ++ fnAppStr "__sorted.data[__j].d" ++ ", __key_val) > 0) { __sorted.data[__j + 1] = __sorted.data[__j]; __j--; } __sorted.data[__j + 1] = __key; } __sorted; })"
+
+                _ ->
+                    "/* List.sortBy wrong arity */ 0"
+
         Src.At _ (Src.VarQual _ "List" "foldl") ->
             -- List.foldl f init list = fold from left
             case args of
@@ -5688,6 +5743,34 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                                         Nothing ->
                                             "({ double elm_" ++ varName ++ " = __maybe_val.data.num; " ++ generateStandaloneExpr body ++ "; })"
 
+                                -- Constructor pattern: \(Src.At _ n) -> n
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
+                                    "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data.num; " ++ generateStandaloneExpr body ++ "; })"
+
+                                -- Qualified constructor pattern: \(Src.At _ n) -> n
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] body) ->
+                                    "({ elm_union_t __inner = __maybe_val.data; double elm_" ++ innerName ++ " = __inner.data.num; " ++ generateStandaloneExpr body ++ "; })"
+
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns body) ->
+                                    generateInlineLambdaBody patterns body "__maybe_val.data.num"
+
+                                -- Partial operator application: ((+) 1) - applies operator with one arg to maybe value
+                                Src.At _ (Src.Call (Src.At _ (Src.Op opName)) [ Src.At _ (Src.Int n) ]) ->
+                                    let
+                                        cOp = case opName of
+                                            "+" -> "+"
+                                            "-" -> "+"  -- ((-) 1) x means 1 - x, but we want x - 1
+                                            "*" -> "*"
+                                            "/" -> "/"
+                                            _ -> opName
+                                    in
+                                    if opName == "-" then
+                                        -- Special case: ((-) n) x = n - x
+                                        "((" ++ String.fromInt n ++ ") - (__maybe_val.data.num))"
+                                    else
+                                        "((__maybe_val.data.num) " ++ cOp ++ " (" ++ String.fromInt n ++ "))"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__maybe_val.data.num)"
 
@@ -5721,6 +5804,10 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                                 Src.At _ (Src.Accessor fieldName) ->
                                     "(__lst.data[__i]." ++ fieldName ++ ")"
 
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
                     in
@@ -5738,6 +5825,10 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
                             case fnExpr of
                                 Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
                                     "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda with any pattern - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
 
                                 _ ->
                                     generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
@@ -5799,6 +5890,186 @@ generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
 
                 _ ->
                     "/* Maybe.andThen partial wrong arity */ 0"
+
+        -- List.indexedMap with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "indexedMap") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PVar pname2) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ pname2 ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with index and Located pattern: \i (Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with index and qualified Located pattern
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname1), Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname1 ++ " = __i; double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBodyIndexed patterns lambdaBody "__i" "__lst.data[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__i, __lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __result.data[__i] = " ++ fnAppStr ++ "; __result; })"
+
+                _ ->
+                    "/* List.indexedMap partial wrong arity */ 0"
+
+        -- List.filterMap with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "filterMap") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with Located pattern: \(Src.At _ x) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Lambda with qualified Located pattern
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ double elm_" ++ innerName ++ " = ((elm_union_t)__lst.data[__i]).data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
+                                -- identity function - just return the element
+                                Src.At _ (Src.Var _ "identity") ->
+                                    "__lst.data[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __lst.length; __i++) { elm_union_t __maybe = " ++ fnAppStr ++ "; if (__maybe.tag == TAG_Just) __result.data[__result.length++] = __maybe.data; } __result; })"
+
+                _ ->
+                    "/* List.filterMap partial wrong arity */ 0"
+
+        -- List.concatMap with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "concatMap") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __src.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__src.data[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__src.data[__i])"
+                    in
+                    "({ elm_list_t __src = " ++ pipeArg ++ "; elm_list_t __result; __result.length = 0; for (int __i = 0; __i < __src.length; __i++) { elm_list_t __sub = " ++ fnAppStr ++ "; for (int __j = 0; __j < __sub.length; __j++) __result.data[__result.length++] = __sub.data[__j]; } __result; })"
+
+                _ ->
+                    "/* List.concatMap partial wrong arity */ 0"
+
+        -- List.sortBy with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "sortBy") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr elemVar =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = " ++ elemVar ++ "; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                                    let
+                                        elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                        bindOne idx pat =
+                                            case pat of
+                                                Src.PVar vn ->
+                                                    "double elm_" ++ vn ++ " = __sort_telem._" ++ String.fromInt idx ++ ".d;"
+                                                Src.PAnything -> ""
+                                                _ -> ""
+                                        bindings = [ bindOne 0 first, bindOne 1 second ]
+                                            ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                            |> List.filter (\s -> s /= "")
+                                            |> String.join " "
+                                    in
+                                    "({ " ++ elemType ++ " __sort_telem = *(" ++ elemType ++ "*)&(" ++ elemVar ++ "); " ++ bindings ++ " " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Constructor pattern: \(Src.At _ n) -> n
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Qualified constructor pattern
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __sort_inner = (elm_union_t)" ++ elemVar ++ "; double elm_" ++ innerName ++ " = __sort_inner.data.num; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody elemVar
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(" ++ elemVar ++ ")"
+                    in
+                    -- Insertion sort implementation for pipe context
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; elm_list_t __sorted; __sorted.length = __lst.length; for (int __i = 0; __i < __lst.length; __i++) __sorted.data[__i] = __lst.data[__i]; for (int __i = 1; __i < __sorted.length; __i++) { elm_data_t __key = __sorted.data[__i]; typeof(" ++ fnAppStr "__sorted.data[__i].d" ++ ") __key_val = " ++ fnAppStr "__key.d" ++ "; int __j = __i - 1; while (__j >= 0 && strcmp(" ++ fnAppStr "__sorted.data[__j].d" ++ ", __key_val) > 0) { __sorted.data[__j + 1] = __sorted.data[__j]; __j--; } __sorted.data[__j + 1] = __key; } __sorted; })"
+
+                _ ->
+                    "/* List.sortBy partial wrong arity */ 0"
+
+        -- List.partition with function and pipe arg (list)
+        Src.At _ (Src.VarQual _ "List" "partition") ->
+            case partialArgs of
+                [ fnExpr ] ->
+                    let
+                        fnAppStr =
+                            case fnExpr of
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
+                                    "({ double elm_" ++ pname ++ " = __lst.data[__i]; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Constructor pattern: \(Src.At _ v) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __elem = (elm_union_t)__lst.data[__i]; typeof(__elem.data) elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Qualified constructor pattern
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                                    "({ elm_union_t __elem = (elm_union_t)__lst.data[__i]; typeof(__elem.data) elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Tuple pattern: \(a, b, c) -> ...
+                                Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                                    let
+                                        elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                        bindOne idx pat =
+                                            case pat of
+                                                Src.PVar vn ->
+                                                    "typeof(__part_telem._" ++ String.fromInt idx ++ ".d) elm_" ++ vn ++ " = __part_telem._" ++ String.fromInt idx ++ ".d;"
+                                                Src.PAnything -> ""
+                                                _ -> ""
+                                        bindings = [ bindOne 0 first, bindOne 1 second ]
+                                            ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                            |> List.filter (\s -> s /= "")
+                                            |> String.join " "
+                                    in
+                                    "({ " ++ elemType ++ " __part_telem = *(" ++ elemType ++ "*)&(__lst.data[__i]); " ++ bindings ++ " " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                                -- Generic lambda - use helper
+                                Src.At _ (Src.Lambda patterns lambdaBody) ->
+                                    generateInlineLambdaBody patterns lambdaBody "__lst.data[__i]"
+
+                                _ ->
+                                    generateStandaloneExpr fnExpr ++ "(__lst.data[__i])"
+                    in
+                    "({ elm_list_t __lst = " ++ pipeArg ++ "; struct { elm_list_t _0; elm_list_t _1; } __result; __result._0.length = 0; __result._1.length = 0; for (int __i = 0; __i < __lst.length; __i++) { if (" ++ fnAppStr ++ ") __result._0.data[__result._0.length++] = __lst.data[__i]; else __result._1.data[__result._1.length++] = __lst.data[__i]; } __result; })"
+
+                _ ->
+                    "/* List.partition partial wrong arity */ 0"
 
         -- Default: just generate a simple function call with all args
         _ ->
@@ -7332,6 +7603,35 @@ generateDestructuring pattern expr =
                     case fnExpr of
                         Src.At _ (Src.Lambda [ Src.At _ (Src.PVar pname) ] lambdaBody) ->
                             "({ double elm_" ++ pname ++ " = __part_lst.data[__i].d; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                        -- Constructor pattern: \(Src.At _ v) -> ...
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = (elm_union_t)__part_lst.data[__i].d; typeof(__elem.data) elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                        -- Qualified constructor pattern: \(Src.At _ v) -> ...
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ] lambdaBody) ->
+                            "({ elm_union_t __elem = (elm_union_t)__part_lst.data[__i].d; typeof(__elem.data) elm_" ++ innerName ++ " = __elem.data; " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                        -- Tuple pattern: \(a, b, c) -> ...
+                        Src.At _ (Src.Lambda [ Src.At _ (Src.PTuple (Src.At _ first) (Src.At _ second) rest) ] lambdaBody) ->
+                            let
+                                elemType = if List.isEmpty rest then "elm_tuple2_t" else "elm_tuple3_t"
+                                bindOne idx pat =
+                                    case pat of
+                                        Src.PVar vn ->
+                                            "typeof(__part_telem._" ++ String.fromInt idx ++ ".d) elm_" ++ vn ++ " = __part_telem._" ++ String.fromInt idx ++ ".d;"
+                                        Src.PAnything -> ""
+                                        _ -> ""
+                                bindings = [ bindOne 0 first, bindOne 1 second ]
+                                    ++ (rest |> List.indexedMap (\i (Src.At _ p) -> bindOne (i + 2) p))
+                                    |> List.filter (\s -> s /= "")
+                                    |> String.join " "
+                            in
+                            "({ " ++ elemType ++ " __part_telem = *(" ++ elemType ++ "*)&(__part_lst.data[__i].d); " ++ bindings ++ " " ++ generateStandaloneExpr lambdaBody ++ "; })"
+
+                        -- Generic lambda - use helper
+                        Src.At _ (Src.Lambda patterns lambdaBody) ->
+                            generateInlineLambdaBody patterns lambdaBody "__part_lst.data[__i].d"
 
                         _ ->
                             generateStandaloneExpr fnExpr ++ "(__part_lst.data[__i].d)"
