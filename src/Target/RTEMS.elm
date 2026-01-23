@@ -1,7 +1,8 @@
 module Target.RTEMS exposing
     ( generateCode
     , runtimePreamble
-    , -- Modular preambles
+    , standalonePreamble
+    , -- Modular RTEMS preambles
       coreTypes
     , taskModule
     , clockModule
@@ -13,8 +14,12 @@ module Target.RTEMS exposing
     , interruptModule
     , -- Elm runtime helpers
       elmStringHelpers
+    , elmExtendedStringHelpers
     , elmUnionTypes
+    , elmTupleTypes
     , elmListHelpers
+    , elmMathHelpers
+    , elmMemoryOps
     )
 
 {-| RTEMS target code generation.
@@ -413,4 +418,180 @@ elmListHelpers =
         , "    }"
         , "    return elm_Nothing();"
         , "}"
+        ]
+
+
+{-| Math helper functions for embedded use.
+-}
+elmMathHelpers : String
+elmMathHelpers =
+    String.join "\n"
+        [ ""
+        , "/* Math Helpers */"
+        , "static double elm_pow(int base, int exp) {"
+        , "    int result = 1;"
+        , "    while (exp > 0) {"
+        , "        if (exp & 1) result *= base;"
+        , "        exp >>= 1; base *= base;"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static double elm_isqrt(int x) {"
+        , "    if (x <= 0) return 0;"
+        , "    int guess = x;"
+        , "    while (1) {"
+        , "        int next = (guess + x / guess) / 2;"
+        , "        if (next >= guess) return guess;"
+        , "        guess = next;"
+        , "    }"
+        , "}"
+        , ""
+        , "static double elm_ilog2(int x) {"
+        , "    if (x <= 0) return 0;"
+        , "    int r = 0;"
+        , "    while (x > 1) { x >>= 1; r++; }"
+        , "    return r;"
+        , "}"
+        ]
+
+
+{-| Memory operations for embedded (no libc).
+-}
+elmMemoryOps : String
+elmMemoryOps =
+    String.join "\n"
+        [ ""
+        , "/* Memory Operations */"
+        , "static void *memset(void *s, int c, unsigned int n) {"
+        , "    unsigned char *p = s;"
+        , "    while (n--) *p++ = (unsigned char)c;"
+        , "    return s;"
+        , "}"
+        , ""
+        , "static void *memmove(void *dest, const void *src, unsigned int n) {"
+        , "    unsigned char *d = dest;"
+        , "    const unsigned char *s = src;"
+        , "    if (d < s) { while (n--) *d++ = *s++; }"
+        , "    else { d += n; s += n; while (n--) *--d = *--s; }"
+        , "    return dest;"
+        , "}"
+        ]
+
+
+{-| Extended string functions for RTEMS standalone mode.
+-}
+elmExtendedStringHelpers : String
+elmExtendedStringHelpers =
+    String.join "\n"
+        [ ""
+        , "/* Extended String Functions */"
+        , "static char __elm_reverse_buf[256];"
+        , "static const char *elm_str_reverse(const char *s) {"
+        , "    int len = 0; while (s[len]) len++;"
+        , "    for (int i = 0; i < len; i++) __elm_reverse_buf[i] = s[len - 1 - i];"
+        , "    __elm_reverse_buf[len] = 0;"
+        , "    return __elm_reverse_buf;"
+        , "}"
+        , ""
+        , "static char __elm_fromchar_buf[2];"
+        , "static const char *elm_str_from_char(char c) {"
+        , "    __elm_fromchar_buf[0] = c; __elm_fromchar_buf[1] = 0;"
+        , "    return __elm_fromchar_buf;"
+        , "}"
+        , ""
+        , "static char __elm_cons_buf[256];"
+        , "static const char *elm_str_cons(char c, const char *s) {"
+        , "    __elm_cons_buf[0] = c;"
+        , "    int i = 0; while (s[i] && i < 254) { __elm_cons_buf[i+1] = s[i]; i++; }"
+        , "    __elm_cons_buf[i+1] = 0;"
+        , "    return __elm_cons_buf;"
+        , "}"
+        , ""
+        , "static char __elm_left_buf[256];"
+        , "static const char *elm_str_left(int n, const char *s) {"
+        , "    int len = 0; while (s[len]) len++;"
+        , "    int take = n < len ? n : len;"
+        , "    for (int i = 0; i < take; i++) __elm_left_buf[i] = s[i];"
+        , "    __elm_left_buf[take] = 0;"
+        , "    return __elm_left_buf;"
+        , "}"
+        , ""
+        , "static char __elm_right_buf[256];"
+        , "static const char *elm_str_right(int n, const char *s) {"
+        , "    int len = 0; while (s[len]) len++;"
+        , "    int start = n < len ? len - n : 0;"
+        , "    int j = 0;"
+        , "    for (int i = start; i < len; i++) __elm_right_buf[j++] = s[i];"
+        , "    __elm_right_buf[j] = 0;"
+        , "    return __elm_right_buf;"
+        , "}"
+        , ""
+        , "static char __elm_repeat_buf[256];"
+        , "static const char *elm_str_repeat(int n, const char *s) {"
+        , "    int slen = 0; while (s[slen]) slen++;"
+        , "    int pos = 0;"
+        , "    for (int i = 0; i < n && pos + slen < 255; i++)"
+        , "        for (int j = 0; j < slen; j++) __elm_repeat_buf[pos++] = s[j];"
+        , "    __elm_repeat_buf[pos] = 0;"
+        , "    return __elm_repeat_buf;"
+        , "}"
+        , ""
+        , "static char __elm_slice_buf[256];"
+        , "static const char *elm_str_slice(int start, int end, const char *s) {"
+        , "    int len = 0; while (s[len]) len++;"
+        , "    if (start < 0) start = len + start; if (start < 0) start = 0;"
+        , "    if (end < 0) end = len + end; if (end < 0) end = 0;"
+        , "    if (start > len) start = len; if (end > len) end = len;"
+        , "    if (start >= end) { __elm_slice_buf[0] = 0; return __elm_slice_buf; }"
+        , "    int j = 0;"
+        , "    for (int i = start; i < end; i++) __elm_slice_buf[j++] = s[i];"
+        , "    __elm_slice_buf[j] = 0;"
+        , "    return __elm_slice_buf;"
+        , "}"
+        , ""
+        , "static char __elm_trim_buf[256];"
+        , "static const char *elm_str_trim(const char *s) {"
+        , "    while (*s == ' ' || *s == '\\t' || *s == '\\n' || *s == '\\r') s++;"
+        , "    int len = 0; while (s[len]) len++;"
+        , "    while (len > 0 && (s[len-1] == ' ' || s[len-1] == '\\t' || s[len-1] == '\\n' || s[len-1] == '\\r')) len--;"
+        , "    for (int i = 0; i < len; i++) __elm_trim_buf[i] = s[i];"
+        , "    __elm_trim_buf[len] = 0;"
+        , "    return __elm_trim_buf;"
+        , "}"
+        ]
+
+
+{-| Tuple types for RTEMS.
+-}
+elmTupleTypes : String
+elmTupleTypes =
+    String.join "\n"
+        [ ""
+        , "/* Tuple Types */"
+        , "typedef struct { int _0; int _1; } elm_tuple2_t;"
+        , "typedef struct { int _0; int _1; int _2; } elm_tuple3_t;"
+        ]
+
+
+{-| Complete standalone preamble for RTEMS applications.
+Includes all runtime helpers needed for standalone execution.
+-}
+standalonePreamble : String
+standalonePreamble =
+    String.join "\n"
+        [ "#include <stdlib.h>"
+        , ""
+        , "/* RTEMS entry point */"
+        , "typedef unsigned int rtems_task_argument;"
+        , "typedef unsigned int rtems_id;"
+        , "#define RTEMS_SELF 0"
+        , "extern void rtems_task_delete(rtems_id id);"
+        , elmStringHelpers
+        , elmMathHelpers
+        , elmMemoryOps
+        , elmExtendedStringHelpers
+        , elmUnionTypes
+        , elmTupleTypes
+        , elmListHelpers
         ]
