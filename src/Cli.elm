@@ -34,7 +34,7 @@ using callback patterns to delegate to the Codegen modules.
 import AST.Source as Src
 import Codegen.Builtins as Builtins exposing (isRecordValue, isStringValue, isUnionValue, makeUnionCtor, wrapUnionData)
 import Codegen.Expr as Expr
-import Codegen.Lambda as Lambda exposing (LiftedFunc)
+import Codegen.Lambda as Lambda exposing (LiftedFunc, collectVarRefs)
 import Codegen.Pattern as Pattern
 import Codegen.Shared as Shared exposing (ExprCtx, MainValue(..), collectAllFunctionNames, collectUserFunctionNames, escapeC, getModuleName, getModulePrefix, isSimpleLiteral, patternVars)
 import Codegen.Union as Union
@@ -3705,80 +3705,6 @@ generateTCOExpr funcName paramNames (Src.At _ expr) =
         -- Any other expression - not a tail call, just return it
         _ ->
             Just ("            return " ++ generateStandaloneExpr (Src.At { start = { row = 1, col = 1 }, end = { row = 1, col = 1 } } expr) ++ ";")
-
-
-{-| Collect all variable references from an expression
--}
-collectVarRefs : Src.Expr -> List String
-collectVarRefs (Src.At _ expr) =
-    case expr of
-        Src.Var _ name ->
-            [ name ]
-
-        Src.VarQual _ _ name ->
-            [ name ]
-
-        Src.Call fn fnArgs ->
-            collectVarRefs fn ++ List.concatMap collectVarRefs fnArgs
-
-        Src.Binops pairs final ->
-            List.concatMap (\( e, _ ) -> collectVarRefs e) pairs ++ collectVarRefs final
-
-        Src.If branches elseExpr ->
-            List.concatMap (\( cond, thenE ) -> collectVarRefs cond ++ collectVarRefs thenE) branches
-                ++ collectVarRefs elseExpr
-
-        Src.Let defs letBody ->
-            let
-                -- Collect refs from def bodies (but not the names being defined)
-                defRefs =
-                    defs
-                        |> List.concatMap
-                            (\(Src.At _ def) ->
-                                case def of
-                                    Src.Define _ _ defBody _ ->
-                                        collectVarRefs defBody
-
-                                    Src.Destruct _ e ->
-                                        collectVarRefs e
-                            )
-            in
-            defRefs ++ collectVarRefs letBody
-
-        Src.Case scrutinee branches ->
-            collectVarRefs scrutinee
-                ++ List.concatMap
-                    (\( _, maybeGuard, branchExpr ) ->
-                        (case maybeGuard of
-                            Just guardExpr -> collectVarRefs guardExpr
-                            Nothing -> []
-                        ) ++ collectVarRefs branchExpr
-                    )
-                    branches
-
-        Src.Lambda _ lambdaBody ->
-            collectVarRefs lambdaBody
-
-        Src.Record fields ->
-            fields |> List.concatMap (\( _, fieldExpr ) -> collectVarRefs fieldExpr)
-
-        Src.Update (Src.At _ baseName) fields ->
-            baseName :: List.concatMap (\( _, fieldExpr ) -> collectVarRefs fieldExpr) fields
-
-        Src.Access inner _ ->
-            collectVarRefs inner
-
-        Src.Negate inner ->
-            collectVarRefs inner
-
-        Src.Tuple first second rest ->
-            collectVarRefs first ++ collectVarRefs second ++ List.concatMap collectVarRefs rest
-
-        Src.List items ->
-            List.concatMap collectVarRefs items
-
-        _ ->
-            []
 
 
 {-| Dead Code Elimination: compute the set of reachable function names from main.
