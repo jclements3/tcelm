@@ -21,6 +21,74 @@ import Format.Box as Box exposing (Box(..), Line, line, punc, row, space)
 import Format.ElmStructure as ES
 
 
+
+-- DOC COMMENTS
+
+
+{-| Format a documentation comment.
+
+The format is:
+- `{-|` on first line with start of text
+- subsequent lines indented to align (4 spaces)
+- `-}` on same line as last text line
+
+Example:
+    {-| This is the documentation
+        text that is indented
+        and the closing is on same line as last text -}
+
+-}
+formatDocComment : Src.DocComment -> Box
+formatDocComment comment =
+    let
+        commentLines =
+            String.lines comment
+
+        indentStr =
+            "    "
+    in
+    case commentLines of
+        [] ->
+            line (row [ punc "{-|", space, punc "-}" ])
+
+        [ single ] ->
+            line (row [ punc "{-|", space, punc single, space, punc "-}" ])
+
+        first :: rest ->
+            let
+                -- Last line needs the closing -}
+                ( middle, lastLine ) =
+                    case List.reverse rest of
+                        [] ->
+                            ( [], first )
+
+                        lst :: middleRev ->
+                            ( List.reverse middleRev, lst )
+
+                firstBox =
+                    line (row [ punc "{-|", space, punc first ])
+
+                middleBoxes =
+                    List.map (\l -> line (punc (indentStr ++ l))) middle
+
+                lastBox =
+                    line (punc (indentStr ++ lastLine ++ " -}"))
+            in
+            Box.stack1 (firstBox :: middleBoxes ++ [ lastBox ])
+
+
+{-| Add doc comment before a declaration box if present.
+-}
+withDocComment : Maybe Src.DocComment -> Box -> Box
+withDocComment maybeDoc declBox =
+    case maybeDoc of
+        Nothing ->
+            declBox
+
+        Just doc ->
+            Box.stack1 [ formatDocComment doc, declBox ]
+
+
 {-| Format a complete module to a string.
 -}
 format : Src.Module -> String
@@ -194,11 +262,14 @@ formatValue (At _ value) =
 
         body =
             formatExpr value.body
+
+        declBox =
+            Box.stack1
+                (annotation
+                    ++ [ ES.definition "=" False (line (Box.identifier name)) args body ]
+                )
     in
-    Box.stack1
-        (annotation
-            ++ [ ES.definition "=" False (line (Box.identifier name)) args body ]
-        )
+    withDocComment value.docs declBox
 
 
 formatTypeAnnotation : String -> Src.Type -> Box
@@ -240,11 +311,14 @@ formatUnion (At _ union) =
                 first :: rest ->
                     Box.prefix (row [ punc "=", space ]) first
                         :: List.map (Box.prefix (row [ punc "|", space ])) rest
+
+        declBox =
+            Box.stack1
+                (ES.spaceSepOrStack (line (punc "type")) [ nameWithArgs ]
+                    :: List.map Box.indent ctorLines
+                )
     in
-    Box.stack1
-        (ES.spaceSepOrStack (line (punc "type")) [ nameWithArgs ]
-            :: List.map Box.indent ctorLines
-        )
+    withDocComment union.docs declBox
 
 
 
@@ -262,12 +336,15 @@ formatAlias (At _ alias) =
 
         nameWithArgs =
             ES.application (line (Box.identifier name)) typeArgs
+
+        declBox =
+            ES.definition "="
+                False
+                (line (row [ punc "type", space, punc "alias" ]))
+                [ nameWithArgs ]
+                (formatType alias.type_)
     in
-    ES.definition "="
-        False
-        (line (row [ punc "type", space, punc "alias" ]))
-        [ nameWithArgs ]
-        (formatType alias.type_)
+    withDocComment alias.docs declBox
 
 
 
@@ -279,11 +356,14 @@ formatPort port_ =
     let
         (At _ name) =
             port_.name
+
+        declBox =
+            ES.equalsPair ":"
+                False
+                (line (row [ punc "port", space, Box.identifier name ]))
+                (formatType port_.type_)
     in
-    ES.equalsPair ":"
-        False
-        (line (row [ punc "port", space, Box.identifier name ]))
-        (formatType port_.type_)
+    withDocComment port_.docs declBox
 
 
 

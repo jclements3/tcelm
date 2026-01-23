@@ -81,7 +81,11 @@ typeAlias start =
                                                 (\( tipe, end ) ->
                                                     let
                                                         alias =
-                                                            Src.Alias name (List.reverse args) tipe
+                                                            { name = name
+                                                            , args = List.reverse args
+                                                            , type_ = tipe
+                                                            , docs = Nothing
+                                                            }
                                                     in
                                                     P.succeed
                                                         ( Alias (Src.at start end alias)
@@ -111,7 +115,11 @@ typeUnion start =
                                                 (\( variants, end ) ->
                                                     let
                                                         union =
-                                                            Src.Union name (List.reverse args) variants
+                                                            { name = name
+                                                            , args = List.reverse args
+                                                            , ctors = variants
+                                                            , docs = Nothing
+                                                            }
                                                     in
                                                     P.succeed
                                                         ( Union (Src.at start end union)
@@ -220,7 +228,10 @@ portDecl start =
                                                                         (\( tipe, end ) ->
                                                                             let
                                                                                 port_ =
-                                                                                    Src.Port name tipe
+                                                                                    { name = name
+                                                                                    , type_ = tipe
+                                                                                    , docs = Nothing
+                                                                                    }
                                                                             in
                                                                             P.succeed ( PortDecl port_, end )
                                                                         )
@@ -286,7 +297,12 @@ chompValueBody start name tipe =
                                         let
                                             -- Note: revArgs is already in correct order from chompArgs
                                             value =
-                                                Src.Value name revArgs body tipe
+                                                { name = name
+                                                , args = revArgs
+                                                , body = body
+                                                , type_ = tipe
+                                                , docs = Nothing
+                                                }
                                         in
                                         P.succeed
                                             ( Value (Src.at start end value)

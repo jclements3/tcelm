@@ -4,6 +4,7 @@ module AST.Source exposing
     , Pattern, Pattern_(..)
     , Type, Type_(..)
     , Def(..), Value, Union, Alias, Infix, Port, Associativity(..)
+    , DocComment
     , Located(..), Region, Position
     , at, merge, toValue, toRegion
     )
@@ -11,6 +12,15 @@ module AST.Source exposing
 {-| Source AST - The abstract syntax tree produced by the parser.
 This mirrors the Haskell compiler's AST/Source.hs structure.
 -}
+
+
+-- DOCUMENTATION COMMENTS
+
+
+{-| A documentation comment `{-| ... -}` attached to a declaration.
+-}
+type alias DocComment =
+    String
 
 
 -- LOCATION
@@ -152,6 +162,7 @@ type Type_
 type alias Module =
     { name : Maybe (Located String)
     , exports : Located Exposing
+    , docs : Maybe DocComment
     , imports : List Import
     , values : List (Located Value)
     , unions : List (Located Union)
@@ -173,6 +184,7 @@ type alias Value =
     , args : List Pattern
     , body : Expr
     , type_ : Maybe Type
+    , docs : Maybe DocComment
     }
 
 
@@ -180,6 +192,7 @@ type alias Union =
     { name : Located String
     , args : List (Located String)
     , ctors : List ( Located String, List Type )
+    , docs : Maybe DocComment
     }
 
 
@@ -187,6 +200,7 @@ type alias Alias =
     { name : Located String
     , args : List (Located String)
     , type_ : Type
+    , docs : Maybe DocComment
     }
 
 
@@ -207,6 +221,7 @@ type Associativity
 type alias Port =
     { name : Located String
     , type_ : Type
+    , docs : Maybe DocComment
     }
 
 

@@ -47,6 +47,7 @@ module_ =
                                                 P.succeed
                                                     { name = Just name
                                                     , exports = exports
+                                                    , docs = Nothing
                                                     , imports = imports
                                                     , values = categorized.values
                                                     , unions = categorized.unions
@@ -59,6 +60,7 @@ module_ =
                                                 P.succeed
                                                     { name = Nothing
                                                     , exports = Src.At (Src.Region { row = 1, col = 1 } { row = 1, col = 1 }) Src.Open
+                                                    , docs = Nothing
                                                     , imports = imports
                                                     , values = categorized.values
                                                     , unions = categorized.unions
