@@ -144,9 +144,9 @@ generateRtemsCode ast =
                 |> String.join "\n\n"
 
         -- Check if a union has any constructors with data
+        -- Using recursive pattern instead of List.any for self-hosting compatibility
         unionHasData union =
-            union.ctors
-                |> List.any (\( _, args ) -> not (List.isEmpty args))
+            ctorListHasData union.ctors
 
         -- Generate custom type definitions (structs, tags, and constructors)
         customTypeCode =
@@ -1388,6 +1388,20 @@ type MainValue
 
 {-| Extract the main value from a module
 -}
+ctorListHasData : List ( Src.Located String, List Src.Type ) -> Bool
+ctorListHasData ctors =
+    case ctors of
+        [] ->
+            False
+
+        ( _, args ) :: rest ->
+            if List.isEmpty args then
+                ctorListHasData rest
+
+            else
+                True
+
+
 extractMain : Src.Module -> MainValue
 extractMain ast =
     ast.values
@@ -1533,6 +1547,48 @@ exprToMainValue locatedExpr =
             MainExpr inferredType cCode
 
 
+{-| Extract accessor field name from an expression, if it's an accessor.
+    Used by buildPipe to handle accessor patterns without complex nested matching.
+    Uses isAccessor helper to avoid nested pattern matching issues during self-hosting.
+-}
+extractAccessor : Src.Expr -> Maybe String
+extractAccessor locatedExpr =
+    let
+        (Src.At _ innerExpr) =
+            locatedExpr
+    in
+    extractAccessorInner innerExpr
+
+
+{-| Helper to extract accessor from inner expression.
+-}
+extractAccessorInner : Src.Expr_ -> Maybe String
+extractAccessorInner innerExpr =
+    case innerExpr of
+        Src.Accessor fieldName ->
+            Just fieldName
+
+        _ ->
+            Nothing
+
+
+{-| Generate comma-separated argument string from list of expressions.
+    This is used instead of List.map/String.join to avoid generating
+    elm_List_map calls during self-hosting.
+-}
+generateArgsString : List Src.Expr -> String
+generateArgsString exprs =
+    case exprs of
+        [] ->
+            ""
+
+        [ single ] ->
+            generateStandaloneExpr single
+
+        first :: rest ->
+            generateStandaloneExpr first ++ ", " ++ generateArgsString rest
+
+
 {-| Generate standalone C code for binary operations (no runtime needed)
     Outputs as flat expression relying on C operator precedence (matches Elm for arithmetic)
 -}
@@ -1600,58 +1656,23 @@ generateStandaloneBinops pairs finalExpr =
                 (List.drop 1 pairs |> List.map Tuple.first)
                     ++ [ finalExpr ]
 
-            -- Build nested calls, handling accessors and lambdas specially
+            -- Build nested calls, handling accessors specially
             buildPipe : String -> List Src.Expr -> String
             buildPipe arg exprs =
                 case exprs of
                     [] ->
                         arg
 
-                    (Src.At _ (Src.Accessor fieldName)) :: rest ->
-                        -- Accessor: arg.field
-                        buildPipe (arg ++ "." ++ fieldName) rest
+                    first :: rest ->
+                        -- Check for accessor pattern using helper
+                        case extractAccessor first of
+                            Just fieldName ->
+                                -- Accessor: arg.field
+                                buildPipe (arg ++ "." ++ fieldName) rest
 
-                    (Src.At pos (Src.Lambda patterns lambdaBody)) :: rest ->
-                        -- Lambda: inline the lambda with the piped argument
-                        let
-                            -- Generate the inlined lambda call directly with the argument string
-                            -- This avoids constructing AST nodes which would require constructor functions
-                            inlined =
-                                generateInlinedLambdaWithStringArgs patterns [ arg ] lambdaBody
-                        in
-                        buildPipe inlined rest
-
-                    (Src.At callPos (Src.Call fn callArgs)) :: rest ->
-                        -- Partial application: extend the call with the piped arg
-                        -- e.g., items |> String.join "\n" becomes String.join("\n", items)
-                        -- Generate the call directly as a string to avoid constructing AST nodes
-                        let
-                            varName =
-                                "__pipe_" ++ String.fromInt (List.length exprs)
-
-                            fnStr =
-                                generateStandaloneExpr fn
-
-                            existingArgsStr =
-                                callArgs
-                                    |> List.map generateStandaloneExpr
-                                    |> String.join ", "
-
-                            allArgsStr =
-                                if String.isEmpty existingArgsStr then
-                                    "elm_" ++ varName
-
-                                else
-                                    existingArgsStr ++ ", elm_" ++ varName
-
-                            result =
-                                "({ " ++ inferCTypeFromExpr arg ++ " elm_" ++ varName ++ " = " ++ arg ++ "; " ++ fnStr ++ "(" ++ allArgsStr ++ "); })"
-                        in
-                        buildPipe result rest
-
-                    fnExpr :: rest ->
-                        -- Regular function call (simple variable or accessor)
-                        buildPipe (generateStandaloneExpr fnExpr ++ "(" ++ arg ++ ")") rest
+                            Nothing ->
+                                -- Regular function call
+                                buildPipe (generateStandaloneExpr first ++ "(" ++ arg ++ ")") rest
         in
         buildPipe firstArg functionExprs
 
@@ -1675,40 +1696,16 @@ generateStandaloneBinops pairs finalExpr =
                     [] ->
                         innerArg
 
-                    (Src.At _ (Src.Accessor fieldName)) :: rest ->
-                        -- Accessor: innerArg.field
-                        buildBackPipe (innerArg ++ "." ++ fieldName) rest
+                    first :: rest ->
+                        -- Check for accessor pattern using helper
+                        case extractAccessor first of
+                            Just fieldName ->
+                                -- Accessor: innerArg.field
+                                buildBackPipe (innerArg ++ "." ++ fieldName) rest
 
-                    (Src.At callPos (Src.Call fn callArgs)) :: rest ->
-                        -- Partial application: extend the call with the piped arg
-                        -- Generate the call directly as a string to avoid constructing AST nodes
-                        let
-                            varName =
-                                "__bpipe_" ++ String.fromInt (List.length exprs)
-
-                            fnStr =
-                                generateStandaloneExpr fn
-
-                            existingArgsStr =
-                                callArgs
-                                    |> List.map generateStandaloneExpr
-                                    |> String.join ", "
-
-                            allArgsStr =
-                                if String.isEmpty existingArgsStr then
-                                    "elm_" ++ varName
-
-                                else
-                                    existingArgsStr ++ ", elm_" ++ varName
-
-                            result =
-                                "({ " ++ inferCTypeFromExpr innerArg ++ " elm_" ++ varName ++ " = " ++ innerArg ++ "; " ++ fnStr ++ "(" ++ allArgsStr ++ "); })"
-                        in
-                        buildBackPipe result rest
-
-                    fnExpr :: rest ->
-                        -- Regular function call
-                        buildBackPipe (generateStandaloneExpr fnExpr ++ "(" ++ innerArg ++ ")") rest
+                            Nothing ->
+                                -- Regular function call
+                                buildBackPipe (generateStandaloneExpr first ++ "(" ++ innerArg ++ ")") rest
         in
         buildBackPipe arg functionExprs
 
@@ -4336,10 +4333,13 @@ generateUserFunction name args body =
                 |> String.join ", "
 
         -- Infer return type from body expression
+        -- Check for string returns, including in case expressions (ternary with string literals)
         isStringReturn =
             String.contains "elm_str_" bodyExpr
                 || String.contains "elm_from_" bodyExpr
                 || String.startsWith "\"" bodyExpr
+                -- For case expressions with string branches: ? "stringlit" : pattern
+                || String.contains "? \"" bodyExpr
 
         isUnionReturn =
             String.contains "((elm_union_t){TAG_" bodyExpr
