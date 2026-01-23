@@ -10,7 +10,7 @@ For RTEMS targets, generates task definitions and shell registration.
 
 import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
 import Codegen.Lambda exposing (LambdaState, LiftedLambda)
-import Codegen.Shared as Shared exposing (escapeC, extractCtorName, mangle, mangleLocal, mangleWithPrefix, patternVars, uniqueStrings)
+import Codegen.Shared as Shared exposing (escapeC, extractCtorName, getModuleName, getModulePrefix, mangle, mangleLocal, mangleWithPrefix, patternVars, uniqueStrings)
 
 
 
@@ -21,13 +21,11 @@ generateModule : Module -> String
 generateModule mod =
     let
         moduleName =
-            mod.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName mod
 
         -- Convert module name to C prefix (e.g., "AST.Source" -> "AST_Source")
         modulePrefix =
-            String.replace "." "_" moduleName
+            getModulePrefix mod
 
         includes =
             [ "#include <stdio.h>"
@@ -4443,9 +4441,7 @@ generateRtemsModule : Module -> String
 generateRtemsModule mod =
     let
         moduleName =
-            mod.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName mod
 
         baseCode =
             generateModule mod
@@ -4595,9 +4591,7 @@ generateNativeWorkerModule : Module -> String
 generateNativeWorkerModule mod =
     let
         moduleName =
-            mod.name
-                |> Maybe.map (\(Src.At _ n) -> n)
-                |> Maybe.withDefault "Main"
+            getModuleName mod
 
         baseCode =
             generateModule mod

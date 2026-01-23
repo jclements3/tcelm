@@ -1946,23 +1946,6 @@ extractAccessorInner innerExpr =
             Nothing
 
 
-{-| Generate comma-separated argument string from list of expressions.
-    This is used instead of List.map/String.join to avoid generating
-    elm_List_map calls during self-hosting.
--}
-generateArgsString : List Src.Expr -> String
-generateArgsString exprs =
-    case exprs of
-        [] ->
-            ""
-
-        [ single ] ->
-            generateStandaloneExpr single
-
-        first :: rest ->
-            generateStandaloneExpr first ++ ", " ++ generateArgsString rest
-
-
 {-| Generate C bindings from a lambda pattern.
     Returns (bindings, element accessor) where:
     - bindings: C code to bind pattern variables (e.g., "double elm_x = __elem._0;")
