@@ -32,42 +32,47 @@ module_ =
     chompHeader
         |> P.andThen
             (\maybeHeader ->
-                chompImports []
+                -- Skip optional module doc comment between header and imports
+                chompModuleDocComment
                     |> P.andThen
-                        (\imports ->
-                            chompDecls []
+                        (\maybeModuleDoc ->
+                            chompImports []
                                 |> P.andThen
-                                    (\decls ->
-                                        let
-                                            categorized =
-                                                categorizeDecls [] [] [] [] [] decls
-                                        in
-                                        case maybeHeader of
-                                            Just ( name, exports ) ->
-                                                P.succeed
-                                                    { name = Just name
-                                                    , exports = exports
-                                                    , docs = Nothing
-                                                    , imports = imports
-                                                    , values = categorized.values
-                                                    , unions = categorized.unions
-                                                    , aliases = categorized.aliases
-                                                    , binops = categorized.binops
-                                                    , ports = categorized.ports
-                                                    }
+                                    (\imports ->
+                                        chompDecls []
+                                            |> P.andThen
+                                                (\decls ->
+                                                    let
+                                                        categorized =
+                                                            categorizeDecls [] [] [] [] [] decls
+                                                    in
+                                                    case maybeHeader of
+                                                        Just ( name, exports ) ->
+                                                            P.succeed
+                                                                { name = Just name
+                                                                , exports = exports
+                                                                , docs = maybeModuleDoc
+                                                                , imports = imports
+                                                                , values = categorized.values
+                                                                , unions = categorized.unions
+                                                                , aliases = categorized.aliases
+                                                                , binops = categorized.binops
+                                                                , ports = categorized.ports
+                                                                }
 
-                                            Nothing ->
-                                                P.succeed
-                                                    { name = Nothing
-                                                    , exports = Src.At (Src.Region { row = 1, col = 1 } { row = 1, col = 1 }) Src.Open
-                                                    , docs = Nothing
-                                                    , imports = imports
-                                                    , values = categorized.values
-                                                    , unions = categorized.unions
-                                                    , aliases = categorized.aliases
-                                                    , binops = categorized.binops
-                                                    , ports = categorized.ports
-                                                    }
+                                                        Nothing ->
+                                                            P.succeed
+                                                                { name = Nothing
+                                                                , exports = Src.At (Src.Region { row = 1, col = 1 } { row = 1, col = 1 }) Src.Open
+                                                                , docs = maybeModuleDoc
+                                                                , imports = imports
+                                                                , values = categorized.values
+                                                                , unions = categorized.unions
+                                                                , aliases = categorized.aliases
+                                                                , binops = categorized.binops
+                                                                , ports = categorized.ports
+                                                                }
+                                                )
                                     )
                         )
             )
@@ -113,6 +118,18 @@ categorizeDecls values unions aliases binops ports decls =
 
                 Decl.PortDecl port_ ->
                     categorizeDecls values unions aliases binops (port_ :: ports) rest
+
+
+
+-- MODULE DOC COMMENT
+
+
+chompModuleDocComment : Parser E.Problem (Maybe Src.DocComment)
+chompModuleDocComment =
+    P.oneOfWithFallback
+        [ Space.chompDocComment E.ModuleSpace
+        ]
+        Nothing
 
 
 
