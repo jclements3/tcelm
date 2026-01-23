@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+/**
+ * tcelm - Elm to C compiler for TCC
+ *
+ * Usage:
+ *   tcelm <source.elm>              # Compile single module to stdout
+ *   tcelm <source.elm> -o out.c     # Compile to file
+ *   tcelm --bundle <main.elm>       # Bundle with dependencies
+ *   tcelm --bundle <main.elm> -o out.c
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+// Re-exec with larger stack if needed
+if (!process.env.TCELM_STACK_SET) {
+    const args = ['--stack-size=32768', __filename, ...process.argv.slice(2)];
+    const child = spawn(process.execPath, args, {
+        stdio: 'inherit',
+        env: { ...process.env, TCELM_STACK_SET: '1' }
+    });
+    child.on('exit', code => process.exit(code));
+    return;
+}
+
+// Parse arguments
+const args = process.argv.slice(2);
+let sourceFile = null;
+let outputFile = null;
+let bundleMode = false;
+
+for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-o' && args[i + 1]) {
+        outputFile = args[++i];
+    } else if (args[i] === '--bundle' || args[i] === '-b') {
+        bundleMode = true;
+    } else if (args[i] === '--help' || args[i] === '-h') {
+        console.log(`tcelm - Elm to C compiler for TCC
+
+Usage:
+  tcelm <source.elm>              Compile single module to stdout
+  tcelm <source.elm> -o out.c     Compile to file
+  tcelm --bundle <main.elm>       Bundle with all dependencies
+  tcelm --bundle <main.elm> -o out.c
+
+Options:
+  -o <file>     Output to file instead of stdout
+  --bundle, -b  Bundle mode: resolve imports and compile all modules
+  --help, -h    Show this help
+`);
+        process.exit(0);
+    } else if (!args[i].startsWith('-')) {
+        sourceFile = args[i];
+    }
+}
+
+if (!sourceFile) {
+    console.error('Error: No source file specified');
+    console.error('Usage: tcelm <source.elm> [-o output.c] [--bundle]');
+    process.exit(1);
+}
+
+if (!fs.existsSync(sourceFile)) {
+    console.error(`Error: File not found: ${sourceFile}`);
+    process.exit(1);
+}
+
+// Load the compiler
+const binDir = __dirname;
+const elmCode = fs.readFileSync(path.join(binDir, 'tcelm.js'), 'utf8');
+const context = {};
+(new Function(elmCode)).call(context);
+
+const Elm = context.Elm;
+if (!Elm || !Elm.Cli) {
+    console.error('Error: Failed to load tcelm compiler');
+    process.exit(1);
+}
+
+if (bundleMode) {
+    // Use the bundle script
+    const bundleScript = path.join(binDir, 'tcelm-bundle.js');
+    const bundleArgs = [bundleScript, sourceFile];
+    if (outputFile) {
+        // Bundle outputs to stdout, we redirect
+    }
+
+    const bundle = require(bundleScript.replace('.js', ''));
+    // For now, just exec the bundle script
+    const bundleChild = spawn(process.execPath, ['--stack-size=32768', bundleScript, sourceFile], {
+        stdio: outputFile ? ['inherit', 'pipe', 'inherit'] : 'inherit'
+    });
+
+    if (outputFile) {
+        const out = fs.createWriteStream(outputFile);
+        bundleChild.stdout.pipe(out);
+        bundleChild.on('exit', code => {
+            if (code === 0) {
+                console.error(`Wrote ${outputFile}`);
+            }
+            process.exit(code);
+        });
+    } else {
+        bundleChild.on('exit', code => process.exit(code));
+    }
+} else {
+    // Single file compilation
+    const source = fs.readFileSync(sourceFile, 'utf8');
+
+    const app = Elm.Cli.init({
+        flags: { target: 'tcc' }
+    });
+
+    app.ports.sendOutput.subscribe(function(result) {
+        if (result.success) {
+            if (outputFile) {
+                fs.writeFileSync(outputFile, result.code);
+                console.error(`Wrote ${outputFile}`);
+            } else {
+                console.log(result.code);
+            }
+            process.exit(0);
+        } else {
+            console.error('Compilation error:', result.error);
+            process.exit(1);
+        }
+    });
+
+    app.ports.receiveSource.send(source);
+}

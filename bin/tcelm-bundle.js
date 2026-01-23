@@ -182,19 +182,22 @@ function compileModule(Elm, source, target) {
  * Extract just the module-specific code (skip headers/runtime)
  */
 function extractModuleCode(cCode, moduleName) {
-    // Find where user-defined types/functions start
+    // Find where module-specific content starts
+    // Priority order: Type tags, Forward declarations, Constants, User functions
     const typeTagsStart = cCode.indexOf('/* Type tags for');
+    const forwardDeclStart = cCode.indexOf('/* Forward declarations */');
+    const constantsStart = cCode.indexOf('/* Simple constants */');
+    const computedConstStart = cCode.indexOf('/* Computed constants');
     const userFuncsStart = cCode.indexOf('/* User-defined functions */');
     const mainStart = cCode.indexOf('/* Elm main value */');
     const cMainStart = cCode.indexOf('int main(void)');
 
-    let start = typeTagsStart !== -1 ? typeTagsStart : userFuncsStart;
-    let end = mainStart !== -1 ? mainStart : cMainStart;
+    // Find earliest module content
+    const candidates = [typeTagsStart, forwardDeclStart, constantsStart, computedConstStart, userFuncsStart]
+        .filter(x => x !== -1);
+    let start = candidates.length > 0 ? Math.min(...candidates) : -1;
 
-    if (start === -1) {
-        // Try to find forward declarations
-        start = cCode.indexOf('/* Forward declarations */');
-    }
+    let end = mainStart !== -1 ? mainStart : cMainStart;
 
     if (start === -1 || end === -1 || start >= end) {
         return `/* Module ${moduleName} - no extractable code */\n`;
@@ -205,6 +208,7 @@ function extractModuleCode(cCode, moduleName) {
 
 /**
  * Extract headers and runtime from compiled C
+ * Strips module-specific includes (*.h) since we're inlining everything
  */
 function extractHeadersAndRuntime(cCode) {
     const userFuncsStart = cCode.indexOf('/* Forward declarations */');
@@ -215,7 +219,17 @@ function extractHeadersAndRuntime(cCode) {
         typeTagsStart !== -1 ? typeTagsStart : cCode.length
     );
 
-    return cCode.substring(0, end);
+    let headers = cCode.substring(0, end);
+
+    // Remove module-specific includes (keep system includes like <stdio.h>)
+    headers = headers.split('\n')
+        .filter(line => !line.match(/^#include\s+"[^"]+\.h"/))
+        .join('\n');
+
+    // Remove empty "/* Imports */" section
+    headers = headers.replace(/\/\* Imports \*\/\s*\n\s*\n/g, '');
+
+    return headers;
 }
 
 /**
