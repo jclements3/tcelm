@@ -84,7 +84,7 @@ compile target source =
         Ok ast ->
             let
                 cCode =
-                    if target == "i386-rtems-nuc" then
+                    if target == "rtems" then
                         generateRtemsCode ast
 
                     else if target == "native" then
@@ -111,7 +111,7 @@ compile target source =
                 ]
 
 
-{-| Generate C code for RTEMS target with Init wrapper
+{-| Generate C code for RTEMS target (x86_64) with Init wrapper
     For simple programs, we generate standalone code without the full runtime.
     Outputs to both serial console and SXGA framebuffer.
 -}
