@@ -7439,6 +7439,22 @@ generateDestructuring pattern expr =
                     in
                     String.join " " fieldBindings
 
+                -- Constructor pattern: let (Src.At _ x) = expr
+                Src.At _ (Src.PCtor _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ->
+                    "typeof(((elm_union_t)" ++ exprStr ++ ").data) elm_" ++ innerName ++ " = ((elm_union_t)" ++ exprStr ++ ").data;"
+
+                -- Qualified constructor pattern: let (Src.At _ x) = expr
+                Src.At _ (Src.PCtorQual _ _ "At" [ Src.At _ Src.PAnything, Src.At _ (Src.PVar innerName) ]) ->
+                    "typeof(((elm_union_t)" ++ exprStr ++ ").data) elm_" ++ innerName ++ " = ((elm_union_t)" ++ exprStr ++ ").data;"
+
+                -- Constructor pattern extracting inner value: let (Just x) = expr
+                Src.At _ (Src.PCtor _ ctorName [ Src.At _ (Src.PVar innerName) ]) ->
+                    "typeof(((elm_union_t)" ++ exprStr ++ ").data.child->data.num) elm_" ++ innerName ++ " = ((elm_union_t)" ++ exprStr ++ ").data.child->data.num;"
+
+                -- Wildcard pattern (just evaluate expr for side effects)
+                Src.At _ Src.PAnything ->
+                    "(void)(" ++ exprStr ++ ");"
+
                 _ ->
                     "/* unsupported destructuring pattern */"
 
