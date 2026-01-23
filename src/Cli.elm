@@ -178,21 +178,34 @@ generateRtemsCode ast =
                                 union.ctors
                                     |> List.indexedMap
                                         (\i ( Src.At _ ctorName, ctorArgs ) ->
-                                            if List.isEmpty ctorArgs then
+                                            let
+                                                argCount =
+                                                    List.length ctorArgs
+
+                                            in
+                                            if argCount == 0 then
                                                 -- No-data constructor
                                                 "static elm_union_t elm_"
                                                     ++ ctorName
                                                     ++ "(void) {\n    elm_union_t result = { .tag = TAG_"
                                                     ++ ctorName
-                                                    ++ ", .data = 0 };\n    return result;\n}"
+                                                    ++ ", .data = {.num = 0}, .data2 = 0 };\n    return result;\n}"
 
-                                            else
-                                                -- Constructor with data
+                                            else if argCount == 1 then
+                                                -- Single argument constructor
                                                 "static elm_union_t elm_"
                                                     ++ ctorName
-                                                    ++ "(int value) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ "(elm_union_t v1) {\n    elm_union_t result = { .tag = TAG_"
                                                     ++ ctorName
-                                                    ++ ", .data = value };\n    return result;\n}"
+                                                    ++ ", .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };\n    return result;\n}"
+
+                                            else
+                                                -- Two argument constructor (Add Expr Expr, etc)
+                                                "static elm_union_t elm_"
+                                                    ++ ctorName
+                                                    ++ "(elm_union_t v1, elm_union_t v2) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ ctorName
+                                                    ++ ", .data = {.child = elm_alloc_union(v1)}, .data2 = elm_alloc_union(v2) };\n    return result;\n}"
                                         )
                                     |> String.join "\n\n"
                         in
@@ -366,8 +379,19 @@ generateRtemsCode ast =
                 , "    return r;"
                 , "}"
                 , ""
+                , "/* Forward declaration for recursive union type */"
+                , "struct elm_union_s;"
+                , ""
                 , "/* Generic tagged union type for custom types */"
-                , "typedef struct { int tag; int data; } elm_union_t;"
+                , "/* Supports both primitive values (.num) and nested unions (.child) */"
+                , "typedef struct elm_union_s { int tag; union { double num; struct elm_union_s *child; } data; } elm_union_t;"
+                , ""
+                , "/* Helper to allocate a nested union on the heap */"
+                , "static elm_union_t *elm_alloc_union(elm_union_t val) {"
+                , "    elm_union_t *p = (elm_union_t*)malloc(sizeof(elm_union_t));"
+                , "    *p = val;"
+                , "    return p;"
+                , "}"
                 , ""
                 , "/* Built-in tuple type */"
                 , "typedef struct { int _0; int _1; } elm_tuple2_t;"
@@ -985,21 +1009,34 @@ generateTccCode ast =
                                 union.ctors
                                     |> List.indexedMap
                                         (\i ( Src.At _ ctorName, ctorArgs ) ->
-                                            if List.isEmpty ctorArgs then
+                                            let
+                                                argCount =
+                                                    List.length ctorArgs
+
+                                            in
+                                            if argCount == 0 then
                                                 -- No-data constructor
                                                 "static elm_union_t elm_"
                                                     ++ ctorName
                                                     ++ "(void) {\n    elm_union_t result = { .tag = TAG_"
                                                     ++ ctorName
-                                                    ++ ", .data = 0 };\n    return result;\n}"
+                                                    ++ ", .data = {.num = 0}, .data2 = 0 };\n    return result;\n}"
 
-                                            else
-                                                -- Constructor with data
+                                            else if argCount == 1 then
+                                                -- Single argument constructor
                                                 "static elm_union_t elm_"
                                                     ++ ctorName
-                                                    ++ "(int value) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ "(elm_union_t v1) {\n    elm_union_t result = { .tag = TAG_"
                                                     ++ ctorName
-                                                    ++ ", .data = value };\n    return result;\n}"
+                                                    ++ ", .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };\n    return result;\n}"
+
+                                            else
+                                                -- Two argument constructor (Add Expr Expr, etc)
+                                                "static elm_union_t elm_"
+                                                    ++ ctorName
+                                                    ++ "(elm_union_t v1, elm_union_t v2) {\n    elm_union_t result = { .tag = TAG_"
+                                                    ++ ctorName
+                                                    ++ ", .data = {.child = elm_alloc_union(v1)}, .data2 = elm_alloc_union(v2) };\n    return result;\n}"
                                         )
                                     |> String.join "\n\n"
                         in
@@ -1158,9 +1195,19 @@ generateTccCode ast =
             , ""
             , "/* Forward declarations for recursive types */"
             , "struct elm_list_s;"
+            , "struct elm_union_s;"
             , ""
             , "/* Generic tagged union type for custom types */"
-            , "typedef struct { int tag; double data; } elm_union_t;"
+            , "/* Supports both primitive values (.num) and nested unions (.child) */"
+            , "/* data2 is optional second argument for binary constructors like Add Expr Expr */"
+            , "typedef struct elm_union_s { int tag; union { double num; struct elm_union_s *child; } data; struct elm_union_s *data2; } elm_union_t;"
+            , ""
+            , "/* Helper to allocate a nested union on the heap */"
+            , "static elm_union_t *elm_alloc_union(elm_union_t val) {"
+            , "    elm_union_t *p = (elm_union_t*)malloc(sizeof(elm_union_t));"
+            , "    *p = val;"
+            , "    return p;"
+            , "}"
             , ""
             , "/* Built-in tuple types - use flexible data union for elements */"
             , "typedef union { double d; void *ptr; struct elm_list_s *lst; const char *str; } elm_elem_t;"
@@ -1358,10 +1405,42 @@ extractMainValue (Src.At _ value) =
             value.name
     in
     if name == "main" then
-        Just (exprToMainValue value.body)
+        Just (exprToMainValueWithType value.type_ value.body)
 
     else
         Nothing
+
+
+{-| Check if a type annotation represents String type
+-}
+mainTypeIsString : Maybe Src.Type -> Bool
+mainTypeIsString maybeType =
+    case maybeType of
+        Just (Src.At _ (Src.TType _ "String" [])) ->
+            True
+
+        _ ->
+            False
+
+
+{-| Convert an expression to a MainValue, using type annotation if available
+-}
+exprToMainValueWithType : Maybe Src.Type -> Src.Expr -> MainValue
+exprToMainValueWithType maybeType expr =
+    let
+        baseValue =
+            exprToMainValue expr
+    in
+    -- If type annotation says String, override int inference
+    if mainTypeIsString maybeType then
+        case baseValue of
+            MainExpr "int" cCode ->
+                MainExpr "const char *" cCode
+
+            _ ->
+                baseValue
+    else
+        baseValue
 
 
 {-| Convert an expression to a MainValue
@@ -1433,8 +1512,20 @@ exprToMainValue (Src.At region expr) =
             MainExpr inferredType cCode
 
         _ ->
-            -- Fallback: try to generate as expression
-            MainExpr "int" (generateStandaloneExpr (Src.At region expr))
+            -- Fallback: try to generate as expression and infer type
+            let
+                cCode = generateStandaloneExpr (Src.At region expr)
+                -- Infer type from generated code patterns
+                inferredType =
+                    if String.contains "elm_str_" cCode
+                        || String.contains "elm_from_int" cCode
+                        || String.contains "elm_from_float" cCode
+                        || String.startsWith "\"" cCode then
+                        "const char *"
+                    else
+                        "int"
+            in
+            MainExpr inferredType cCode
 
 
 {-| Generate standalone C code for binary operations (no runtime needed)
@@ -1744,6 +1835,37 @@ generateStandaloneBinops pairs finalExpr =
             "(" ++ buildExpr terms ++ ")"
 
 
+{-| Helper to determine if an expression generates a union value
+-}
+isUnionValue : String -> Bool
+isUnionValue exprStr =
+    String.startsWith "((elm_union_t)" exprStr
+        || String.startsWith "elm_alloc_union" exprStr
+        || String.contains "elm_union_t" exprStr
+
+
+{-| Wrap a value for use in elm_union_t constructor
+    - Union values use .child with elm_alloc_union
+    - Primitive values use .num
+-}
+wrapUnionData : String -> String
+wrapUnionData valueStr =
+    if isUnionValue valueStr then
+        "{.child = elm_alloc_union(" ++ valueStr ++ ")}"
+    else
+        "{.num = " ++ valueStr ++ "}"
+
+
+{-| Generate a union constructor expression
+-}
+makeUnionCtor : String -> String -> String
+makeUnionCtor tag dataValue =
+    if dataValue == "0" || dataValue == "" then
+        "((elm_union_t){" ++ tag ++ ", {.num = 0}})"
+    else
+        "((elm_union_t){" ++ tag ++ ", " ++ wrapUnionData dataValue ++ "})"
+
+
 {-| Generate standalone C code for a single expression (no runtime)
 -}
 generateStandaloneExpr : Src.Expr -> String
@@ -1858,11 +1980,11 @@ generateStandaloneExpr (Src.At _ expr) =
 
                 ( Src.CapVar, "Nothing" ) ->
                     -- Built-in Maybe Nothing constructor
-                    "((elm_union_t){TAG_Nothing, 0})"
+                    makeUnionCtor "TAG_Nothing" "0"
 
                 ( Src.CapVar, _ ) ->
                     -- Constructor - generate union tag for nullary constructor
-                    "((elm_union_t){TAG_" ++ name ++ ", 0})"
+                    makeUnionCtor ("TAG_" ++ name) "0"
 
                 _ ->
                     "elm_" ++ name
@@ -1872,7 +1994,7 @@ generateStandaloneExpr (Src.At _ expr) =
                 Src.CapVar ->
                     -- Qualified constructor - generate tag value
                     -- For nullary constructors like Src.LowVar, Src.CapVar
-                    "((elm_union_t){TAG_" ++ moduleName ++ "_" ++ name ++ ", 0})"
+                    makeUnionCtor ("TAG_" ++ moduleName ++ "_" ++ name) "0"
 
                 Src.LowVar ->
                     -- Qualified variable - reference as function/value
@@ -3932,40 +4054,64 @@ generateStandaloneCall fn args =
                 Src.At _ (Src.Var Src.CapVar ctorName) ->
                     -- Unqualified constructor call: Ctor arg1 arg2
                     let
-                        argStrs =
-                            List.map generateStandaloneExpr args
+                        -- Wrap each argument as elm_union_t if it's a primitive
+                        wrapAsUnion argExpr =
+                            let
+                                argStr = generateStandaloneExpr argExpr
+                            in
+                            if isUnionValue argStr then
+                                argStr
+                            else
+                                -- Wrap primitive as union with tag 0 (generic)
+                                "((elm_union_t){0, {.num = " ++ argStr ++ "}, 0})"
 
-                        dataValue =
-                            case argStrs of
-                                [] ->
-                                    "0"
-                                [ single ] ->
-                                    single
-                                _ ->
-                                    -- Multiple args - for simple unions just use first arg
-                                    -- Full AST construction would need proper tuple/record support
-                                    List.head argStrs |> Maybe.withDefault "0"
+                        argStrs =
+                            List.map wrapAsUnion args
                     in
-                    "((elm_union_t){TAG_" ++ ctorName ++ ", " ++ dataValue ++ "})"
+                    case argStrs of
+                        [] ->
+                            -- Nullary constructor - use inline form
+                            makeUnionCtor ("TAG_" ++ ctorName) "0"
+                        [ single ] ->
+                            -- Single arg constructor - call generated function
+                            "elm_" ++ ctorName ++ "(" ++ single ++ ")"
+                        [ first, second ] ->
+                            -- Two arg constructor - call generated function with both args
+                            "elm_" ++ ctorName ++ "(" ++ first ++ ", " ++ second ++ ")"
+                        _ ->
+                            -- More than two args - not currently supported
+                            "/* constructor with >2 args not supported */ " ++ makeUnionCtor ("TAG_" ++ ctorName) "0"
 
                 Src.At _ (Src.VarQual Src.CapVar moduleName ctorName) ->
                     -- Qualified constructor call: Module.Ctor arg1 arg2
                     let
-                        argStrs =
-                            List.map generateStandaloneExpr args
+                        -- Wrap each argument as elm_union_t if it's a primitive
+                        wrapAsUnion argExpr =
+                            let
+                                argStr = generateStandaloneExpr argExpr
+                            in
+                            if isUnionValue argStr then
+                                argStr
+                            else
+                                -- Wrap primitive as union with tag 0 (generic)
+                                "((elm_union_t){0, {.num = " ++ argStr ++ "}, 0})"
 
-                        dataValue =
-                            case argStrs of
-                                [] ->
-                                    "0"
-                                [ single ] ->
-                                    single
-                                _ ->
-                                    -- Multiple args - for simple unions just use first arg
-                                    -- Full AST construction would need proper tuple/record support
-                                    List.head argStrs |> Maybe.withDefault "0"
+                        argStrs =
+                            List.map wrapAsUnion args
                     in
-                    "((elm_union_t){TAG_" ++ moduleName ++ "_" ++ ctorName ++ ", " ++ dataValue ++ "})"
+                    case argStrs of
+                        [] ->
+                            -- Nullary constructor - use inline form
+                            makeUnionCtor ("TAG_" ++ moduleName ++ "_" ++ ctorName) "0"
+                        [ single ] ->
+                            -- Single arg constructor - call generated function
+                            "elm_" ++ moduleName ++ "_" ++ ctorName ++ "(" ++ single ++ ")"
+                        [ first, second ] ->
+                            -- Two arg constructor - call generated function with both args
+                            "elm_" ++ moduleName ++ "_" ++ ctorName ++ "(" ++ first ++ ", " ++ second ++ ")"
+                        _ ->
+                            -- More than two args - not currently supported
+                            "/* constructor with >2 args not supported */ " ++ makeUnionCtor ("TAG_" ++ moduleName ++ "_" ++ ctorName) "0"
 
                 _ ->
                     -- Regular function call
@@ -4795,14 +4941,50 @@ generateStandaloneCase scrutinee branches =
 
                                     else
                                         -- Constructor with data - bind variable and compare tag
+                                        -- Check if the variable is used as a union (passed to function with elm_union_t param)
                                         let
+                                            resultStr = generateStandaloneExpr resultExpr
+
                                             bindings =
                                                 ctorPatterns
                                                     |> List.indexedMap
-                                                        (\_ (Src.At _ pat) ->
+                                                        (\patIdx (Src.At _ pat) ->
                                                             case pat of
                                                                 Src.PVar varName ->
-                                                                    "double elm_" ++ varName ++ " = elm_case_scrutinee.data;"
+                                                                    -- Check if variable is used as union in result expression
+                                                                    -- Exclude known primitive functions that take numbers
+                                                                    let
+                                                                        isPassedToPrimitive =
+                                                                            String.contains ("elm_from_int(elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains ("elm_from_float(elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains ("elm_str_" ++ "append(elm_" ++ varName ++ ",") resultStr
+                                                                                || String.contains ("+ elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains ("+ elm_" ++ varName ++ ";") resultStr
+                                                                                || String.contains ("- elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains ("- elm_" ++ varName ++ ";") resultStr
+                                                                                || String.contains ("* elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains ("* elm_" ++ varName ++ ";") resultStr
+                                                                                || String.contains ("/ elm_" ++ varName ++ ")") resultStr
+                                                                                || String.contains ("/ elm_" ++ varName ++ ";") resultStr
+
+                                                                        isUsedAsUnion =
+                                                                            not isPassedToPrimitive
+                                                                                && (String.contains ("(elm_" ++ varName ++ ")") resultStr
+                                                                                    || String.contains ("(elm_" ++ varName ++ ",") resultStr
+                                                                                    || String.contains (", elm_" ++ varName ++ ")") resultStr
+                                                                                    || String.contains ("elm_" ++ varName ++ ".tag") resultStr)
+
+                                                                        -- First arg from data.child, second arg from data2
+                                                                        accessor =
+                                                                            if patIdx == 0 then
+                                                                                "elm_case_scrutinee.data.child"
+                                                                            else
+                                                                                "elm_case_scrutinee.data2"
+                                                                    in
+                                                                    if isUsedAsUnion then
+                                                                        "elm_union_t elm_" ++ varName ++ " = *" ++ accessor ++ ";"
+                                                                    else
+                                                                        "double elm_" ++ varName ++ " = " ++ accessor ++ "->data.num;"
 
                                                                 _ ->
                                                                     ""
@@ -4815,7 +4997,7 @@ generateStandaloneCase scrutinee branches =
                                             ++ " ? ({ "
                                             ++ bindings
                                             ++ " "
-                                            ++ generateStandaloneExpr resultExpr
+                                            ++ resultStr
                                             ++ "; }) : "
                                             ++ generateBranches rest
                                             ++ ")"
@@ -4848,13 +5030,44 @@ generateStandaloneCase scrutinee branches =
                             else
                                 -- Constructor with data - bind variable and compare tag
                                 let
+                                    resultStr = generateStandaloneExpr resultExpr
+
                                     bindings =
                                         ctorPatterns
                                             |> List.indexedMap
-                                                (\_ (Src.At _ pat) ->
+                                                (\patIdx (Src.At _ pat) ->
                                                     case pat of
                                                         Src.PVar varName ->
-                                                            "double elm_" ++ varName ++ " = elm_case_scrutinee.data;"
+                                                            -- Check if variable is used as union in result expression
+                                                            -- Exclude known primitive functions that take numbers
+                                                            let
+                                                                isPassedToPrimitive =
+                                                                    String.contains ("elm_from_int(elm_" ++ varName) resultStr
+                                                                        || String.contains ("elm_from_float(elm_" ++ varName) resultStr
+                                                                        || String.contains ("elm_str_" ++ "append(elm_" ++ varName) resultStr
+                                                                        || String.contains ("+ elm_" ++ varName) resultStr
+                                                                        || String.contains ("- elm_" ++ varName) resultStr
+                                                                        || String.contains ("* elm_" ++ varName) resultStr
+                                                                        || String.contains ("/ elm_" ++ varName) resultStr
+
+                                                                isUsedAsUnion =
+                                                                    not isPassedToPrimitive
+                                                                        && (String.contains ("(elm_" ++ varName ++ ")") resultStr
+                                                                            || String.contains ("(elm_" ++ varName ++ ",") resultStr
+                                                                            || String.contains (", elm_" ++ varName ++ ")") resultStr
+                                                                            || String.contains ("elm_" ++ varName ++ ".tag") resultStr)
+
+                                                                -- First arg from data.child, second arg from data2
+                                                                accessor =
+                                                                    if patIdx == 0 then
+                                                                        "elm_case_scrutinee.data.child"
+                                                                    else
+                                                                        "elm_case_scrutinee.data2"
+                                                            in
+                                                            if isUsedAsUnion then
+                                                                "elm_union_t elm_" ++ varName ++ " = *" ++ accessor ++ ";"
+                                                            else
+                                                                "double elm_" ++ varName ++ " = " ++ accessor ++ "->data.num;"
 
                                                         _ ->
                                                             ""
@@ -4867,7 +5080,7 @@ generateStandaloneCase scrutinee branches =
                                     ++ " ? ({ "
                                     ++ bindings
                                     ++ " "
-                                    ++ generateStandaloneExpr resultExpr
+                                    ++ resultStr
                                     ++ "; }) : "
                                     ++ generateBranches rest
                                     ++ ")"

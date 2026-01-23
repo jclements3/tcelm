@@ -195,7 +195,9 @@ chompVariantArgs revArgs =
             (\end ->
                 P.oneOfWithFallback
                     [ Space.checkIndent end E.DeclStart
-                        |> P.andThen (\_ -> Type.term)
+                        -- Use termNoApp so each type is parsed separately without type application
+                        -- e.g., "MkPair Int Int" should have [Int, Int], not [Int Int]
+                        |> P.andThen (\_ -> Type.termNoApp)
                         |> P.andThen
                             (\( arg, newEnd ) ->
                                 Space.chomp E.DeclSpace

@@ -1,4 +1,4 @@
-module Parse.Type exposing (expression, term)
+module Parse.Type exposing (expression, term, termNoApp)
 
 {-| Type annotation parsing for Elm.
 -}
