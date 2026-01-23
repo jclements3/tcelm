@@ -1675,7 +1675,7 @@ generateTccCode ast =
             , ""
             , "/* Built-in List type - fixed-size array with flexible element storage */"
             , "#define ELM_LIST_MAX 64"
-            , "typedef union { double d; elm_tuple2_t t2; elm_tuple3_t t3; void *ptr; struct elm_list_s *lst; elm_union_t u; } elm_data_t;"
+            , "typedef union { double d; elm_tuple2_t t2; elm_tuple3_t t3; void *ptr; struct elm_list_s *lst; elm_union_t u; const char *str; } elm_data_t;"
             , "typedef struct elm_list_s { int length; elm_data_t data[ELM_LIST_MAX]; } elm_list_t;"
             , ""
             , "/* String.replace - replace all occurrences */"
@@ -5907,16 +5907,57 @@ generateStandaloneCase scrutinee branches =
                                         _ ->
                                             ( "", "" )
 
-                                -- For list elements, determine accessor based on pattern type
-                                -- Simple PVar means numeric value (.d), constructor pattern means union (.u)
+                                -- For list elements, determine accessor based on pattern type AND usage
+                                -- If the variable is used with .tag access, it's a union type
+                                -- If the variable is used with string functions, it's a string
+                                -- Otherwise, default to double
+                                resultStr = generateStandaloneExpr resultExpr
+
+                                -- Check if head variable is used as a union type
+                                headVarUsedAsUnion =
+                                    case headPat of
+                                        Src.PVar hName ->
+                                            String.contains ("elm_" ++ hName ++ ".tag") resultStr
+                                                || String.contains ("elm_" ++ hName ++ ".data") resultStr
+                                        _ -> False
+
+                                -- Check if head variable is used as a string
+                                headVarUsedAsString =
+                                    case headPat of
+                                        Src.PVar hName ->
+                                            String.contains ("elm_str_append(elm_" ++ hName) resultStr
+                                                || String.contains ("elm_str_append(" ++ "\"") resultStr && String.contains (", elm_" ++ hName ++ ")") resultStr
+                                                || String.contains ("strlen(elm_" ++ hName) resultStr
+                                        _ -> False
+
                                 headAccessor =
                                     case headPat of
-                                        Src.PVar _ -> "(elm_case_scrutinee.data[0].d)"
+                                        Src.PVar _ ->
+                                            if headVarUsedAsUnion then
+                                                "(elm_case_scrutinee.data[0].u)"
+                                            else if headVarUsedAsString then
+                                                "(elm_case_scrutinee.data[0].str)"
+                                            else
+                                                "(elm_case_scrutinee.data[0].d)"
                                         Src.PAnything -> "(elm_case_scrutinee.data[0].d)"
                                         _ -> "(elm_case_scrutinee.data[0].u)"
 
+                                -- Update extractPatternBindings for different types
+                                extractPatternBindingsWithType : String -> Src.Pattern_ -> Bool -> Bool -> ( String, String )
+                                extractPatternBindingsWithType elemExpr pat isUnion isString =
+                                    case pat of
+                                        Src.PVar hName ->
+                                            if isUnion then
+                                                ( "elm_union_t elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
+                                            else if isString then
+                                                ( "const char *elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
+                                            else
+                                                ( "double elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
+                                        _ ->
+                                            extractPatternBindings elemExpr pat
+
                                 ( headBinding, headCondition ) =
-                                    extractPatternBindings headAccessor headPat
+                                    extractPatternBindingsWithType headAccessor headPat headVarUsedAsUnion headVarUsedAsString
 
                                 tailBinding =
                                     case tailPat of
