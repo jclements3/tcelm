@@ -4043,17 +4043,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* List.any wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "List" "sort") ->
-            -- List.sort list = sorted list (ascending, insertion sort)
-            case args of
-                [ listExpr ] ->
-                    let
-                        listStr = generateStandaloneExpr listExpr
-                    in
-                    "({ elm_list_t __lst = " ++ listStr ++ "; for (int __i = 1; __i < __lst.length; __i++) { int __key = __lst.data[__i], __j = __i - 1; while (__j >= 0 && __lst.data[__j] > __key) { __lst.data[__j + 1] = __lst.data[__j]; __j--; } __lst.data[__j + 1] = __key; } __lst; })"
-
-                _ ->
-                    "/* List.sort wrong arity */ 0"
+        -- Note: List.sort is now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "List" "indexedMap") ->
             -- List.indexedMap f list = apply f(index, elem) to each element

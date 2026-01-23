@@ -354,6 +354,9 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "List" "intersperse") ->
             Just (generateListIntersperse genExpr args)
 
+        Src.At _ (Src.VarQual _ "List" "sort") ->
+            Just (generateListSort genExpr args)
+
         -- Math functions (Basics module, qualified)
         Src.At _ (Src.VarQual _ "Basics" "floor") ->
             Just (generateFloor genExpr args)
@@ -1585,3 +1588,17 @@ generateListIntersperse genExpr args =
 
         _ ->
             "/* List.intersperse wrong arity */ 0"
+
+
+generateListSort : GenExpr -> List Src.Expr -> String
+generateListSort genExpr args =
+    case args of
+        [ listExpr ] ->
+            let
+                listStr =
+                    genExpr listExpr
+            in
+            "({ elm_list_t __lst = " ++ listStr ++ "; for (int __i = 1; __i < __lst.length; __i++) { int __key = __lst.data[__i], __j = __i - 1; while (__j >= 0 && __lst.data[__j] > __key) { __lst.data[__j + 1] = __lst.data[__j]; __j--; } __lst.data[__j + 1] = __key; } __lst; })"
+
+        _ ->
+            "/* List.sort wrong arity */ 0"
