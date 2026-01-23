@@ -3393,18 +3393,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* Just wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "Maybe" "withDefault") ->
-            -- Maybe.withDefault default maybe = value or default
-            case args of
-                [ defaultVal, maybeVal ] ->
-                    let
-                        defStr = generateStandaloneExpr defaultVal
-                        maybeStr = generateStandaloneExpr maybeVal
-                    in
-                    "((" ++ maybeStr ++ ").tag == TAG_Just ? (" ++ maybeStr ++ ").data : " ++ defStr ++ ")"
-
-                _ ->
-                    "/* Maybe.withDefault wrong arity */ 0"
+        -- Note: Maybe.withDefault is now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "Maybe" "map") ->
             -- Maybe.map f maybe = apply f to value if Just, else Nothing
@@ -3746,18 +3735,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* Err wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "Result" "withDefault") ->
-            -- Result.withDefault def result
-            case args of
-                [ def, result ] ->
-                    let
-                        defStr = generateStandaloneExpr def
-                        resultStr = generateStandaloneExpr result
-                    in
-                    "((" ++ resultStr ++ ").tag == TAG_Ok ? (" ++ resultStr ++ ").data : " ++ defStr ++ ")"
-
-                _ ->
-                    "/* Result.withDefault wrong arity */ 0"
+        -- Note: Result.withDefault is now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "Result" "map") ->
             -- Result.map fn result
@@ -3795,17 +3773,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* Result.mapError wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "Result" "toMaybe") ->
-            -- Result.toMaybe result
-            case args of
-                [ resultExpr ] ->
-                    let
-                        resultStr = generateStandaloneExpr resultExpr
-                    in
-                    "((" ++ resultStr ++ ").tag == TAG_Ok ? ((elm_union_t){TAG_Just, (" ++ resultStr ++ ").data}) : ((elm_union_t){TAG_Nothing, 0}))"
-
-                _ ->
-                    "/* Result.toMaybe wrong arity */ 0"
+        -- Note: Result.toMaybe is now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "Result" "andThen") ->
             -- Result.andThen fn result
@@ -3825,19 +3793,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* Result.andThen wrong arity */ 0"
 
-        Src.At _ (Src.VarQual _ "Result" "fromMaybe") ->
-            -- Result.fromMaybe err maybe
-            case args of
-                [ errExpr, maybeExpr ] ->
-                    let
-                        errStr = generateStandaloneExpr errExpr
-                        maybeStr = generateStandaloneExpr maybeExpr
-                    in
-                    "((" ++ maybeStr ++ ").tag == TAG_Just ? ((elm_union_t){TAG_Ok, (" ++ maybeStr ++ ").data}) : ((elm_union_t){TAG_Err, " ++ errStr ++ "}))"
-
-                _ ->
-                    "/* Result.fromMaybe wrong arity */ 0"
-
+        -- Note: Result.fromMaybe is now handled by Builtins.generateBuiltinCall
         -- Note: Debug.* functions are now handled by Builtins.generateBuiltinCall
 
         Src.At _ (Src.VarQual _ "List" "length") ->

@@ -257,6 +257,20 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "Debug" "todo") ->
             Just (generateDebugTodo genExpr args)
 
+        -- Maybe module (simple functions only - map/andThen have lambda handling in Cli.elm)
+        Src.At _ (Src.VarQual _ "Maybe" "withDefault") ->
+            Just (generateMaybeWithDefault genExpr args)
+
+        -- Result module (simple functions only - map/mapError/andThen have lambda handling in Cli.elm)
+        Src.At _ (Src.VarQual _ "Result" "withDefault") ->
+            Just (generateResultWithDefault genExpr args)
+
+        Src.At _ (Src.VarQual _ "Result" "toMaybe") ->
+            Just (generateResultToMaybe genExpr args)
+
+        Src.At _ (Src.VarQual _ "Result" "fromMaybe") ->
+            Just (generateResultFromMaybe genExpr args)
+
         -- Not a builtin we handle here
         _ ->
             Nothing
@@ -969,3 +983,76 @@ generateDebugTodo _ args =
 
         _ ->
             "/* Debug.todo wrong arity */ 0"
+
+
+
+-- MAYBE MODULE HANDLERS
+
+
+generateMaybeWithDefault : GenExpr -> List Src.Expr -> String
+generateMaybeWithDefault genExpr args =
+    case args of
+        [ defaultVal, maybeVal ] ->
+            let
+                defStr =
+                    genExpr defaultVal
+
+                maybeStr =
+                    genExpr maybeVal
+            in
+            "((" ++ maybeStr ++ ").tag == TAG_Just ? (" ++ maybeStr ++ ").data : " ++ defStr ++ ")"
+
+        _ ->
+            "/* Maybe.withDefault wrong arity */ 0"
+
+
+
+-- RESULT MODULE HANDLERS
+
+
+generateResultWithDefault : GenExpr -> List Src.Expr -> String
+generateResultWithDefault genExpr args =
+    case args of
+        [ def, result ] ->
+            let
+                defStr =
+                    genExpr def
+
+                resultStr =
+                    genExpr result
+            in
+            "((" ++ resultStr ++ ").tag == TAG_Ok ? (" ++ resultStr ++ ").data : " ++ defStr ++ ")"
+
+        _ ->
+            "/* Result.withDefault wrong arity */ 0"
+
+
+generateResultToMaybe : GenExpr -> List Src.Expr -> String
+generateResultToMaybe genExpr args =
+    case args of
+        [ resultExpr ] ->
+            let
+                resultStr =
+                    genExpr resultExpr
+            in
+            "((" ++ resultStr ++ ").tag == TAG_Ok ? ((elm_union_t){TAG_Just, (" ++ resultStr ++ ").data}) : ((elm_union_t){TAG_Nothing, 0}))"
+
+        _ ->
+            "/* Result.toMaybe wrong arity */ 0"
+
+
+generateResultFromMaybe : GenExpr -> List Src.Expr -> String
+generateResultFromMaybe genExpr args =
+    case args of
+        [ errExpr, maybeExpr ] ->
+            let
+                errStr =
+                    genExpr errExpr
+
+                maybeStr =
+                    genExpr maybeExpr
+            in
+            "((" ++ maybeStr ++ ").tag == TAG_Just ? ((elm_union_t){TAG_Ok, (" ++ maybeStr ++ ").data}) : ((elm_union_t){TAG_Err, " ++ errStr ++ "}))"
+
+        _ ->
+            "/* Result.fromMaybe wrong arity */ 0"
