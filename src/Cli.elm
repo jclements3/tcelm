@@ -3159,24 +3159,7 @@ generateStandaloneCallImplFallback ctx fn args =
                 _ ->
                     "/* String.map wrong arity */ 0"
 
-        -- Note: String.replace is now handled by Builtins.generateBuiltinCall
-
-        Src.At _ (Src.VarQual _ "String" "join") ->
-            -- String.join sep list = join strings with separator
-            case args of
-                [ sepExpr, listExpr ] ->
-                    let
-                        sepStr =
-                            generateStandaloneExpr sepExpr
-
-                        listStr =
-                            generateStandaloneExpr listExpr
-                    in
-                    "({ static char __join_buf[1024]; elm_list_t __lst = " ++ listStr ++ "; const char *__sep = " ++ sepStr ++ "; int __pos = 0; for (int __i = 0; __i < __lst.length && __pos < 1023; __i++) { if (__i > 0) { int __seplen = 0; while (__sep[__seplen]) __seplen++; for (int __j = 0; __j < __seplen && __pos < 1023; __j++) __join_buf[__pos++] = __sep[__j]; } const char *__s = (const char *)(long)__lst.data[__i]; while (*__s && __pos < 1023) __join_buf[__pos++] = *__s++; } __join_buf[__pos] = 0; __join_buf; })"
-
-                _ ->
-                    "/* String.join wrong arity */ 0"
-
+        -- Note: String.replace and String.join are now handled by Builtins.generateBuiltinCall
         -- Note: Bitwise.* functions are now handled by Builtins.generateBuiltinCall
 
         -- Note: floor, ceiling, round, truncate, sqrt, logBase, toFloat, isEven, isOdd

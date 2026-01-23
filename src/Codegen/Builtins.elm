@@ -235,7 +235,8 @@ generateBuiltinCall genExpr ctx fn args =
         Src.At _ (Src.VarQual _ "String" "replace") ->
             Just (generateStringReplace genExpr args)
 
-        -- Note: String.join has inline implementation in Cli.elm, not handled here
+        Src.At _ (Src.VarQual _ "String" "join") ->
+            Just (generateStringJoin genExpr args)
 
         -- Bitwise module
         Src.At _ (Src.VarQual _ "Bitwise" "and") ->
@@ -1115,6 +1116,23 @@ generateStringReplace genExpr args =
 
         _ ->
             "/* String.replace wrong arity */ 0"
+
+
+generateStringJoin : GenExpr -> List Src.Expr -> String
+generateStringJoin genExpr args =
+    case args of
+        [ sepExpr, listExpr ] ->
+            let
+                sepStr =
+                    genExpr sepExpr
+
+                listStr =
+                    genExpr listExpr
+            in
+            "({ static char __join_buf[1024]; elm_list_t __lst = " ++ listStr ++ "; const char *__sep = " ++ sepStr ++ "; int __pos = 0; for (int __i = 0; __i < __lst.length && __pos < 1023; __i++) { if (__i > 0) { int __seplen = 0; while (__sep[__seplen]) __seplen++; for (int __j = 0; __j < __seplen && __pos < 1023; __j++) __join_buf[__pos++] = __sep[__j]; } const char *__s = (const char *)(long)__lst.data[__i]; while (*__s && __pos < 1023) __join_buf[__pos++] = *__s++; } __join_buf[__pos] = 0; __join_buf; })"
+
+        _ ->
+            "/* String.join wrong arity */ 0"
 
 
 
