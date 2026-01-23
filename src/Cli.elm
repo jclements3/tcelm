@@ -5633,6 +5633,10 @@ inferCTypeAndInit locatedExpr =
             -- Use typeof to infer the correct type (works for records, etc.)
             ( "typeof(elm_" ++ name ++ ")", "elm_" ++ name )
 
+        Src.List _ ->
+            -- List literal returns elm_list_t
+            ( "elm_list_t", generateStandaloneExpr locatedExpr )
+
         _ ->
             ( "double", generateStandaloneExpr locatedExpr )
 
@@ -6370,6 +6374,16 @@ generateStandaloneCase scrutinee branches =
                                                 || String.contains ("strlen(elm_" ++ hName) resultStr
                                         _ -> False
 
+                                -- Check if head variable is used as a list (nested list case)
+                                headVarUsedAsList =
+                                    case headPat of
+                                        Src.PVar hName ->
+                                            String.contains ("elm_" ++ hName ++ ".length") resultStr
+                                                || String.contains ("elm_" ++ hName ++ ".data") resultStr
+                                                || String.contains ("(elm_" ++ hName ++ ")") resultStr
+                                                || String.contains ("elm_list_t elm_case_scrutinee = elm_" ++ hName) resultStr
+                                        _ -> False
+
                                 headAccessor =
                                     case headPat of
                                         Src.PVar _ ->
@@ -6377,27 +6391,31 @@ generateStandaloneCase scrutinee branches =
                                                 "(elm_case_scrutinee.data[0].u)"
                                             else if headVarUsedAsString then
                                                 "(elm_case_scrutinee.data[0].str)"
+                                            else if headVarUsedAsList then
+                                                "(*elm_case_scrutinee.data[0].lst)"
                                             else
                                                 "(elm_case_scrutinee.data[0].d)"
                                         Src.PAnything -> "(elm_case_scrutinee.data[0].d)"
                                         _ -> "(elm_case_scrutinee.data[0].u)"
 
                                 -- Update extractPatternBindings for different types
-                                extractPatternBindingsWithType : String -> Src.Pattern_ -> Bool -> Bool -> ( String, String )
-                                extractPatternBindingsWithType elemExpr pat isUnion isString =
+                                extractPatternBindingsWithType : String -> Src.Pattern_ -> Bool -> Bool -> Bool -> ( String, String )
+                                extractPatternBindingsWithType elemExpr pat isUnion isString isList =
                                     case pat of
                                         Src.PVar hName ->
                                             if isUnion then
                                                 ( "elm_union_t elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
                                             else if isString then
                                                 ( "const char *elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
+                                            else if isList then
+                                                ( "elm_list_t elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
                                             else
                                                 ( "double elm_" ++ hName ++ " = " ++ elemExpr ++ ";", "" )
                                         _ ->
                                             extractPatternBindings elemExpr pat
 
                                 ( headBinding, headCondition ) =
-                                    extractPatternBindingsWithType headAccessor headPat headVarUsedAsUnion headVarUsedAsString
+                                    extractPatternBindingsWithType headAccessor headPat headVarUsedAsUnion headVarUsedAsString headVarUsedAsList
 
                                 tailBinding =
                                     case tailPat of
