@@ -1,0 +1,186 @@
+module Codegen.Shared exposing
+    ( ExprCtx
+    , MainValue(..)
+    , ctorListHasData
+    , defaultExprCtx
+    , escapeC
+    , generateCharPredCall
+    , mainTypeIsString
+    , patternVars
+    , uniqueStrings
+    )
+
+{-| Shared types and utilities for code generation.
+
+This module contains common types, helper functions, and constants
+used across the various code generation modules.
+
+-}
+
+import AST.Source as Src
+
+
+{-| Context passed through expression generation for tracking scope and names.
+-}
+type alias ExprCtx =
+    { funcPrefix : String -- The enclosing function name for lifted local functions
+    , modulePrefix : String -- Module name with dots replaced by underscores (for function prefixes)
+    , userFunctions : List String -- Names of user-defined functions in this module
+    }
+
+
+{-| Default context for top-level or main expressions
+-}
+defaultExprCtx : ExprCtx
+defaultExprCtx =
+    { funcPrefix = "main"
+    , modulePrefix = ""
+    , userFunctions = []
+    }
+
+
+{-| Type representing the main value's type and code
+-}
+type MainValue
+    = MainString String
+    | MainInt Int
+    | MainExpr String String -- (C type, C expression)
+
+
+{-| Escape a string for C
+-}
+escapeC : String -> String
+escapeC s =
+    String.toList s
+        |> List.map
+            (\c ->
+                case c of
+                    '"' ->
+                        "\\\""
+
+                    '\'' ->
+                        "\\'"
+
+                    '\\' ->
+                        "\\\\"
+
+                    '\n' ->
+                        "\\n"
+
+                    '\t' ->
+                        "\\t"
+
+                    '\u{000D}' ->
+                        "\\r"
+
+                    _ ->
+                        String.fromChar c
+            )
+        |> String.concat
+
+
+{-| Generate inline code for Char predicates
+-}
+generateCharPredCall : String -> String -> String
+generateCharPredCall fnName charExpr =
+    case fnName of
+        "isDigit" ->
+            "(" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9')"
+
+        "isAlpha" ->
+            "((" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z'))"
+
+        "isUpper" ->
+            "(" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z')"
+
+        "isLower" ->
+            "(" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z')"
+
+        "isAlphaNum" ->
+            "((" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z') || (" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9'))"
+
+        "isHexDigit" ->
+            "((" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9') || (" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'f') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'F'))"
+
+        "isOctDigit" ->
+            "(" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '7')"
+
+        _ ->
+            "/* unknown Char predicate: " ++ fnName ++ " */ 0"
+
+
+{-| Extract variable names bound by a pattern
+-}
+patternVars : Src.Pattern -> List String
+patternVars (Src.At _ pat) =
+    case pat of
+        Src.PVar name ->
+            [ name ]
+
+        Src.PCtor _ _ subPats ->
+            List.concatMap patternVars subPats
+
+        Src.PCtorQual _ _ _ subPats ->
+            List.concatMap patternVars subPats
+
+        Src.PList subPats ->
+            List.concatMap patternVars subPats
+
+        Src.PCons headPat tailPat ->
+            patternVars headPat ++ patternVars tailPat
+
+        Src.PTuple first second rest ->
+            patternVars first ++ patternVars second ++ List.concatMap patternVars rest
+
+        Src.PRecord fields ->
+            List.map (\(Src.At _ name) -> name) fields
+
+        Src.PAlias innerPat (Src.At _ aliasName) ->
+            aliasName :: patternVars innerPat
+
+        _ ->
+            []
+
+
+{-| Remove duplicates from a list
+-}
+uniqueStrings : List String -> List String
+uniqueStrings list =
+    List.foldl
+        (\item acc ->
+            if List.member item acc then
+                acc
+
+            else
+                acc ++ [ item ]
+        )
+        []
+        list
+
+
+{-| Check if a union type has any constructors with data
+-}
+ctorListHasData : List ( Src.Located String, List Src.Type ) -> Bool
+ctorListHasData ctors =
+    case ctors of
+        [] ->
+            False
+
+        ( _, args ) :: rest ->
+            if List.isEmpty args then
+                ctorListHasData rest
+
+            else
+                True
+
+
+{-| Check if a type annotation represents String type
+-}
+mainTypeIsString : Maybe Src.Type -> Bool
+mainTypeIsString maybeType =
+    case maybeType of
+        Just (Src.At _ (Src.TType _ "String" [])) ->
+            True
+
+        _ ->
+            False

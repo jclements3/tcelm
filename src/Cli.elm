@@ -2,11 +2,42 @@ port module Cli exposing (main)
 
 {-| CLI entry point for tcelm compiler.
 
-Compiles Elm source code to C code for RTEMS.
+Compiles Elm source code to C code for multiple targets:
+
+  - RTEMS: Real-time embedded systems
+  - TCC: Tiny C Compiler (portable, no GCC extensions)
+  - Native: Standard desktop/server environments
+
+## Module Organization
+
+Code generation is split across several modules:
+
+  - Codegen.Shared: Common types and utilities
+  - Codegen.Builtins: Built-in function handlers (Basics, String, List, etc.)
+  - Codegen.Pattern: Pattern matching generation
+  - Codegen.Expr: Expression generation utilities
+  - Codegen.Union: Custom type generation
+  - Codegen.Lambda: Lambda lifting types and utilities
+
+Target-specific code:
+
+  - Target.TCC: TCC target (skeleton)
+  - Target.RTEMS: RTEMS target (skeleton)
+  - Target.Native: Native target (skeleton)
+  - Target.NativeWorker: Native worker target (skeleton)
+
+The main expression generation remains in this module for now,
+using callback patterns to delegate to the Codegen modules.
 
 -}
 
 import AST.Source as Src
+import Codegen.Builtins as Builtins
+import Codegen.Expr as Expr
+import Codegen.Lambda as Lambda exposing (LiftedFunc)
+import Codegen.Pattern as Pattern
+import Codegen.Shared as Shared exposing (ExprCtx, MainValue(..), escapeC, patternVars)
+import Codegen.Union as Union
 import Generate.C as C
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -173,74 +204,10 @@ generateRtemsCode ast =
                     )
                 |> String.join "\n\n"
 
-        -- Check if a union has any constructors with data
-        -- Using recursive pattern instead of List.any for self-hosting compatibility
-        unionHasData union =
-            ctorListHasData union.ctors
-
-        -- Generate custom type definitions (structs, tags, and constructors)
+        -- Generate custom type definitions using Union module
         customTypeCode =
             ast.unions
-                |> List.map
-                    (\(Src.At _ union) ->
-                        let
-                            (Src.At _ typeName) =
-                                union.name
-
-                            hasData =
-                                unionHasData union
-
-                            -- Tag defines for all constructors
-                            tagDefines =
-                                union.ctors
-                                    |> List.indexedMap
-                                        (\i ( Src.At _ ctorName, _ ) ->
-                                            "#define TAG_" ++ ctorName ++ " " ++ String.fromInt i
-                                        )
-                                    |> String.join "\n"
-
-                            -- Type alias for all custom types (use common elm_union_t)
-                            structDef =
-                                "typedef elm_union_t elm_" ++ typeName ++ ";\n"
-
-                            -- Constructor functions using elm_union_t
-                            ctorFuncs =
-                                union.ctors
-                                    |> List.indexedMap
-                                        (\i ( Src.At _ ctorName, ctorArgs ) ->
-                                            let
-                                                argCount =
-                                                    List.length ctorArgs
-
-                                            in
-                                            if argCount == 0 then
-                                                -- No-data constructor
-                                                "static elm_union_t elm_"
-                                                    ++ ctorName
-                                                    ++ "(void) {\n    elm_union_t result = { .tag = TAG_"
-                                                    ++ ctorName
-                                                    ++ ", .data = {.num = 0}, .data2 = 0 };\n    return result;\n}"
-
-                                            else if argCount == 1 then
-                                                -- Single argument constructor
-                                                "static elm_union_t elm_"
-                                                    ++ ctorName
-                                                    ++ "(elm_union_t v1) {\n    elm_union_t result = { .tag = TAG_"
-                                                    ++ ctorName
-                                                    ++ ", .data = {.child = elm_alloc_union(v1)}, .data2 = 0 };\n    return result;\n}"
-
-                                            else
-                                                -- Two argument constructor (Add Expr Expr, etc)
-                                                "static elm_union_t elm_"
-                                                    ++ ctorName
-                                                    ++ "(elm_union_t v1, elm_union_t v2) {\n    elm_union_t result = { .tag = TAG_"
-                                                    ++ ctorName
-                                                    ++ ", .data = {.child = elm_alloc_union(v1)}, .data2 = elm_alloc_union(v2) };\n    return result;\n}"
-                                        )
-                                    |> String.join "\n\n"
-                        in
-                        tagDefines ++ "\n" ++ structDef ++ ctorFuncs
-                    )
+                |> List.map Union.generateUnionDef
                 |> String.join "\n\n"
 
         constructorDefinesCode =
@@ -2521,30 +2488,6 @@ generateStandaloneFunction (Src.At _ value) =
         ]
 
 
-{-| Type representing the main value's type and code
--}
-type MainValue
-    = MainString String
-    | MainInt Int
-    | MainExpr String String  -- (C type, C expression)
-
-
-{-| Extract the main value from a module
--}
-ctorListHasData : List ( Src.Located String, List Src.Type ) -> Bool
-ctorListHasData ctors =
-    case ctors of
-        [] ->
-            False
-
-        ( _, args ) :: rest ->
-            if List.isEmpty args then
-                ctorListHasData rest
-
-            else
-                True
-
-
 extractMain : Src.Module -> MainValue
 extractMain ast =
     ast.values
@@ -2568,18 +2511,6 @@ extractMainValue (Src.At _ value) =
         Nothing
 
 
-{-| Check if a type annotation represents String type
--}
-mainTypeIsString : Maybe Src.Type -> Bool
-mainTypeIsString maybeType =
-    case maybeType of
-        Just (Src.At _ (Src.TType _ "String" [])) ->
-            True
-
-        _ ->
-            False
-
-
 {-| Convert an expression to a MainValue, using type annotation if available
 -}
 exprToMainValueWithType : Maybe Src.Type -> Src.Expr -> MainValue
@@ -2589,7 +2520,7 @@ exprToMainValueWithType maybeType expr =
             exprToMainValue expr
     in
     -- If type annotation says String, override int inference
-    if mainTypeIsString maybeType then
+    if Shared.mainTypeIsString maybeType then
         case baseValue of
             MainExpr "int" cCode ->
                 MainExpr "const char *" cCode
@@ -2907,7 +2838,7 @@ generateStandaloneBinopsWithCtx ctx pairs finalExpr =
 generateStandaloneBinops : List ( Src.Expr, Src.Located String ) -> Src.Expr -> String
 generateStandaloneBinops pairs finalExpr =
     -- Use default context for backward compatibility
-    generateStandaloneBinopsImpl defaultExprCtx pairs finalExpr
+    generateStandaloneBinopsImpl Shared.defaultExprCtx pairs finalExpr
 
 
 {-| Internal implementation with context threading
@@ -3274,30 +3205,11 @@ makeUnionCtor tag dataValue =
         "((elm_union_t){" ++ tag ++ ", " ++ wrapUnionData dataValue ++ "})"
 
 
-{-| Context for expression generation, tracks enclosing function name
--}
-type alias ExprCtx =
-    { funcPrefix : String  -- The enclosing function name for lifted local functions
-    , modulePrefix : String  -- Module name with dots replaced by underscores (for function prefixes)
-    , userFunctions : List String  -- Names of user-defined functions in this module
-    }
-
-
-{-| Default context for top-level or main expressions
--}
-defaultExprCtx : ExprCtx
-defaultExprCtx =
-    { funcPrefix = "main"
-    , modulePrefix = ""
-    , userFunctions = []
-    }
-
-
 {-| Generate standalone C code for a single expression (no runtime)
 -}
 generateStandaloneExpr : Src.Expr -> String
 generateStandaloneExpr expr =
-    generateStandaloneExprWithCtx defaultExprCtx expr
+    generateStandaloneExprWithCtx Shared.defaultExprCtx expr
 
 
 {-| Generate standalone C code with function context for lifted local functions
@@ -3698,13 +3610,27 @@ generateStandaloneCallWithCtx ctx fn args =
 -}
 generateStandaloneCall : Src.Expr -> List Src.Expr -> String
 generateStandaloneCall fn args =
-    generateStandaloneCallImpl defaultExprCtx fn args
+    generateStandaloneCallImpl Shared.defaultExprCtx fn args
 
 
 {-| Implementation of standalone call generation with context
 -}
 generateStandaloneCallImpl : ExprCtx -> Src.Expr -> List Src.Expr -> String
 generateStandaloneCallImpl ctx fn args =
+    -- First try the extracted builtin handlers
+    case Builtins.generateBuiltinCall generateStandaloneExpr ctx fn args of
+        Just result ->
+            result
+
+        Nothing ->
+            -- Fall back to remaining handlers
+            generateStandaloneCallImplFallback ctx fn args
+
+
+{-| Fallback implementation for builtins not yet migrated to Builtins module
+-}
+generateStandaloneCallImplFallback : ExprCtx -> Src.Expr -> List Src.Expr -> String
+generateStandaloneCallImplFallback ctx fn args =
     -- Handle built-in functions
     case fn of
         Src.At _ (Src.Var _ "modBy") ->
@@ -4344,7 +4270,7 @@ generateStandaloneCallImpl ctx fn args =
 
                                 Src.At _ (Src.VarQual _ "Char" fnName) ->
                                     -- Handle Char.isDigit, Char.isAlpha, etc.
-                                    generateCharPredCall fnName "__str[__i]"
+                                    Shared.generateCharPredCall fnName "__str[__i]"
 
                                 _ ->
                                     generateStandaloneExpr predExpr ++ "(__str[__i])"
@@ -4372,7 +4298,7 @@ generateStandaloneCallImpl ctx fn args =
 
                                 Src.At _ (Src.VarQual _ "Char" fnName) ->
                                     -- Handle Char.isDigit, Char.isAlpha, etc.
-                                    generateCharPredCall fnName "__str[__i]"
+                                    Shared.generateCharPredCall fnName "__str[__i]"
 
                                 _ ->
                                     generateStandaloneExpr predExpr ++ "(__str[__i])"
@@ -4448,7 +4374,7 @@ generateStandaloneCallImpl ctx fn args =
                                     "({ double elm_" ++ pname ++ " = __str[__i]; " ++ bodyStr ++ "; })"
 
                                 Src.At _ (Src.VarQual _ "Char" fnName) ->
-                                    generateCharPredCall fnName "__str[__i]"
+                                    Shared.generateCharPredCall fnName "__str[__i]"
 
                                 _ ->
                                     generateStandaloneExpr predExpr ++ "(__str[__i])"
@@ -6147,7 +6073,7 @@ generateStandaloneCallWithPipeArgCtx ctx fn partialArgs pipeArg =
 -}
 generateStandaloneCallWithPipeArg : Src.Expr -> List Src.Expr -> String -> String
 generateStandaloneCallWithPipeArg fn partialArgs pipeArg =
-    generateStandaloneCallWithPipeArgImpl defaultExprCtx fn partialArgs pipeArg
+    generateStandaloneCallWithPipeArgImpl Shared.defaultExprCtx fn partialArgs pipeArg
 
 
 {-| Implementation of pipe argument call generation.
@@ -7260,17 +7186,6 @@ generateTCOExpr funcName paramNames (Src.At _ expr) =
             Just ("            return " ++ generateStandaloneExpr (Src.At { start = { row = 1, col = 1 }, end = { row = 1, col = 1 } } expr) ++ ";")
 
 
-{-| A local function to be lifted to module level
--}
-type alias LiftedFunc =
-    { prefix : String
-    , name : String
-    , args : List Src.Pattern
-    , body : Src.Expr
-    , capturedVars : List String  -- Variables captured from outer scope
-    }
-
-
 {-| Collect all variable references from an expression
 -}
 collectVarRefs : Src.Expr -> List String
@@ -7377,7 +7292,7 @@ computeReachableFunctions values =
                 |> Maybe.map (\( _, body ) -> collectVarRefs body)
                 |> Maybe.withDefault []
                 |> List.filter (\ref -> List.member ref definedFuncs)
-                |> uniqueStrings
+                |> Shared.uniqueStrings
 
         -- Compute transitive closure starting from "main"
         computeClosure : List String -> List String -> List String
@@ -7415,54 +7330,6 @@ filterReachableValues values =
                 in
                 List.member name reachable
             )
-
-
-{-| Extract variable names bound by a pattern
--}
-patternVars : Src.Pattern -> List String
-patternVars (Src.At _ pat) =
-    case pat of
-        Src.PVar name ->
-            [ name ]
-
-        Src.PCtor _ _ subPats ->
-            List.concatMap patternVars subPats
-
-        Src.PCtorQual _ _ _ subPats ->
-            List.concatMap patternVars subPats
-
-        Src.PList subPats ->
-            List.concatMap patternVars subPats
-
-        Src.PCons headPat tailPat ->
-            patternVars headPat ++ patternVars tailPat
-
-        Src.PTuple first second rest ->
-            patternVars first ++ patternVars second ++ List.concatMap patternVars rest
-
-        Src.PRecord fields ->
-            List.map (\(Src.At _ name) -> name) fields
-
-        Src.PAlias innerPat (Src.At _ aliasName) ->
-            aliasName :: patternVars innerPat
-
-        _ ->
-            []
-
-
-{-| Remove duplicates from a list
--}
-uniqueStrings : List String -> List String
-uniqueStrings list =
-    List.foldl
-        (\item acc ->
-            if List.member item acc then
-                acc
-            else
-                acc ++ [ item ]
-        )
-        []
-        list
 
 
 {-| Collect local function definitions from an expression for lifting to module level
@@ -7512,7 +7379,7 @@ collectLocalFunctionsWithScope prefix scope (Src.At _ expr) =
 
                                                 -- Get all var refs in body
                                                 allRefs =
-                                                    collectVarRefs defBody |> uniqueStrings
+                                                    collectVarRefs defBody |> Shared.uniqueStrings
 
                                                 -- Captured = refs that are in scope but not in args or stdlib
                                                 stdlibFuncs =
@@ -8047,7 +7914,7 @@ generateStandaloneLetWithPrefix prefix defs body =
 
                                         -- Get all var refs in body
                                         allRefs =
-                                            collectVarRefs defBody |> uniqueStrings
+                                            collectVarRefs defBody |> Shared.uniqueStrings
 
                                         -- Collect names of values defined in this let (excluding functions)
                                         letValueNames =
@@ -8381,7 +8248,7 @@ generateDestructuring pattern expr =
 -}
 generateStandaloneIf : List ( Src.Expr, Src.Expr ) -> Src.Expr -> String
 generateStandaloneIf branches elseExpr =
-    generateStandaloneIfWithCtx defaultExprCtx branches elseExpr
+    generateStandaloneIfWithCtx Shared.defaultExprCtx branches elseExpr
 
 
 {-| Generate if/else with function context
@@ -8407,6 +8274,20 @@ Supports pattern guards: `pattern if guard -> body`
 -}
 generateStandaloneCase : Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
 generateStandaloneCase scrutinee branches =
+    -- First try the extracted pattern handlers
+    case Pattern.generateCaseExpr generateStandaloneExpr scrutinee branches of
+        Just result ->
+            result
+
+        Nothing ->
+            -- Fall back to the full implementation
+            generateStandaloneCaseFallback scrutinee branches
+
+
+{-| Fallback implementation for complex pattern matching not yet migrated
+-}
+generateStandaloneCaseFallback : Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+generateStandaloneCaseFallback scrutinee branches =
     let
         scrutineeStr =
             generateStandaloneExpr scrutinee
@@ -10032,92 +9913,6 @@ extractMainString (Src.At _ value) =
 
     else
         Nothing
-
-
-{-| Escape a string for C
--}
-escapeC : String -> String
-escapeC s =
-    String.toList s
-        |> List.map
-            (\c ->
-                case c of
-                    '"' ->
-                        "\\\""
-
-                    '\'' ->
-                        "\\'"
-
-                    '\\' ->
-                        "\\\\"
-
-                    '\n' ->
-                        "\\n"
-
-                    '\t' ->
-                        "\\t"
-
-                    '\u{000D}' ->
-                        "\\r"
-
-                    _ ->
-                        String.fromChar c
-            )
-        |> String.concat
-
-
-{- OLD CODE - keeping for reference when runtime is available
-        baseCode =
-            C.generateModule ast
-
-        rtemsWrapper =
-            String.join "\n"
-                [ ""
-                , "/* RTEMS entry point */"
-                , "typedef unsigned int rtems_task_argument;"
-                , "typedef unsigned int rtems_id;"
-                , "#define RTEMS_SELF 0"
-                , "extern void rtems_task_delete(rtems_id id);"
-                , ""
-                , "/* Serial port output (COM1) */"
-                , "static inline void outb(unsigned short port, unsigned char val) {"
-                , "    __asm__ volatile (\"outb %0, %1\" : : \"a\"(val), \"Nd\"(port));"
-                , "}"
-                , "static inline unsigned char inb(unsigned short port) {"
-                , "    unsigned char ret;"
-                , "    __asm__ volatile (\"inb %1, %0\" : \"=a\"(ret) : \"Nd\"(port));"
-                , "    return ret;"
--}
-
-
-{-| Generate inline code for Char predicates
--}
-generateCharPredCall : String -> String -> String
-generateCharPredCall fnName charExpr =
-    case fnName of
-        "isDigit" ->
-            "(" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9')"
-
-        "isAlpha" ->
-            "((" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z'))"
-
-        "isUpper" ->
-            "(" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z')"
-
-        "isLower" ->
-            "(" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z')"
-
-        "isAlphaNum" ->
-            "((" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'z') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'Z') || (" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9'))"
-
-        "isHexDigit" ->
-            "((" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '9') || (" ++ charExpr ++ " >= 'a' && " ++ charExpr ++ " <= 'f') || (" ++ charExpr ++ " >= 'A' && " ++ charExpr ++ " <= 'F'))"
-
-        "isOctDigit" ->
-            "(" ++ charExpr ++ " >= '0' && " ++ charExpr ++ " <= '7')"
-
-        _ ->
-            "/* unknown Char predicate: " ++ fnName ++ " */ 0"
 
 
 formatErrors : List (Parse.Primitives.DeadEnd Reporting.Error.Syntax.Problem) -> String
