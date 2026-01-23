@@ -694,7 +694,7 @@ case_ start =
         )
 
 
-chompBranch : Parser E.Problem ( ( Src.Pattern, Expr ), Position )
+chompBranch : Parser E.Problem ( ( Src.Pattern, Maybe Expr, Expr ), Position )
 chompBranch =
     Pattern.expression
         |> P.andThen
@@ -702,16 +702,21 @@ chompBranch =
                 Space.checkIndent patternEnd E.CaseIndentArrow
                     |> P.andThen
                         (\_ ->
-                            P.symbol "->" E.CaseArrow
+                            -- Try to parse optional guard: "if <expr>"
+                            chompOptionalGuard
                                 |> P.andThen
-                                    (\_ ->
-                                        Space.chompAndCheckIndent E.CaseSpace E.CaseIndentBranch
+                                    (\maybeGuard ->
+                                        P.symbol "->" E.CaseArrow
                                             |> P.andThen
                                                 (\_ ->
-                                                    expression
+                                                    Space.chompAndCheckIndent E.CaseSpace E.CaseIndentBranch
                                                         |> P.andThen
-                                                            (\( branchExpr, end ) ->
-                                                                P.succeed ( ( pattern, branchExpr ), end )
+                                                            (\_ ->
+                                                                expression
+                                                                    |> P.andThen
+                                                                        (\( branchExpr, end ) ->
+                                                                            P.succeed ( ( pattern, maybeGuard, branchExpr ), end )
+                                                                        )
                                                             )
                                                 )
                                     )
@@ -719,7 +724,31 @@ chompBranch =
             )
 
 
-chompCaseEnd : List ( Src.Pattern, Expr ) -> Position -> Parser E.Problem ( List ( Src.Pattern, Expr ), Position )
+{-| Parse optional guard expression: "if <expr>"
+Returns Nothing if no guard, Just expr if guard present.
+-}
+chompOptionalGuard : Parser E.Problem (Maybe Expr)
+chompOptionalGuard =
+    P.oneOfWithFallback
+        [ Keyword.if_ E.Start
+            |> P.andThen
+                (\_ ->
+                    Space.chompAndCheckIndent E.CaseSpace E.CaseIndentArrow
+                        |> P.andThen
+                            (\_ ->
+                                expression
+                                    |> P.andThen
+                                        (\( guardExpr, _ ) ->
+                                            Space.chomp E.Space
+                                                |> P.andThen (\_ -> P.succeed (Just guardExpr))
+                                        )
+                            )
+                )
+        ]
+        Nothing
+
+
+chompCaseEnd : List ( Src.Pattern, Maybe Expr, Expr ) -> Position -> Parser E.Problem ( List ( Src.Pattern, Maybe Expr, Expr ), Position )
 chompCaseEnd branches end =
     P.oneOfWithFallback
         [ Space.checkAligned E.CasePatternAlignment

@@ -90,7 +90,7 @@ type Expr_
     | Call Expr (List Expr)
     | If (List ( Expr, Expr )) Expr
     | Let (List (Located Def)) Expr
-    | Case Expr (List ( Pattern, Expr ))
+    | Case Expr (List ( Pattern, Maybe Expr, Expr ))  -- (pattern, maybe guard, body)
     | Accessor String
     | Access Expr (Located String)
     | Update (Located String) (List ( Located String, Expr ))

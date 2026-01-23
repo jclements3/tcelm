@@ -401,7 +401,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
 
                 ( counterAfterBranches, branchCodes ) =
                     List.foldl
-                        (\( pat, branchExpr ) ( c, acc ) ->
+                        (\( pat, _, branchExpr ) ( c, acc ) ->
                             let
                                 patLocals =
                                     collectPatternVar pat ++ locals
@@ -1224,7 +1224,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                     collectLambdasFromExpr modulePrefix outerLocals scrutinee state
             in
             List.foldl
-                (\( pat, branchExpr ) st ->
+                (\( pat, _, branchExpr ) st ->
                     let
                         patLocals =
                             collectPatternVar pat ++ outerLocals
@@ -1345,7 +1345,7 @@ collectFreeVars boundVars (Src.At _ expr) =
 
                 branchVars =
                     List.concatMap
-                        (\( pat, branchExpr ) ->
+                        (\( pat, _, branchExpr ) ->
                             collectFreeVars (collectPatternVar pat ++ boundVars) branchExpr
                         )
                         branches
@@ -1618,7 +1618,11 @@ generateExprInContextWithPrefix modulePrefix locals (Src.At _ expr) =
             generateLetInContextWithPrefix modulePrefix locals defs body
 
         Case subject branches ->
-            generateCaseInContextWithPrefix modulePrefix locals subject branches
+            -- Strip guards from branches (guards not yet supported in code gen)
+            let
+                strippedBranches = List.map (\( pat, _, body ) -> ( pat, body )) branches
+            in
+            generateCaseInContextWithPrefix modulePrefix locals subject strippedBranches
 
         Accessor field ->
             "/* accessor ." ++ field ++ " */"
@@ -2083,7 +2087,11 @@ generateExprInContext locals (Src.At _ expr) =
             generateLetInContext locals defs body
 
         Case subject branches ->
-            generateCaseInContext locals subject branches
+            -- Strip guards from branches (guards not yet supported in code gen)
+            let
+                strippedBranches = List.map (\( pat, _, body ) -> ( pat, body )) branches
+            in
+            generateCaseInContext locals subject strippedBranches
 
         Accessor field ->
             "/* accessor ." ++ field ++ " */"
@@ -3072,7 +3080,11 @@ generateExpr (Src.At _ expr) =
             generateLet defs body
 
         Case subject branches ->
-            generateCase subject branches
+            -- Strip guards from branches (guards not yet supported in code gen)
+            let
+                strippedBranches = List.map (\( pat, _, body ) -> ( pat, body )) branches
+            in
+            generateCase subject strippedBranches
 
         Accessor field ->
             "/* accessor ." ++ field ++ " */"
