@@ -1,5 +1,19 @@
 # tcelm TODO - Master Plan
 
+## Current Progress
+
+**Last Updated**: 2025-01-24
+**Last Session**: Created TODO.md, analyzed codebase structure
+**Next Action**: Start Phase 1.1 - Extract Target/RTEMS.elm from Cli.elm
+
+### Session Log
+- [x] 2025-01-24: Created TODO.md with full roadmap
+- [x] 2025-01-24: Analyzed Cli.elm structure (6,353 lines, 168 case statements)
+- [x] 2025-01-24: Documented Codegen/ module responsibilities
+- [ ] **NEXT**: Extract generateRtemsCode (lines 159-770) to Target/RTEMS.elm
+
+---
+
 ## Current State Summary
 
 | Component | Status | Notes |
