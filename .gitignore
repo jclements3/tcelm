@@ -60,3 +60,4 @@ tests/ripitt_output/
 elm-compiler-src/
 tcc/
 taos/
+.claude/
