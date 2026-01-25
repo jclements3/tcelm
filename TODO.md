@@ -325,6 +325,24 @@
   - Added skipNewlines before checking for `|` in record expressions
   - `{ r \n | a = 1 }` now parses correctly
   - 265 tests passing
+- [x] 2026-01-25: Multi-module merger improvements (tcelm2-merge.js)
+  - Handle `import X exposing (Name1, Name2)` with proper renaming
+  - Handle `import X exposing (..)` with wildcard export collection
+  - Properly parse `Type(..)` syntax in exposing clauses
+  - Use balanced parentheses parsing for complex exposing clauses
+  - Parser fix: multiline union type constructor args now parse correctly
+  - Type alias expansion in custom type constructor arguments (Infer.elm)
+  - Lambda pattern desugaring for complex patterns like `\(_, t) -> ...` (Desugar.elm)
+  - 265 tests passing
+- [x] 2026-01-25: Type inference bug discovered (tcelm2)
+  - Specific combination causes infinite type error: polymorphic record type alias +
+    function using it + case expression with function call in scrutinee + recursive function
+  - Minimal repro: `type alias Located a = { value : a }` + `getValue : Located a -> a` +
+    `peek : State -> Maybe Char` + `case peek state of` + recursive `advanceN`
+  - Error: "Infinite type: t1 occurs in { pos : Int }"
+  - Original tcelm compiler handles this correctly (self-hosting can proceed via that path)
+  - Investigation shows issue is in type inference around polymorphic records
+  - 265 tests passing (issue only manifests with specific code patterns in merged file)
 - [x] Local function capture in anonymous lambdas: WORKS in tcelm2
   - Example: `let f x = x + 1 in List.foldl (\e a -> f e + a) 0 xs` compiles correctly
   - The old tcelm has this bug but tcelm2 handles it properly
@@ -361,11 +379,15 @@
   - [x] Constructor merging with proper prefixing
   - [x] Imports hoisted to top of merged file (fixes mid-file import error)
   - [x] Parser fix: multiline constructor definitions now parse correctly
-  - [ ] Type alias expansion in type inference (Types_TypeVar ≠ String currently)
-  - Current blockers for self-hosting:
-    1. Type aliases not expanded during type inference (Types_TypeVar vs String)
-    2. Complex module like Types.elm triggers type unification errors
-    3. Simple multi-module with union types WORKS: Helper.makeTriple -> helper_makeTriple
+  - [x] Type alias expansion in constructor arguments
+  - [x] Handle `import X exposing (Name1, Type(..))` properly
+  - [x] Handle `import X exposing (..)` wildcard imports
+  - [x] Lambda pattern desugaring for complex patterns
+  - Current blockers for self-hosting with tcelm2:
+    1. **Type inference bug**: polymorphic record type alias + case expression with function call
+       in scrutinee causes infinite type error. See minimal repro in session log.
+    2. Original tcelm (not tcelm2) can compile the merged file correctly
+  - **Workaround**: Use original tcelm compiler for self-hosting until type inference bug is fixed
 
 ---
 
