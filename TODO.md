@@ -369,6 +369,13 @@
   - EUnit now produces TCon "()" to match TAUnit (was TCon "Unit")
   - Fixed typedef collision for single-constructor types (type T = T a)
   - 265 tests passing
+- [x] 2026-01-25: RTEMS Multi-Core Elm bindings (Phase 6 complete)
+  - Created `lib/Rtems/Channel.elm` - bounded message-passing channels with FFI
+  - Created `lib/Rtems/MVar.elm` - synchronized mutable variables with FFI
+  - Created `lib/Rtems/Par.elm` - parallel computation primitives (parMap, fork/join)
+  - Created `lib/Rtems/Atomic.elm` - lock-free atomic int/bool operations
+  - Expanded `runtime/tcelm_atomic.h` with full atomic operations for FFI
+  - Updated `docs/patterns.md` and `docs/RTEMS.md` for current state
 - [ ] **NEXT**: Self-hosting roadmap
   - [x] Individual module compilation works (Types.elm, AST.elm produce valid C)
   - [x] Library modules no longer generate main() (MainNone variant added)
@@ -721,24 +728,31 @@ Reduce boilerplate for common cases:
 
 ---
 
-## Phase 6: RTEMS Multi-Core (LOWER PRIORITY)
+## Phase 6: RTEMS Multi-Core ✅ COMPLETE
 
 For 4-core NUC parallel execution.
 
 ### 6.1 Core Primitives
-- [ ] Core affinity type
-- [ ] Core ID query
-- [ ] Core count query
+- [x] Core affinity type (`Rtems.SMP.ProcessorSet`)
+- [x] Core ID query (`Rtems.SMP.currentProcessor`)
+- [x] Core count query (`Rtems.SMP.processorCount`)
 
 ### 6.2 Parallelism
-- [ ] `Par` type for parallel computations
-- [ ] `parMap` - parallel map over array
-- [ ] Barrier synchronization
+- [x] `Par` type for parallel computations (`Rtems.Par`)
+- [x] `parMap` - parallel map over array (`Rtems.Par.parMap`)
+- [x] Barrier synchronization (`Rtems.Barrier`)
 
 ### 6.3 Inter-Core Communication
-- [ ] `Channel a` - bounded queues
-- [ ] `MVar a` - synchronized mutable variable
-- [ ] Atomic variables
+- [x] `Channel a` - bounded queues (`Rtems.Channel`)
+- [x] `MVar a` - synchronized mutable variable (`Rtems.MVar`)
+- [x] Atomic variables (`Rtems.Atomic`)
+
+### Multi-Core Modules Created
+- `lib/Rtems/Channel.elm` - Bounded message-passing channels
+- `lib/Rtems/MVar.elm` - Synchronized mutable variables
+- `lib/Rtems/Par.elm` - Parallel computation primitives
+- `lib/Rtems/Atomic.elm` - Lock-free atomic operations
+- `runtime/tcelm_atomic.h` - Expanded with Elm FFI bindings
 
 ---
 

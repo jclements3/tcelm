@@ -175,6 +175,10 @@ tcelm provides extensive hardware and system integration:
 | `Rtems.Network` | Network configuration and utilities |
 | `Rtems.SMP` | Symmetric multi-processing support |
 | `Rtems.Shell` | Interactive shell command registration |
+| `Rtems.Channel` | Bounded message-passing channels |
+| `Rtems.MVar` | Synchronized mutable variables |
+| `Rtems.Par` | Parallel computation primitives |
+| `Rtems.Atomic` | Lock-free atomic operations |
 
 See `lib/Rtems/*.elm` for complete API documentation.
 
@@ -341,14 +345,18 @@ lib/
 ├── Rtems.elm            # Main RTEMS module
 └── Rtems/
     ├── ADC.elm          # Analog-to-digital
+    ├── Atomic.elm       # Lock-free atomics
     ├── Barrier.elm      # Barrier sync
+    ├── Channel.elm      # Message channels
     ├── Clock.elm        # Clock/time
     ├── DAC.elm          # Digital-to-analog
     ├── Events.elm       # Event flags
     ├── Gpio.elm         # GPIO pins
     ├── I2C.elm          # I2C bus
     ├── Interrupt.elm    # ISR bindings
+    ├── MVar.elm         # Synchronized variables
     ├── Network.elm      # Network config
+    ├── Par.elm          # Parallel computation
     ├── Shell.elm        # Shell commands
     ├── SMP.elm          # Multi-core
     ├── Socket.elm       # BSD sockets
