@@ -6814,14 +6814,14 @@ patternCondition ctx scrutVar pattern =
                     ( "1", "" )
 
         Core.PRecord fields _ ->
-            -- Record patterns
+            -- Record patterns - use elm_record_get to access fields from linked list representation
             let
                 bindings =
                     fields
                         |> List.map (\( name, subPat ) ->
                             case subPat of
                                 Core.PVar tv ->
-                                    "elm_value_t " ++ mangle tv.name ++ " = " ++ scrutVar ++ "." ++ name ++ "; "
+                                    "elm_value_t " ++ mangle tv.name ++ " = elm_record_get(\"" ++ name ++ "\", " ++ scrutVar ++ "); "
                                 _ ->
                                     ""
                         )
