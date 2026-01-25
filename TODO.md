@@ -231,7 +231,8 @@
   - Time.now : Task x Int (get current POSIX time in milliseconds)
   - Time.posixToMillis, Time.millisToPosix (conversions)
   - Process.sleep : Float -> Task x () (sleep for milliseconds)
-  - 186 tests passing, ~265 builtin functions
+  - List.zip : List a -> List b -> List (a, b) (combine lists into tuples)
+  - 187 tests passing, ~270 builtin functions
 - [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution)
 
 ---
