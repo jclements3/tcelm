@@ -341,11 +341,17 @@
   - Fixed: `x :: xs -> x` patterns in case branches work
   - Fixed: `let (a, b) = expr in ...` after simple bindings work
   - 265 tests passing (all FP patterns pass)
-- [ ] **ISSUE**: Type aliases not expanded in type annotations
-  - `type alias Env = Dict.Dict String Int` then `f : Env -> Env` fails
-  - Workaround: use expanded type `Dict.Dict String Int` directly
-  - Need to store and expand type aliases during type inference
-- [ ] **NEXT**: Continue testing and improving compiler robustness
+- [x] 2026-01-25: Type alias expansion in type inference
+  - Store type aliases during TypeAliasDecl processing
+  - Expand aliases when processing type annotations (ValueDecl, ForeignDecl)
+  - Support parametric aliases like `type alias MyList a = List a`
+  - Working: `type alias Env = Dict.Dict String Int` then `f : Env -> Env`
+- [x] 2026-01-25: Fixed custom type constructor inference and unit type
+  - Constructor arg types now properly parsed from type annotations
+  - EUnit now produces TCon "()" to match TAUnit (was TCon "Unit")
+  - Fixed typedef collision for single-constructor types (type T = T a)
+  - 265 tests passing
+- [ ] **NEXT**: Continue toward self-hosting (compile tcelm2 with itself)
 
 ---
 
