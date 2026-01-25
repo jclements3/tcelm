@@ -341,6 +341,10 @@
   - Fixed: `x :: xs -> x` patterns in case branches work
   - Fixed: `let (a, b) = expr in ...` after simple bindings work
   - 265 tests passing (all FP patterns pass)
+- [ ] **ISSUE**: Type aliases not expanded in type annotations
+  - `type alias Env = Dict.Dict String Int` then `f : Env -> Env` fails
+  - Workaround: use expanded type `Dict.Dict String Int` directly
+  - Need to store and expand type aliases during type inference
 - [ ] **NEXT**: Continue testing and improving compiler robustness
 
 ---
