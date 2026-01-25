@@ -1480,6 +1480,53 @@ generateRuntime _ =
         , "    elm_value_t reversed = elm_List_reverse(set);"
         , "    return elm_Set_foldl(f, acc, reversed);"
         , "}"
+        , ""
+        , "/* ===== CHAR MODULE ===== */"
+        , ""
+        , "static elm_value_t elm_Char_toCode(elm_value_t c) {"
+        , "    return elm_int(c.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_fromCode(elm_value_t code) {"
+        , "    return (elm_value_t){ .tag = 3, .data.i = code.data.i, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isDigit(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool(ch >= '0' && ch <= '9');"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isLower(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool(ch >= 'a' && ch <= 'z');"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isUpper(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool(ch >= 'A' && ch <= 'Z');"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isAlpha(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isAlphaNum(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_toUpper(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    if (ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A';"
+        , "    return (elm_value_t){ .tag = 3, .data.i = ch, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_toLower(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    if (ch >= 'A' && ch <= 'Z') ch = ch - 'A' + 'a';"
+        , "    return (elm_value_t){ .tag = 3, .data.i = ch, .next = NULL };"
+        , "}"
         ]
 
 
@@ -2499,6 +2546,17 @@ getFunctionArity ctx name =
         "Set.foldl" -> 3
         "Set.foldr" -> 3
 
+        -- Char module (all unary)
+        "Char.toCode" -> 1
+        "Char.fromCode" -> 1
+        "Char.isDigit" -> 1
+        "Char.isLower" -> 1
+        "Char.isUpper" -> 1
+        "Char.isAlpha" -> 1
+        "Char.isAlphaNum" -> 1
+        "Char.toUpper" -> 1
+        "Char.toLower" -> 1
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -2607,6 +2665,10 @@ isBuiltin name =
         , "Set.size", "Set.isEmpty", "Set.toList", "Set.fromList"
         , "Set.union", "Set.intersect", "Set.diff"
         , "Set.map", "Set.filter", "Set.foldl", "Set.foldr"
+        -- Char module
+        , "Char.toCode", "Char.fromCode"
+        , "Char.isDigit", "Char.isLower", "Char.isUpper", "Char.isAlpha", "Char.isAlphaNum"
+        , "Char.toUpper", "Char.toLower"
         ]
 
 

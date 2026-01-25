@@ -476,6 +476,17 @@ builtinTypes =
                     (TArrow (TVar "b")
                         (TArrow (TApp (TCon "Set") (TVar "a")) (TVar "b"))))
           )
+
+        -- Char module
+        , ( "Char.toCode", Scheme [] [] (TArrow (TCon "Char") (TCon "Int")) )
+        , ( "Char.fromCode", Scheme [] [] (TArrow (TCon "Int") (TCon "Char")) )
+        , ( "Char.isDigit", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isLower", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isUpper", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isAlpha", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isAlphaNum", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.toUpper", Scheme [] [] (TArrow (TCon "Char") (TCon "Char")) )
+        , ( "Char.toLower", Scheme [] [] (TArrow (TCon "Char") (TCon "Char")) )
         ]
 
 
