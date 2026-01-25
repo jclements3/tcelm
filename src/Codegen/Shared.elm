@@ -55,6 +55,7 @@ type MainValue
     = MainString String
     | MainInt Int
     | MainExpr String String -- (C type, C expression)
+    | MainNone -- No main function in module (library module)
 
 
 {-| Escape a string for C

@@ -763,16 +763,50 @@ generateCode config ast =
                 "/* Forward declarations */\n" ++ forwardDecls ++ "\n\n"
 
         -- Generate elm_main function and result handling based on type
-        ( returnType, returnExpr, printFormat ) =
+        mainImpl =
             case mainValue of
                 MainString s ->
-                    ( "const char *", "\"" ++ escapeC s ++ "\"", "%s" )
+                    [ "/* Elm main value */"
+                    , "static const char * elm_main(void) {"
+                    , "    return \"" ++ escapeC s ++ "\";"
+                    , "}"
+                    , ""
+                    , "int main(void) {"
+                    , "    printf(\"%s\\n\", elm_main());"
+                    , "    return 0;"
+                    , "}"
+                    ]
 
                 MainInt n ->
-                    ( "int", String.fromInt n, "%d" )
+                    [ "/* Elm main value */"
+                    , "static int elm_main(void) {"
+                    , "    return " ++ String.fromInt n ++ ";"
+                    , "}"
+                    , ""
+                    , "int main(void) {"
+                    , "    printf(\"%d\\n\", elm_main());"
+                    , "    return 0;"
+                    , "}"
+                    ]
 
                 MainExpr cType cExpr ->
-                    ( cType, fixComplexConstantRefs cExpr, if cType == "int" then "%d" else "%s" )
+                    let
+                        printFormat = if cType == "int" then "%d" else "%s"
+                    in
+                    [ "/* Elm main value */"
+                    , "static " ++ cType ++ " elm_main(void) {"
+                    , "    return " ++ fixComplexConstantRefs cExpr ++ ";"
+                    , "}"
+                    , ""
+                    , "int main(void) {"
+                    , "    printf(\"" ++ printFormat ++ "\\n\", elm_main());"
+                    , "    return 0;"
+                    , "}"
+                    ]
+
+                MainNone ->
+                    -- Library module - no main function
+                    [ "/* Library module - no main() */" ]
 
         header =
             [ "/*"
@@ -783,21 +817,10 @@ generateCode config ast =
             , importCode
             , runtimePreamble
             ]
-
-        mainImpl =
-            [ "static " ++ returnType ++ " elm_main(void) {"
-            , "    return " ++ returnExpr ++ ";"
-            , "}"
-            , ""
-            , "int main(void) {"
-            , "    printf(\"" ++ printFormat ++ "\\n\", elm_main());"
-            , "    return 0;"
-            , "}"
-            ]
     in
     String.join "\n"
         (header
-            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ earlyConstantsCode ++ liftedFunctionsCode ++ complexConstantsSection ++ userFunctionsCode ++ "/* Elm main value */" ]
+            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ earlyConstantsCode ++ liftedFunctionsCode ++ complexConstantsSection ++ userFunctionsCode ]
             ++ mainImpl
         )
 

@@ -184,6 +184,14 @@ generateCode config ast =
                         , fbPrint = "fb_print(result);"
                         }
 
+                MainNone ->
+                    -- Library module - minimal stubs
+                    { elmMainFunc = "/* Library module - no main */"
+                    , resultDecl = ""
+                    , resultPrint = ""
+                    , fbPrint = ""
+                    }
+
         standaloneCode =
             String.join "\n"
                 [ "/*"
