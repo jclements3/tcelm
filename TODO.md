@@ -852,8 +852,13 @@ Result: Transaction processing with do-notation works correctly.
 - Balance queries (getBalance function)
 - Event sourcing (List.foldl applyEvent)
 
-**Milestone 4**: Ledger runs on NUC with RTEMS, communicates via serial/network.
-(Requires hardware - RTEMS bindings complete in lib/Rtems/)
+**Milestone 4** ⚠️ IN PROGRESS: Ledger runs on NUC with RTEMS, communicates via serial/network.
+- [x] QEMU testing works - tcelm programs run in QEMU with RTEMS stubs
+- [x] Runtime tests pass in QEMU (28/28)
+- [x] SMP tests pass in QEMU (15/15, 4 cores)
+- [x] Multi-core workload test works (4 CPUs, 400K work units)
+- [x] Elm factorial(10) = 3628800 verified in QEMU
+- [ ] Deploy to physical Intel NUC (requires hardware)
 
 ---
 
