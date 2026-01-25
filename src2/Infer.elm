@@ -231,6 +231,20 @@ builtinTypes =
                 (TArrow (TArrow (TCon "Int") (TArrow (TVar "a") (TVar "b")))
                     (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "b"))))
           )
+        , ( "List.sort"
+          , Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))
+          )
+        , ( "List.sortBy"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))))
+          )
+        , ( "List.partition"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "List") (TVar "a"))
+                        (TTuple [ TApp (TCon "List") (TVar "a"), TApp (TCon "List") (TVar "a") ])))
+          )
 
         -- Maybe module
         , ( "Maybe.withDefault", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "Maybe") (TVar "a")) (TVar "a"))) )

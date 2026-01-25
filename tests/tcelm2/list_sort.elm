@@ -1,0 +1,5 @@
+-- expect: [1, 1, 2, 3, 4, 5]
+module Test exposing (main)
+
+main =
+    List.sort [3, 1, 4, 1, 5, 2]

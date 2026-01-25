@@ -336,6 +336,15 @@ generateRuntime _ =
         , "    return elm_unit(); /* field not found */"
         , "}"
         , ""
+        , "/* Tuple operations - use special tag 600 for 2-tuples */"
+        , "static elm_value_t elm_tuple2(elm_value_t a, elm_value_t b) {"
+        , "    elm_value_t *first = elm_alloc();"
+        , "    elm_value_t *second = elm_alloc();"
+        , "    *first = a;"
+        , "    *second = b;"
+        , "    return (elm_value_t){ .tag = 600, .data.c = first, .next = second };"
+        , "}"
+        , ""
         , "/* Closure application */"
         , "static elm_value_t elm_apply1(elm_closure_t *c, elm_value_t arg) {"
         , "    if (c->applied + 1 < c->arity) {"
@@ -735,6 +744,75 @@ generateRuntime _ =
         , "    return elm_List_reverse(acc);"
         , "}"
         , ""
+        , "/* List.sort - insertion sort for simplicity (assumes Int elements) */"
+        , "static elm_value_t elm_List_sort(elm_value_t xs) {"
+        , "    if (xs.tag == 100) return elm_nil();"
+        , "    elm_value_t sorted = elm_nil();"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t elem = *xs.data.c;"
+        , "        elm_value_t prev = elm_nil();"
+        , "        elm_value_t curr = sorted;"
+        , "        /* Find insertion point */"
+        , "        while (curr.tag == 101 && curr.data.c->data.i < elem.data.i) {"
+        , "            prev = elm_cons(*curr.data.c, prev);"
+        , "            curr = *curr.next;"
+        , "        }"
+        , "        /* Build new sorted list: reverse(prev) ++ [elem] ++ curr */"
+        , "        elm_value_t result = elm_cons(elem, curr);"
+        , "        while (prev.tag == 101) {"
+        , "            result = elm_cons(*prev.data.c, result);"
+        , "            prev = *prev.next;"
+        , "        }"
+        , "        sorted = result;"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return sorted;"
+        , "}"
+        , ""
+        , "/* List.sortBy - sort using a key function */"
+        , "static elm_value_t elm_List_sortBy(elm_value_t keyFn, elm_value_t xs) {"
+        , "    if (xs.tag == 100) return elm_nil();"
+        , "    elm_value_t sorted = elm_nil();"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t elem = *xs.data.c;"
+        , "        elm_value_t elemKey = elm_apply1((elm_closure_t *)keyFn.data.p, elem);"
+        , "        elm_value_t prev = elm_nil();"
+        , "        elm_value_t curr = sorted;"
+        , "        /* Find insertion point by comparing keys */"
+        , "        while (curr.tag == 101) {"
+        , "            elm_value_t currKey = elm_apply1((elm_closure_t *)keyFn.data.p, *curr.data.c);"
+        , "            if (currKey.data.i >= elemKey.data.i) break;"
+        , "            prev = elm_cons(*curr.data.c, prev);"
+        , "            curr = *curr.next;"
+        , "        }"
+        , "        elm_value_t result = elm_cons(elem, curr);"
+        , "        while (prev.tag == 101) {"
+        , "            result = elm_cons(*prev.data.c, result);"
+        , "            prev = *prev.next;"
+        , "        }"
+        , "        sorted = result;"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return sorted;"
+        , "}"
+        , ""
+        , "/* List.partition - split list by predicate */"
+        , "static elm_value_t elm_List_partition(elm_value_t pred, elm_value_t xs) {"
+        , "    elm_value_t trues = elm_nil();"
+        , "    elm_value_t falses = elm_nil();"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t elem = *xs.data.c;"
+        , "        elm_value_t keep = elm_apply1((elm_closure_t *)pred.data.p, elem);"
+        , "        if (keep.data.i) {"
+        , "            trues = elm_cons(elem, trues);"
+        , "        } else {"
+        , "            falses = elm_cons(elem, falses);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_tuple2(elm_List_reverse(trues), elm_List_reverse(falses));"
+        , "}"
+        , ""
         , "/* Maybe module */"
         , "static elm_value_t elm_Maybe_withDefault(elm_value_t def, elm_value_t maybe) {"
         , "    if (maybe.tag == 200) return def;"
@@ -1033,7 +1111,7 @@ generateRuntime _ =
         , ""
         , "/* Tuple module */"
         , "static elm_value_t elm_Tuple_pair(elm_value_t a, elm_value_t b) {"
-        , "    return elm_cons(a, b);"
+        , "    return elm_tuple2(a, b);"
         , "}"
         , ""
         , "static elm_value_t elm_Tuple_first(elm_value_t tuple) {"
@@ -1048,14 +1126,14 @@ generateRuntime _ =
         , "    elm_value_t first = *tuple.data.c;"
         , "    elm_value_t second = *tuple.next;"
         , "    elm_value_t newFirst = elm_apply1((elm_closure_t *)f.data.p, first);"
-        , "    return elm_cons(newFirst, second);"
+        , "    return elm_tuple2(newFirst, second);"
         , "}"
         , ""
         , "static elm_value_t elm_Tuple_mapSecond(elm_value_t f, elm_value_t tuple) {"
         , "    elm_value_t first = *tuple.data.c;"
         , "    elm_value_t second = *tuple.next;"
         , "    elm_value_t newSecond = elm_apply1((elm_closure_t *)f.data.p, second);"
-        , "    return elm_cons(first, newSecond);"
+        , "    return elm_tuple2(first, newSecond);"
         , "}"
         ]
 
@@ -1726,12 +1804,21 @@ generateTupleAccum ctx renames exprs =
         [ single ] ->
             generateExprAccum ctx renames single
 
+        [ first, second ] ->
+            -- 2-tuple uses elm_tuple2 for proper tag
+            let
+                ( firstCode, ctx1 ) = generateExprAccum ctx renames first
+                ( secondCode, ctx2 ) = generateExprAccum ctx1 renames second
+            in
+            ( "elm_tuple2(" ++ firstCode ++ ", " ++ secondCode ++ ")", ctx2 )
+
         first :: rest ->
+            -- 3+ tuple: nest as elm_tuple2(first, tuple(rest))
             let
                 ( firstCode, ctx1 ) = generateExprAccum ctx renames first
                 ( restCode, ctx2 ) = generateTupleAccum ctx1 renames rest
             in
-            ( "elm_cons(" ++ firstCode ++ ", " ++ restCode ++ ")", ctx2 )
+            ( "elm_tuple2(" ++ firstCode ++ ", " ++ restCode ++ ")", ctx2 )
 
 
 generateRecordAccum : GenCtx -> Dict String String -> List ( String, Core.Expr ) -> ( String, GenCtx )
@@ -1955,6 +2042,9 @@ getFunctionArity ctx name =
         "List.all" -> 2
         "List.concatMap" -> 2
         "List.indexedMap" -> 2
+        "List.sort" -> 1
+        "List.sortBy" -> 2
+        "List.partition" -> 2
 
         -- List module (ternary)
         "List.foldl" -> 3
@@ -2092,6 +2182,7 @@ isBuiltin name =
         , "List.append", "List.concat", "List.intersperse", "List.range", "List.repeat"
         , "List.map", "List.filter", "List.filterMap", "List.foldl", "List.foldr"
         , "List.any", "List.all", "List.concatMap", "List.indexedMap"
+        , "List.sort", "List.sortBy", "List.partition"
         -- Maybe module
         , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2"
         -- Result module
@@ -2531,12 +2622,21 @@ generateTupleWithRenames ctx renames exprs =
         [ single ] ->
             generateExprWithRenames ctx renames single
 
+        [ first, second ] ->
+            -- 2-tuple uses elm_tuple2 for proper tag
+            let
+                firstCode = generateExprWithRenames ctx renames first
+                secondCode = generateExprWithRenames ctx renames second
+            in
+            "elm_tuple2(" ++ firstCode ++ ", " ++ secondCode ++ ")"
+
         first :: rest ->
+            -- 3+ tuple: nest as elm_tuple2(first, tuple(rest))
             let
                 firstCode = generateExprWithRenames ctx renames first
                 restCode = generateTupleWithRenames ctx renames rest
             in
-            "elm_cons(" ++ firstCode ++ ", " ++ restCode ++ ")"
+            "elm_tuple2(" ++ firstCode ++ ", " ++ restCode ++ ")"
 
 
 generateRecordWithRenames : GenCtx -> Dict String String -> List ( String, Core.Expr ) -> String
@@ -2887,6 +2987,14 @@ generateMain ctx =
             , "        case 301: {"
             , "            printf(\"Ok \");"
             , "            print_value(*v.data.c);"
+            , "            break;"
+            , "        }"
+            , "        case 600: {"
+            , "            printf(\"(\");"
+            , "            print_value(*v.data.c);"
+            , "            printf(\", \");"
+            , "            print_value(*v.next);"
+            , "            printf(\")\");"
             , "            break;"
             , "        }"
             , "        default: printf(\"<value:%d>\", v.tag); break;"
