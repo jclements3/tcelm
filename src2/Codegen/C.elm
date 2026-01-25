@@ -926,7 +926,8 @@ generateDataType ctx dataDef =
         tagDefs =
             dataDef.constructors
                 |> List.map (\ctor ->
-                    "#define TAG_" ++ dataDef.name ++ "_" ++ ctor.name ++ " " ++ String.fromInt (1000 + ctor.tag)
+                    -- Use just constructor name for tag (constructors are unique within module)
+                    "#define TAG_" ++ ctor.name ++ " " ++ String.fromInt (1000 + ctor.tag)
                 )
                 |> String.join "\n"
 
@@ -941,7 +942,8 @@ generateDataType ctx dataDef =
 generateConstructor : GenCtx -> String -> Core.DataConDef -> String
 generateConstructor _ typeName ctor =
     let
-        tag = "TAG_" ++ typeName ++ "_" ++ ctor.name
+        -- Use just constructor name for tag (constructors are unique within module)
+        tag = "TAG_" ++ ctor.name
     in
     if ctor.fields == [] then
         -- Nullary constructor

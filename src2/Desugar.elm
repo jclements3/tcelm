@@ -587,9 +587,20 @@ desugarPattern ctx pattern =
 
         AST.PCon qname subPats ->
             let
+                conName = qualNameToString qname
                 subPatsCore = List.map (\loc -> desugarPattern ctx (AST.getValue loc)) subPats
+
+                -- Look up the constructor's result type from context
+                conType =
+                    case Dict.get conName ctx.constructors of
+                        Just info ->
+                            -- Extract the result type (last arrow in the constructor type)
+                            getResultType info.type_
+
+                        Nothing ->
+                            TVar "a"
             in
-            Core.PCon (qualNameToString qname) subPatsCore (TVar "a")
+            Core.PCon conName subPatsCore conType
 
         AST.PRecord fields ->
             let
@@ -663,6 +674,19 @@ litType lit =
         AST.LFloat _ -> TCon "Float"
         AST.LString _ -> TCon "String"
         AST.LChar _ -> TCon "Char"
+
+
+-- Extract the result type from a constructor's function type
+-- For `Red : Color`, returns `Color`
+-- For `Just : a -> Maybe a`, returns `Maybe a`
+getResultType : Type -> Type
+getResultType ty =
+    case ty of
+        TArrow _ result ->
+            getResultType result
+
+        _ ->
+            ty
 
 
 qualNameToString : AST.QualName -> String
