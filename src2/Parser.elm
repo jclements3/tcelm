@@ -651,10 +651,20 @@ parseConstructor state =
 
 parseConstructorArgs : ParseState -> ( List (Located TypeAnnotation), ParseState )
 parseConstructorArgs state =
-    if peekAny [ UpperIdent, LowerIdent, LParen, LBrace ] state then
-        case parseAtomicType state of
+    -- Skip newlines to handle multiline constructor definitions,
+    -- but stop if we reach column 1 (new declaration)
+    let
+        state0 = skipNewlinesUnlessAtColumn1 state
+        -- Check if we're at column 1 after skipping - if so, it's a new declaration
+        atColumn1 =
+            case currentToken state0 of
+                Just tok -> tok.region.start.column == 1
+                Nothing -> True
+    in
+    if not atColumn1 && peekAny [ UpperIdent, LowerIdent, LParen, LBrace ] state0 then
+        case parseAtomicType state0 of
             Err _ ->
-                ( [], state )
+                ( [], state0 )
 
             Ok ( ty, state1 ) ->
                 let
@@ -662,7 +672,7 @@ parseConstructorArgs state =
                 in
                 ( ty :: rest, state2 )
     else
-        ( [], state )
+        ( [], state0 )
 
 
 parseClassDecl : Parser (Located Decl)

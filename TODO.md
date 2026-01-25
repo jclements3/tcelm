@@ -357,12 +357,15 @@
   - [x] tcelm-bundle.js fixed for old tcelm (extractHeaders stops before main)
   - [x] tcelm2-merge.js created - merges modules into single source
   - [x] Simple function-only multi-module works: Helper.double -> helper_double
-  - [ ] Type alias merging needs proper uppercase prefixing + reference updates
-  - [ ] Constructor merging needs similar fixes
+  - [x] Type alias merging with proper uppercase prefixing
+  - [x] Constructor merging with proper prefixing
+  - [x] Imports hoisted to top of merged file (fixes mid-file import error)
+  - [x] Parser fix: multiline constructor definitions now parse correctly
+  - [ ] Type alias expansion in type inference (Types_TypeVar ≠ String currently)
   - Current blockers for self-hosting:
-    1. Type definitions in merged modules need proper renaming (Ast_Position not ast_Position)
-    2. Cross-module type references need updating during merge
-    3. Alternative: implement proper cross-module type inference in tcelm2
+    1. Type aliases not expanded during type inference (Types_TypeVar vs String)
+    2. Complex module like Types.elm triggers type unification errors
+    3. Simple multi-module with union types WORKS: Helper.makeTriple -> helper_makeTriple
 
 ---
 

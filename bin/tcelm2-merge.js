@@ -22,7 +22,7 @@ const BUILTINS = new Set([
     'Basics', 'String', 'List', 'Maybe', 'Result',
     'Tuple', 'Debug', 'Char', 'Platform', 'Bitwise',
     'Array', 'Dict', 'Set', 'Json.Decode', 'Json.Encode',
-    'Platform.Cmd', 'Platform.Sub', 'Types'
+    'Platform.Cmd', 'Platform.Sub'
 ]);
 
 // RTEMS modules handled by runtime headers
@@ -152,27 +152,60 @@ function sortModules(modules) {
 }
 
 /**
+ * Extract all import statements from source (for hoisting to top)
+ */
+function extractAllImports(source) {
+    const imports = [];
+    const importRegex = /^import\s+.+$/gm;
+    let match;
+    while ((match = importRegex.exec(source)) !== null) {
+        imports.push(match[0]);
+    }
+    return imports;
+}
+
+/**
  * Extract the body of an Elm module (everything after module/import declarations)
+ * Also removes all import statements from the body
  */
 function extractModuleBody(source) {
     const lines = source.split('\n');
     let bodyStartLine = 0;
+    let inBlockComment = false;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
+
+        // Track block comments (including doc comments)
+        if (line.includes('{-')) {
+            inBlockComment = true;
+        }
+        if (line.includes('-}')) {
+            inBlockComment = false;
+            bodyStartLine = i + 1;
+            continue;
+        }
+
         // Skip module declaration, exposing, and imports
         if (line.startsWith('module ') || line.startsWith('port module ') ||
             line.startsWith('import ') || line.startsWith('exposing') ||
             line.startsWith('(') || line.startsWith(',') ||
-            line.startsWith(')') || line === '') {
+            line.startsWith(')') || line === '' ||
+            line.startsWith('--') || inBlockComment) {
             bodyStartLine = i + 1;
-        } else if (line && !line.startsWith('--')) {
-            // Found first real content
+        } else if (line && !inBlockComment) {
+            // Found first real content (not in block comment)
             break;
         }
     }
 
-    return lines.slice(bodyStartLine).join('\n');
+    // Get body lines and filter out any import statements
+    const bodyLines = lines.slice(bodyStartLine).filter(line => {
+        const trimmed = line.trim();
+        return !trimmed.startsWith('import ');
+    });
+
+    return bodyLines.join('\n');
 }
 
 /**
@@ -237,7 +270,7 @@ function rewriteQualifiedNames(source, moduleNames) {
 }
 
 /**
- * Collect all type names defined in a module
+ * Collect all type names defined in a module (both aliases and union types)
  */
 function collectTypeNames(source) {
     const typeNames = [];
@@ -247,6 +280,67 @@ function collectTypeNames(source) {
         typeNames.push(match[1]);
     }
     return typeNames;
+}
+
+/**
+ * Collect constructor names from union types
+ * e.g., "type Foo = Bar | Baz Int" -> ["Bar", "Baz"]
+ */
+function collectConstructorNames(source) {
+    const ctorNames = [];
+    const lines = source.split('\n');
+    let inTypeDef = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        // Start of union type definition (not alias)
+        if (trimmed.match(/^type\s+[A-Z]/) && !trimmed.match(/^type\s+alias\s+/)) {
+            inTypeDef = true;
+            // Check for constructors on same line as type keyword
+            const sameLineMatch = trimmed.match(/^type\s+[A-Z][a-zA-Z0-9_]*[^=]*=\s*(.+)/);
+            if (sameLineMatch) {
+                const rest = sameLineMatch[1];
+                extractCtorsFromLine(rest, ctorNames);
+            }
+            continue;
+        }
+
+        // Inside type definition - look for constructors
+        if (inTypeDef) {
+            // Check if we've left the type definition
+            if (trimmed && !trimmed.startsWith('|') && !trimmed.startsWith('=')) {
+                if (trimmed.match(/^[a-z]/) || trimmed.match(/^type\s+/) ||
+                    trimmed.match(/^--/) || trimmed.match(/^{-/)) {
+                    inTypeDef = false;
+                    continue;
+                }
+            }
+
+            extractCtorsFromLine(trimmed, ctorNames);
+        }
+    }
+
+    return ctorNames;
+}
+
+/**
+ * Extract constructor names from a line of a type definition
+ */
+function extractCtorsFromLine(line, ctorNames) {
+    // Remove leading = or |
+    let rest = line.replace(/^[|=]\s*/, '');
+    if (!rest) return;
+
+    // Match constructor name at start of each variant
+    // Constructor is uppercase identifier at start, possibly followed by type args
+    const ctorMatch = rest.match(/^([A-Z][a-zA-Z0-9_]*)/);
+    if (ctorMatch) {
+        const ctorName = ctorMatch[1];
+        if (!ctorNames.includes(ctorName)) {
+            ctorNames.push(ctorName);
+        }
+    }
 }
 
 /**
@@ -286,7 +380,7 @@ function collectFunctionNames(source) {
 
 /**
  * Prefix all top-level definitions in a module with the module name
- * Uses lowercase prefix for functions, uppercase for types
+ * Uses lowercase prefix for functions, uppercase for types and constructors
  */
 function prefixModuleDefinitions(source, moduleName) {
     // Get prefix forms
@@ -295,6 +389,7 @@ function prefixModuleDefinitions(source, moduleName) {
 
     // Collect all names defined in this module
     const typeNames = collectTypeNames(source);
+    const ctorNames = collectConstructorNames(source);
     const funcNames = collectFunctionNames(source);
 
     let result = source;
@@ -311,6 +406,18 @@ function prefixModuleDefinitions(source, moduleName) {
         result = result.replace(
             new RegExp(`(?<!\\.)\\b${typeName}\\b(?!\\.)`, 'g'),
             `${upperPrefix}_${typeName}`
+        );
+    }
+
+    // Rename constructors in type definitions and usages
+    for (const ctorName of ctorNames) {
+        // Skip if it's the same as a type name (we already handled it)
+        if (typeNames.includes(ctorName)) continue;
+
+        // Replace constructor references (uppercase identifier)
+        result = result.replace(
+            new RegExp(`(?<!\\.)\\b${ctorName}\\b`, 'g'),
+            `${upperPrefix}_${ctorName}`
         );
     }
 
@@ -351,9 +458,32 @@ function mergeModules(modules, sortedNames, mainModuleName) {
         return mod && !mod.isMain;
     });
 
+    // Collect all imports from all modules
+    const allImports = new Set();
+    for (const name of sortedNames) {
+        const mod = modules.get(name);
+        if (!mod) continue;
+        const imports = extractAllImports(mod.source);
+        for (const imp of imports) {
+            // Filter out imports of modules we're merging (they'll be inline)
+            const importedModule = imp.match(/^import\s+([\w.]+)/)?.[1];
+            if (importedModule && !modules.has(importedModule)) {
+                allImports.add(imp);
+            }
+        }
+    }
+
     // Add module header
-    mergedParts.push('module Main exposing (main)\n');
+    mergedParts.push('module Main exposing (main)');
     mergedParts.push('');
+
+    // Add all imports (builtin modules only)
+    if (allImports.size > 0) {
+        for (const imp of allImports) {
+            mergedParts.push(imp);
+        }
+        mergedParts.push('');
+    }
 
     // Add merged declarations from all modules (in dependency order)
     for (const name of sortedNames) {
