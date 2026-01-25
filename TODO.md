@@ -176,6 +176,10 @@
   - Support for Int, Float, Bool, String, Char, (), Ptr types
   - Foreign functions properly integrated with code generator (mangling, arity, calls)
   - 120 tests passing
+- [x] 2026-01-25: Complete String module:
+  - String.toList, String.fromList - convert to/from List Char
+  - String.padLeft, String.padRight - pad strings with fill character
+  - 124 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
@@ -368,8 +372,8 @@ Result.andThen (\validated ->
 - [x] String.slice
 - [x] String.toUpper / String.toLower
 - [x] String.trim / String.trimLeft / String.trimRight
-- [ ] String.toList / String.fromList - needs implementation
-- [ ] String.padLeft / String.padRight - needs implementation
+- [x] String.toList / String.fromList
+- [x] String.padLeft / String.padRight
 
 ### 3.2 List Module ✅ COMPLETE
 - [x] List.map

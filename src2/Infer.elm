@@ -343,6 +343,10 @@ builtinTypes =
         , ( "String.trim", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
         , ( "String.trimLeft", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
         , ( "String.trimRight", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
+        , ( "String.toList", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "List") (TCon "Char"))) )
+        , ( "String.fromList", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Char")) (TCon "String")) )
+        , ( "String.padLeft", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String")))) )
+        , ( "String.padRight", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String")))) )
           -- Tuple module
         , ( "Tuple.pair", Scheme [ "a", "b" ] [] (TArrow (TVar "a") (TArrow (TVar "b") (TTuple [ TVar "a", TVar "b" ]))) )
         , ( "Tuple.first", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "a")) )
