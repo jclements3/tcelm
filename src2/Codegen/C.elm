@@ -390,6 +390,19 @@ generateRuntime _ =
         , "    return elm_int(a.data.i % b.data.i);"
         , "}"
         , ""
+        , "/* modBy : Int -> Int -> Int -- always positive result */"
+        , "static elm_value_t elm_modBy(elm_value_t divisor, elm_value_t n) {"
+        , "    int64_t d = divisor.data.i;"
+        , "    int64_t x = n.data.i;"
+        , "    int64_t r = x % d;"
+        , "    return elm_int((r < 0) ? r + (d < 0 ? -d : d) : r);"
+        , "}"
+        , ""
+        , "/* remainderBy : Int -> Int -> Int -- same sign as dividend */"
+        , "static elm_value_t elm_remainderBy(elm_value_t divisor, elm_value_t n) {"
+        , "    return elm_int(n.data.i % divisor.data.i);"
+        , "}"
+        , ""
         , "static elm_value_t elm_intDiv(elm_value_t a, elm_value_t b) {"
         , "    return elm_int(a.data.i / b.data.i);"
         , "}"
@@ -1759,6 +1772,8 @@ getFunctionArity ctx name =
         "max" -> 2
         "clamp" -> 3
         "abs" -> 1
+        "modBy" -> 2
+        "remainderBy" -> 2
 
         -- List module (unary)
         "List.isEmpty" -> 1
@@ -1910,6 +1925,7 @@ isBuiltin name =
         , "pipe", "pipeLeft", "compose", "composeLeft"
         -- Basics module
         , "identity", "always", "flip", "min", "max", "clamp", "abs"
+        , "modBy", "remainderBy"
         -- List module
         , "List.isEmpty", "List.length", "List.reverse", "List.member"
         , "List.head", "List.tail", "List.take", "List.drop"
