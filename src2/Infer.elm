@@ -447,6 +447,8 @@ builtinTypes =
         , ( "String.startsWith", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
         , ( "String.endsWith", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
         , ( "String.split", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TApp (TCon "List") (TCon "String")))) )
+        , ( "String.indexes", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TApp (TCon "List") (TCon "Int")))) )
+        , ( "String.indices", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TApp (TCon "List") (TCon "Int")))) )
         , ( "String.replace", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TArrow (TCon "String") (TCon "String")))) )
         , ( "String.slice", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String")))) )
         , ( "String.toUpper", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )

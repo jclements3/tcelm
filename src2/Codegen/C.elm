@@ -1359,6 +1359,27 @@ generateRuntime _ =
         , "    return elm_List_reverse(parts);"
         , "}"
         , ""
+        , "/* String.indexes - find all occurrences of a substring */"
+        , "static elm_value_t elm_String_indexes(elm_value_t sub, elm_value_t str) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    const char *s = str.data.s;"
+        , "    const char *subStr = sub.data.s;"
+        , "    size_t subLen = strlen(subStr);"
+        , "    if (subLen == 0) return elm_nil(); /* Empty substring - return empty list */"
+        , "    const char *p = s;"
+        , "    while ((p = strstr(p, subStr)) != NULL) {"
+        , "        int64_t idx = p - s;"
+        , "        result = elm_cons(elm_int(idx), result);"
+        , "        p++; /* Move past current match to find overlapping matches */"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "/* String.indices - alias for String.indexes */"
+        , "static elm_value_t elm_String_indices(elm_value_t sub, elm_value_t str) {"
+        , "    return elm_String_indexes(sub, str);"
+        , "}"
+        , ""
         , "/* String.replace - replace all occurrences of a substring */"
         , "static elm_value_t elm_String_replace(elm_value_t from, elm_value_t to, elm_value_t str) {"
         , "    const char *s = str.data.s;"
@@ -3597,6 +3618,8 @@ getFunctionArity ctx name =
         "String.startsWith" -> 2
         "String.endsWith" -> 2
         "String.split" -> 2
+        "String.indexes" -> 2
+        "String.indices" -> 2
         "String.replace" -> 3
         "String.slice" -> 3
         "String.toUpper" -> 1
@@ -3846,7 +3869,7 @@ isBuiltin name =
         , "String.append", "String.join", "String.fromInt", "String.toInt", "String.fromFloat", "String.toFloat"
         , "String.left", "String.right", "String.dropLeft", "String.dropRight"
         , "String.contains", "String.startsWith", "String.endsWith"
-        , "String.split", "String.replace", "String.slice", "String.toUpper", "String.toLower"
+        , "String.split", "String.indexes", "String.indices", "String.replace", "String.slice", "String.toUpper", "String.toLower"
         , "String.trim", "String.trimLeft", "String.trimRight"
         , "String.toList", "String.fromList", "String.padLeft", "String.padRight"
         , "String.cons", "String.uncons", "String.fromChar"
