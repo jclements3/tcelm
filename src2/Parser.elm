@@ -1371,15 +1371,24 @@ parseAppExpr state =
 
 parseAppArgs : ParseState -> ( List (Located Expr), ParseState )
 parseAppArgs state =
-    case parseAtomicExpr state of
-        Err _ ->
-            ( [], state )
+    -- Stop if we hit a token at column 1 (new top-level declaration)
+    case currentToken state of
+        Just tok ->
+            if tok.region.start.column == 1 then
+                ( [], state )
+            else
+                case parseAtomicExpr state of
+                    Err _ ->
+                        ( [], state )
 
-        Ok ( arg, state1 ) ->
-            let
-                ( rest, state2 ) = parseAppArgs state1
-            in
-            ( arg :: rest, state2 )
+                    Ok ( arg, state1 ) ->
+                        let
+                            ( rest, state2 ) = parseAppArgs state1
+                        in
+                        ( arg :: rest, state2 )
+
+        Nothing ->
+            ( [], state )
 
 
 parseAtomicExpr : Parser (Located Expr)

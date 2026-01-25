@@ -40,7 +40,12 @@
   - Partial application generates closures with correct arity
   - Zero-arity functions (CAFs) called correctly
   - Over-application chains elm_apply1 calls
-- [ ] **NEXT**: Test more complex patterns, add List.map with closures
+- [x] 2026-01-24: Fixed parser and type inference:
+  - Parser: stop function application at column 1 (new declaration boundary)
+  - Type inference: handle cons pattern bindings when scrutinee type is TVar
+  - Case expression bodies now correctly return values
+  - List cons pattern matching works (h :: t -> h)
+- [ ] **NEXT**: Implement List.map with closures, test more complex patterns
 
 ---
 
@@ -79,13 +84,15 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Binary operators | ✅ Working | +, -, *, /, etc. in scope |
 | Type inference | ✅ Working | Hindley-Milner with proper scoping |
 | Partial application | ✅ Working | Closures generated with correct arity |
+| List patterns | ✅ Working | h :: t pattern matching works |
 | Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
 
 ### Known Issues
 
 1. ~~**Curried function calls**: Fixed - generates `elm_add(x, y)` directly~~
 2. ~~**Module prefixes**: Fixed - `elm_Test_double` generated correctly~~
-3. **Lambda lifting**: Function pointer not set correctly (inline lambdas only)
+3. ~~**Parser boundary**: Fixed - stops at column 1 for new declarations~~
+4. **Lambda lifting**: Function pointer not set correctly (inline lambdas only)
 
 ### Usage
 ```bash

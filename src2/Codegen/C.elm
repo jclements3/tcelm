@@ -362,6 +362,10 @@ generateRuntime _ =
         , "static elm_value_t elm_not(elm_value_t a) {"
         , "    return elm_bool(!a.data.i);"
         , "}"
+        , ""
+        , "static elm_value_t elm_negate(elm_value_t a) {"
+        , "    return elm_int(-a.data.i);"
+        , "}"
         ]
 
 
@@ -874,17 +878,18 @@ generateCase ctx scrutinee alts =
     let
         scrutCode = generateExpr ctx scrutinee
         ( scrutVar, ctx1 ) = freshName "scrut" ctx
+        ( resultVar, ctx2 ) = freshName "result" ctx1
 
         branches =
             alts
-                |> List.map (generateAlt ctx1 scrutVar)
+                |> List.map (generateAlt ctx2 scrutVar resultVar)
                 |> String.join " else "
     in
-    "({ elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ "; " ++ branches ++ "; })"
+    "({ elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ "; elm_value_t " ++ resultVar ++ "; " ++ branches ++ " " ++ resultVar ++ "; })"
 
 
-generateAlt : GenCtx -> String -> Core.Alt -> String
-generateAlt ctx scrutVar (Core.Alt pattern guard body) =
+generateAlt : GenCtx -> String -> String -> Core.Alt -> String
+generateAlt ctx scrutVar resultVar (Core.Alt pattern guard body) =
     let
         ( condition, bindings ) = patternCondition ctx scrutVar pattern
         guardCode =
@@ -893,7 +898,7 @@ generateAlt ctx scrutVar (Core.Alt pattern guard body) =
                 Just g -> " && (" ++ generateExpr ctx g ++ ").data.i"
         bodyCode = generateExpr ctx body
     in
-    "if (" ++ condition ++ guardCode ++ ") { " ++ bindings ++ bodyCode ++ "; }"
+    "if (" ++ condition ++ guardCode ++ ") { " ++ bindings ++ resultVar ++ " = " ++ bodyCode ++ "; }"
 
 
 patternCondition : GenCtx -> String -> Core.Pattern -> ( String, String )
@@ -918,19 +923,44 @@ patternCondition ctx scrutVar pattern =
 
         Core.PCon name subPats _ ->
             let
-                tagCheck = scrutVar ++ ".tag == TAG_" ++ name
+                -- Use actual tag values for known types
+                tagValue =
+                    case name of
+                        "True" -> "5"
+                        "False" -> "4"
+                        "Nothing" -> "200"
+                        "Just" -> "201"
+                        "Err" -> "300"
+                        "Ok" -> "301"
+                        "[]" -> "100"  -- Nil (AST)
+                        "::" -> "101"  -- Cons (AST)
+                        "Nil" -> "100"  -- Nil (desugared)
+                        "Cons" -> "101"  -- Cons (desugared)
+                        _ -> "TAG_" ++ name
+
+                tagCheck = scrutVar ++ ".tag == " ++ tagValue
 
                 subConditions =
                     subPats
                         |> List.indexedMap (\i subPat ->
                             let
-                                subScrutVar = scrutVar ++ ".data.c"
-                                -- For chained fields, need to navigate ->next
+                                -- For list cons: first arg is .data.c (head), second is .next (tail)
+                                -- For other constructors: chain through .data.c and .next
                                 actualScrut =
-                                    if i == 0 then
-                                        "(*" ++ subScrutVar ++ ")"
+                                    if name == "Cons" || name == "::" then
+                                        if i == 0 then
+                                            "(*" ++ scrutVar ++ ".data.c)"  -- head
+                                        else
+                                            "(*" ++ scrutVar ++ ".next)"     -- tail
                                     else
-                                        "(*" ++ String.repeat i (subScrutVar ++ "->next") ++ ")"
+                                        if i == 0 then
+                                            "(*" ++ scrutVar ++ ".data.c)"
+                                        else
+                                            -- Navigate through ->next chain for other constructors
+                                            let
+                                                nextChain = String.repeat i "->next"
+                                            in
+                                            "(*" ++ scrutVar ++ ".data.c" ++ nextChain ++ ")"
                             in
                             patternCondition ctx actualScrut subPat
                         )
@@ -985,8 +1015,24 @@ generateCon ctx name args =
             args
                 |> List.map (generateExpr ctx)
                 |> String.join ", "
+
+        -- Map desugared names to runtime function names
+        funcName =
+            case name of
+                "Nil" -> "elm_nil"
+                "Cons" -> "elm_cons"
+                "Nothing" -> "elm_nothing"
+                "Just" -> "elm_just"
+                "Ok" -> "elm_ok"
+                "Err" -> "elm_err"
+                "True" -> "elm_bool(true)"
+                "False" -> "elm_bool(false)"
+                _ -> "elm_" ++ name
     in
-    "elm_" ++ name ++ "(" ++ argCodes ++ ")"
+    if List.isEmpty args && (name == "True" || name == "False") then
+        funcName
+    else
+        funcName ++ "(" ++ argCodes ++ ")"
 
 
 generateTuple : GenCtx -> List Core.Expr -> String

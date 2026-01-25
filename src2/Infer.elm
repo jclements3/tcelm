@@ -705,14 +705,16 @@ inferBranches env scrutTy resultTy branches state =
         branch :: rest ->
             let
                 br = AST.getValue branch
-                patBinds = patternBindings (AST.getValue br.pattern) scrutTy
+                -- Apply current substitution to scrutinee type to resolve type variables
+                resolvedScrutTy = applySubst state.substitution scrutTy
+                ( patBinds, state0 ) = patternBindingsWithState (AST.getValue br.pattern) resolvedScrutTy state
                 env1 =
                     List.foldl
                         (\( name, ty ) e -> extendEnv name (Scheme [] [] ty) e)
                         env
                         patBinds
             in
-            case infer env1 (AST.getValue br.body) state of
+            case infer env1 (AST.getValue br.body) state0 of
                 Err e ->
                     Err e
 
@@ -932,6 +934,97 @@ patternBindings pattern ty =
 
         AST.PUnit ->
             []
+
+
+{-| Extract variable bindings from a pattern, generating fresh type variables when needed.
+-}
+patternBindingsWithState : AST.Pattern -> Type -> InferState -> ( List ( String, Type ), InferState )
+patternBindingsWithState pattern ty state =
+    case pattern of
+        AST.PVar name ->
+            ( [ ( name, ty ) ], state )
+
+        AST.PWildcard ->
+            ( [], state )
+
+        AST.PLit _ ->
+            ( [], state )
+
+        AST.PCon _ subPats ->
+            -- Would need constructor type info to get sub-pattern types
+            ( [], state )
+
+        AST.PRecord fields ->
+            case ty of
+                TRecord fieldTypes _ ->
+                    let
+                        binds =
+                            fields
+                                |> List.filterMap (\locName ->
+                                    let
+                                        name = AST.getValue locName
+                                    in
+                                    fieldTypes
+                                        |> List.filterMap (\( fn, ft ) ->
+                                            if fn == name then Just ( name, ft ) else Nothing
+                                        )
+                                        |> List.head
+                                )
+                    in
+                    ( binds, state )
+
+                _ ->
+                    ( [], state )
+
+        AST.PTuple subPats ->
+            case ty of
+                TTuple types ->
+                    let
+                        results =
+                            List.map2 patternBindings (List.map AST.getValue subPats) types
+                                |> List.concat
+                    in
+                    ( results, state )
+
+                _ ->
+                    ( [], state )
+
+        AST.PList _ ->
+            ( [], state )
+
+        AST.PCons head tail ->
+            case ty of
+                TApp (TCon "List") elemTy ->
+                    let
+                        headBinds = patternBindings (AST.getValue head) elemTy
+                        tailBinds = patternBindings (AST.getValue tail) ty
+                    in
+                    ( headBinds ++ tailBinds, state )
+
+                TVar _ ->
+                    -- Type is not yet resolved, generate fresh type variables
+                    let
+                        ( elemTy, state1 ) = freshTypeVar state
+                        listTy = TApp (TCon "List") elemTy
+                        headBinds = patternBindings (AST.getValue head) elemTy
+                        tailBinds = patternBindings (AST.getValue tail) listTy
+                    in
+                    ( headBinds ++ tailBinds, state1 )
+
+                _ ->
+                    ( [], state )
+
+        AST.PAlias inner alias_ ->
+            let
+                ( innerBinds, state1 ) = patternBindingsWithState (AST.getValue inner) ty state
+            in
+            ( ( AST.getValue alias_, ty ) :: innerBinds, state1 )
+
+        AST.PParens inner ->
+            patternBindingsWithState (AST.getValue inner) ty state
+
+        AST.PUnit ->
+            ( [], state )
 
 
 
