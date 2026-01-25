@@ -2079,11 +2079,13 @@ inferLet env bindings body state =
 
                 Ok ( bindTy, state1 ) ->
                     let
-                        scheme = generalize env state1.constraints bindTy
                         patBinds = patternBindings (AST.getValue letBind.pattern) bindTy
                         env1 =
                             List.foldl
-                                (\( name, _ ) e -> extendEnv name scheme e)
+                                (\( name, ty ) e ->
+                                    let scheme = generalize env state1.constraints ty
+                                    in extendEnv name scheme e
+                                )
                                 env
                                 patBinds
                     in
@@ -2351,6 +2353,15 @@ patternBindings pattern ty =
             case ty of
                 TTuple types ->
                     List.map2 patternBindings (List.map AST.getValue subPats) types
+                        |> List.concat
+
+                TVar _ ->
+                    -- Type is a variable, bind each element with a fresh type variable placeholder
+                    -- This will be resolved later by unification
+                    subPats
+                        |> List.indexedMap (\i subPat ->
+                            patternBindings (AST.getValue subPat) (TVar ("_tuple_elem_" ++ String.fromInt i))
+                        )
                         |> List.concat
 
                 _ ->

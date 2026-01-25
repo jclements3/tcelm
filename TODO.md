@@ -11,7 +11,7 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-25
-**Last Session**: Fixed-size integers (Int8-64, UInt8-64) + Ptr module for safe pointer handling
+**Last Session**: Fixed-size integers, Ptr module, and tuple destructuring in let bindings
 **Next Action**: Continue with ledger work or Callbacks (Phase 4.3)
 
 ### Session Log
@@ -291,6 +291,10 @@
   - Ptr.isNull: check if pointer is null
   - Ptr.toMaybe: convert null to Nothing, non-null to Just
   - 216 tests passing
+- [x] 2026-01-25: Fix tuple pattern destructuring in let bindings
+  - `let (a, b) = expr in ...` now correctly binds a and b with proper types
+  - Complex patterns in let bindings desugared to case expressions
+  - 218 tests passing
 - [ ] **NEXT**: Continue with more advanced features or ledger work
 
 ---

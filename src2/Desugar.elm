@@ -468,11 +468,33 @@ desugarLet ctx bindings body =
         binding :: rest ->
             let
                 bind = AST.getValue binding
-                bindName = patternName (AST.getValue bind.pattern)
+                pat = AST.getValue bind.pattern
                 bindExpr = desugarExpr ctx (AST.getValue bind.value)
                 innerExpr = desugarLet ctx rest body
             in
-            Core.ELet bindName bindExpr innerExpr (Core.exprType innerExpr)
+            -- For simple variable patterns, use ELet directly
+            -- For complex patterns (tuple, record, etc.), use case expression
+            if isSimplePattern pat then
+                Core.ELet (patternName pat) bindExpr innerExpr (Core.exprType innerExpr)
+            else
+                -- Convert complex pattern to case expression:
+                -- let pattern = expr in body => case expr of pattern -> body
+                let
+                    patCore = desugarPattern ctx pat
+                    alt = Core.Alt patCore Nothing innerExpr
+                in
+                Core.ECase bindExpr [ alt ] (Core.exprType innerExpr)
+
+
+{-| Check if a pattern is simple (just a variable or alias binding).
+-}
+isSimplePattern : AST.Pattern -> Bool
+isSimplePattern pattern =
+    case pattern of
+        AST.PVar _ -> True
+        AST.PAlias _ _ -> True
+        AST.PWildcard -> True
+        _ -> False
 
 
 
