@@ -227,6 +227,11 @@
   - Maybe.filter : (a -> Bool) -> Maybe a -> Maybe a (filter with predicate)
   - Dict.union, Dict.diff, Dict.intersect (set operations on dicts)
   - 184 tests passing, ~260 builtin functions
+- [x] 2026-01-25: Time and Process modules
+  - Time.now : Task x Int (get current POSIX time in milliseconds)
+  - Time.posixToMillis, Time.millisToPosix (conversions)
+  - Process.sleep : Float -> Task x () (sleep for milliseconds)
+  - 186 tests passing, ~265 builtin functions
 - [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution)
 
 ---
