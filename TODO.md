@@ -233,7 +233,18 @@
   - Process.sleep : Float -> Task x () (sleep for milliseconds)
   - List.zip : List a -> List b -> List (a, b) (combine lists into tuples)
   - 187 tests passing, ~270 builtin functions
-- [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution)
+- [x] 2026-01-25: Type classes (Elm-style constrained polymorphism)
+  - Built-in type classes: comparable, appendable, number
+  - Instance resolution for: Int, Float, Char, String, List comparable, Tuple
+  - Updated function signatures with constraints:
+    - List.sort, List.sortBy, compare: comparable constraint
+    - List.maximum, List.minimum: comparable constraint
+    - Dict.*: comparable key constraint
+    - Set.*: comparable element constraint
+  - Instance resolution algorithm in Infer.elm
+  - Exported isComparable, isAppendable, isNumber for code generation
+  - 188 tests passing
+- [ ] **NEXT**: JSON encoding/decoding
 
 ---
 
@@ -282,7 +293,7 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Custom types | ✅ Working | Constructors with args, pattern matching |
 | Tuples | ✅ Working | Creation, pattern matching, Tuple module |
 | Do-notation | ✅ Working | Maybe and Result, monad auto-detection |
-| Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
+| Type classes | ✅ Working | comparable, appendable, number with instance resolution |
 
 ### Known Issues
 
@@ -605,7 +616,7 @@ The new src2/ architecture was specifically designed to support these features w
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Type Classes | 🔧 Infrastructure ready | Types.elm has TypeClass, Instance, Constraint |
+| Type Classes | ✅ Working | Elm-style comparable/appendable/number constraints |
 | Higher-Kinded Types | 🔧 Infrastructure ready | Kind system in Types.elm (KStar, KArrow) |
 | do-notation | ✅ Working | Maybe and Result monads, auto-detection |
 | Row Polymorphism | 🔧 Types ready | TRecord has optional row variable |

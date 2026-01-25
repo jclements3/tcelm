@@ -7,6 +7,11 @@ module Infer exposing
     , emptyEnv
     , extendEnv
     , lookupEnv
+    , resolveConstraint
+    , checkConstraints
+    , isComparable
+    , isAppendable
+    , isNumber
     )
 
 {-| Hindley-Milner type inference with type class support.
@@ -46,10 +51,85 @@ type alias Env =
 emptyEnv : Env
 emptyEnv =
     { types = builtinTypes
-    , classes = Dict.empty
-    , instances = []
+    , classes = builtinClasses
+    , instances = builtinInstances
     , constructors = builtinConstructors
     }
+
+
+{-| Built-in type classes for Elm's constrained type variables.
+
+Elm has these special type variable constraints:
+- comparable: Int, Float, Char, String, List comparable, Tuple of comparables
+- appendable: String, List a
+- number: Int, Float
+-}
+builtinClasses : Dict ClassName TypeClass
+builtinClasses =
+    Dict.fromList
+        [ ( "comparable"
+          , TypeClass "comparable" [ "a" ] [ KStar ]
+                [ ( "compare", Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
+                    (TArrow (TVar "a") (TArrow (TVar "a") (TCon "Order")))
+                  )
+                ]
+                []  -- no superclasses
+          )
+        , ( "appendable"
+          , TypeClass "appendable" [ "a" ] [ KStar ]
+                [ ( "append", Scheme [ "a" ] [ IsIn "appendable" (TVar "a") ]
+                    (TArrow (TVar "a") (TArrow (TVar "a") (TVar "a")))
+                  )
+                ]
+                []
+          )
+        , ( "number"
+          , TypeClass "number" [ "a" ] [ KStar ]
+                [ ( "add", Scheme [ "a" ] [ IsIn "number" (TVar "a") ]
+                    (TArrow (TVar "a") (TArrow (TVar "a") (TVar "a")))
+                  )
+                , ( "sub", Scheme [ "a" ] [ IsIn "number" (TVar "a") ]
+                    (TArrow (TVar "a") (TArrow (TVar "a") (TVar "a")))
+                  )
+                , ( "mul", Scheme [ "a" ] [ IsIn "number" (TVar "a") ]
+                    (TArrow (TVar "a") (TArrow (TVar "a") (TVar "a")))
+                  )
+                , ( "negate", Scheme [ "a" ] [ IsIn "number" (TVar "a") ]
+                    (TArrow (TVar "a") (TVar "a"))
+                  )
+                ]
+                []
+          )
+        ]
+
+
+{-| Built-in instances for primitive types.
+-}
+builtinInstances : List Instance
+builtinInstances =
+    -- comparable instances
+    [ Instance [] [] (IsIn "comparable" (TCon "Int")) []
+    , Instance [] [] (IsIn "comparable" (TCon "Float")) []
+    , Instance [] [] (IsIn "comparable" (TCon "Char")) []
+    , Instance [] [] (IsIn "comparable" (TCon "String")) []
+    -- List comparable => comparable (List a)
+    , Instance [ "a" ] [ IsIn "comparable" (TVar "a") ]
+        (IsIn "comparable" (TApp (TCon "List") (TVar "a"))) []
+    -- Tuple instances for comparable
+    , Instance [ "a", "b" ] [ IsIn "comparable" (TVar "a"), IsIn "comparable" (TVar "b") ]
+        (IsIn "comparable" (TTuple [ TVar "a", TVar "b" ])) []
+    , Instance [ "a", "b", "c" ]
+        [ IsIn "comparable" (TVar "a"), IsIn "comparable" (TVar "b"), IsIn "comparable" (TVar "c") ]
+        (IsIn "comparable" (TTuple [ TVar "a", TVar "b", TVar "c" ])) []
+
+    -- appendable instances
+    , Instance [] [] (IsIn "appendable" (TCon "String")) []
+    , Instance [ "a" ] [] (IsIn "appendable" (TApp (TCon "List") (TVar "a"))) []
+
+    -- number instances
+    , Instance [] [] (IsIn "number" (TCon "Int")) []
+    , Instance [] [] (IsIn "number" (TCon "Float")) []
+    ]
 
 
 {-| Built-in types for operators and common functions.
@@ -173,8 +253,8 @@ builtinTypes =
         , ( "EQ", Scheme [] [] (TCon "Order") )
         , ( "GT", Scheme [] [] (TCon "Order") )
         , ( "compare"
-          , Scheme [ "comparable" ] []
-                (TArrow (TVar "comparable") (TArrow (TVar "comparable") (TCon "Order")))
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
+                (TArrow (TVar "a") (TArrow (TVar "a") (TCon "Order")))
           )
         , ( "curry"
           , Scheme [ "a", "b", "c" ] []
@@ -228,8 +308,14 @@ builtinTypes =
         , ( "List.drop", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
         , ( "List.sum", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TCon "Int")) )
         , ( "List.product", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TCon "Int")) )
-        , ( "List.maximum", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TApp (TCon "Maybe") (TCon "Int"))) )
-        , ( "List.minimum", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TApp (TCon "Maybe") (TCon "Int"))) )
+        , ( "List.maximum"
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
+                (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a")))
+          )
+        , ( "List.minimum"
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
+                (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a")))
+          )
         , ( "List.append", appendOp )
         , ( "List.concat", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TApp (TCon "List") (TVar "a"))) (TApp (TCon "List") (TVar "a"))) )
         , ( "List.intersperse", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
@@ -282,10 +368,11 @@ builtinTypes =
                     (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "b"))))
           )
         , ( "List.sort"
-          , Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
+                (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))
           )
         , ( "List.sortBy"
-          , Scheme [ "a", "b" ] []
+          , Scheme [ "a", "b" ] [ IsIn "comparable" (TVar "b") ]
                 (TArrow (TArrow (TVar "a") (TVar "b"))
                     (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))))
           )
@@ -588,183 +675,185 @@ builtinTypes =
         , ( "Tuple.mapSecond", Scheme [ "a", "b", "c" ] [] (TArrow (TArrow (TVar "b") (TVar "c")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "a", TVar "c" ]))) )
         , ( "Tuple.mapBoth", Scheme [ "a", "b", "c", "d" ] [] (TArrow (TArrow (TVar "a") (TVar "c")) (TArrow (TArrow (TVar "b") (TVar "d")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "c", TVar "d" ])))) )
 
-        -- Dict module (association list implementation)
+        -- Dict module (association list implementation) - keys must be comparable
         , ( "Dict.empty"
-          , Scheme [ "k", "v" ] [] (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
+                (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
           )
         , ( "Dict.singleton"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TVar "k") (TArrow (TVar "v") (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
           )
         , ( "Dict.insert"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TVar "k") (TArrow (TVar "v") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))))
           )
         , ( "Dict.get"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TVar "k") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "Maybe") (TVar "v"))))
           )
         , ( "Dict.remove"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TVar "k") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
           )
         , ( "Dict.member"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TVar "k") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TCon "Bool")))
           )
         , ( "Dict.size"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TCon "Int"))
           )
         , ( "Dict.isEmpty"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TCon "Bool"))
           )
         , ( "Dict.keys"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "List") (TVar "k")))
           )
         , ( "Dict.values"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "List") (TVar "v")))
           )
         , ( "Dict.toList"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "List") (TTuple [ TVar "k", TVar "v" ])))
           )
         , ( "Dict.fromList"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TCon "List") (TTuple [ TVar "k", TVar "v" ])) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))
           )
         , ( "Dict.update"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TVar "k")
                     (TArrow (TArrow (TApp (TCon "Maybe") (TVar "v")) (TApp (TCon "Maybe") (TVar "v")))
                         (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                             (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))))
           )
         , ( "Dict.map"
-          , Scheme [ "k", "a", "b" ] []
+          , Scheme [ "k", "a", "b" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TArrow (TVar "k") (TArrow (TVar "a") (TVar "b")))
                     (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "a"))
                         (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "b"))))
           )
         , ( "Dict.filter"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TCon "Bool")))
                     (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                         (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
           )
         , ( "Dict.foldl"
-          , Scheme [ "k", "v", "b" ] []
+          , Scheme [ "k", "v", "b" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TArrow (TVar "b") (TVar "b"))))
                     (TArrow (TVar "b")
                         (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TVar "b"))))
           )
         , ( "Dict.foldr"
-          , Scheme [ "k", "v", "b" ] []
+          , Scheme [ "k", "v", "b" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TArrow (TVar "b") (TVar "b"))))
                     (TArrow (TVar "b")
                         (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TVar "b"))))
           )
         , ( "Dict.partition"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TCon "Bool")))
                     (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                         (TTuple [ TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")
                                 , TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v") ])))
           )
         , ( "Dict.union"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                     (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                         (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
           )
         , ( "Dict.diff"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                     (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                         (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
           )
         , ( "Dict.intersect"
-          , Scheme [ "k", "v" ] []
+          , Scheme [ "k", "v" ] [ IsIn "comparable" (TVar "k") ]
                 (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                     (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
                         (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
           )
 
-        -- Set module
+        -- Set module - elements must be comparable
         , ( "Set.empty"
-          , Scheme [ "a" ] [] (TApp (TCon "Set") (TVar "a"))
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
+                (TApp (TCon "Set") (TVar "a"))
           )
         , ( "Set.singleton"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TVar "a") (TApp (TCon "Set") (TVar "a")))
           )
         , ( "Set.insert"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TVar "a") (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
           )
         , ( "Set.remove"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TVar "a") (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
           )
         , ( "Set.member"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TVar "a") (TArrow (TApp (TCon "Set") (TVar "a")) (TCon "Bool")))
           )
         , ( "Set.size"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "Set") (TVar "a")) (TCon "Int"))
           )
         , ( "Set.isEmpty"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "Set") (TVar "a")) (TCon "Bool"))
           )
         , ( "Set.toList"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "List") (TVar "a")))
           )
         , ( "Set.fromList"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Set") (TVar "a")))
           )
         , ( "Set.union"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "Set") (TVar "a")) (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
           )
         , ( "Set.intersect"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "Set") (TVar "a")) (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
           )
         , ( "Set.diff"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TApp (TCon "Set") (TVar "a")) (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
           )
         , ( "Set.map"
-          , Scheme [ "a", "b" ] []
+          , Scheme [ "a", "b" ] [ IsIn "comparable" (TVar "a"), IsIn "comparable" (TVar "b") ]
                 (TArrow (TArrow (TVar "a") (TVar "b"))
                     (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "b"))))
           )
         , ( "Set.filter"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TArrow (TVar "a") (TCon "Bool"))
                     (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
           )
         , ( "Set.foldl"
-          , Scheme [ "a", "b" ] []
+          , Scheme [ "a", "b" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
                     (TArrow (TVar "b")
                         (TArrow (TApp (TCon "Set") (TVar "a")) (TVar "b"))))
           )
         , ( "Set.foldr"
-          , Scheme [ "a", "b" ] []
+          , Scheme [ "a", "b" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
                     (TArrow (TVar "b")
                         (TArrow (TApp (TCon "Set") (TVar "a")) (TVar "b"))))
           )
         , ( "Set.partition"
-          , Scheme [ "a" ] []
+          , Scheme [ "a" ] [ IsIn "comparable" (TVar "a") ]
                 (TArrow (TArrow (TVar "a") (TCon "Bool"))
                     (TArrow (TApp (TCon "Set") (TVar "a"))
                         (TTuple [ TApp (TCon "Set") (TVar "a"), TApp (TCon "Set") (TVar "a") ])))
@@ -1039,6 +1128,163 @@ applySubstConstraint subst (IsIn cls ty) =
 applySubstEnv : Substitution -> Env -> Env
 applySubstEnv subst env =
     { env | types = Dict.map (\_ -> applySubstScheme subst) env.types }
+
+
+
+-- INSTANCE RESOLUTION
+
+
+{-| Check if a constraint is satisfied by finding a matching instance.
+Returns Ok () if satisfied, Err if no matching instance found.
+-}
+resolveConstraint : Env -> Constraint -> Result TypeError ()
+resolveConstraint env constraint =
+    let
+        (IsIn className ty) = constraint
+    in
+    case findMatchingInstance env.instances constraint of
+        Just (Instance _ prereqs _ _) ->
+            -- Found a matching instance, now check prerequisites
+            resolvePrerequisites env prereqs
+
+        Nothing ->
+            -- No instance found - check if it's a type variable (deferred)
+            case ty of
+                TVar _ ->
+                    -- Type variable constraints are deferred (polymorphic)
+                    Ok ()
+
+                _ ->
+                    Err (NoInstance className ty)
+
+
+{-| Find an instance that matches the given constraint.
+-}
+findMatchingInstance : List Instance -> Constraint -> Maybe Instance
+findMatchingInstance instances (IsIn targetClass targetTy) =
+    instances
+        |> List.filterMap (\inst ->
+            let
+                (Instance vars _ (IsIn instClass instHead) _) = inst
+            in
+            if instClass == targetClass then
+                -- Try to match the instance head against the target type
+                case matchTypes instHead targetTy of
+                    Just _ -> Just inst
+                    Nothing -> Nothing
+            else
+                Nothing
+        )
+        |> List.head
+
+
+{-| Try to match an instance head pattern against a concrete type.
+Returns a substitution if successful.
+-}
+matchTypes : Type -> Type -> Maybe Substitution
+matchTypes pattern target =
+    case (pattern, target) of
+        (TVar v, _) ->
+            -- Type variable in pattern matches anything
+            Just (singleSubst v target)
+
+        (TCon c1, TCon c2) ->
+            if c1 == c2 then Just emptySubst else Nothing
+
+        (TApp p1 p2, TApp t1 t2) ->
+            case matchTypes p1 t1 of
+                Just s1 ->
+                    case matchTypes (applySubst s1 p2) t2 of
+                        Just s2 -> Just (composeSubst s2 s1)
+                        Nothing -> Nothing
+                Nothing -> Nothing
+
+        (TTuple pats, TTuple targs) ->
+            if List.length pats == List.length targs then
+                matchTypeLists pats targs
+            else
+                Nothing
+
+        (TArrow p1 p2, TArrow t1 t2) ->
+            case matchTypes p1 t1 of
+                Just s1 ->
+                    case matchTypes (applySubst s1 p2) t2 of
+                        Just s2 -> Just (composeSubst s2 s1)
+                        Nothing -> Nothing
+                Nothing -> Nothing
+
+        _ -> Nothing
+
+
+matchTypeLists : List Type -> List Type -> Maybe Substitution
+matchTypeLists pats targs =
+    case (pats, targs) of
+        ([], []) -> Just emptySubst
+        (p :: ps, t :: ts) ->
+            case matchTypes p t of
+                Just s1 ->
+                    case matchTypeLists (List.map (applySubst s1) ps) ts of
+                        Just s2 -> Just (composeSubst s2 s1)
+                        Nothing -> Nothing
+                Nothing -> Nothing
+        _ -> Nothing
+
+
+{-| Check all prerequisite constraints.
+-}
+resolvePrerequisites : Env -> List Constraint -> Result TypeError ()
+resolvePrerequisites env prereqs =
+    case prereqs of
+        [] -> Ok ()
+        c :: rest ->
+            case resolveConstraint env c of
+                Ok () -> resolvePrerequisites env rest
+                Err e -> Err e
+
+
+{-| Check all collected constraints after type inference.
+-}
+checkConstraints : Env -> Substitution -> List Constraint -> Result TypeError ()
+checkConstraints env subst constraints =
+    let
+        resolvedConstraints =
+            constraints
+                |> List.map (applySubstConstraint subst)
+                -- Filter out constraints on type variables (they're polymorphic)
+                |> List.filter (\(IsIn _ ty) ->
+                    case ty of
+                        TVar _ -> False
+                        _ -> True
+                )
+    in
+    resolvePrerequisites env resolvedConstraints
+
+
+{-| Check if a type is comparable (for use during code generation).
+-}
+isComparable : Env -> Type -> Bool
+isComparable env ty =
+    case resolveConstraint env (IsIn "comparable" ty) of
+        Ok () -> True
+        Err _ -> False
+
+
+{-| Check if a type is appendable.
+-}
+isAppendable : Env -> Type -> Bool
+isAppendable env ty =
+    case resolveConstraint env (IsIn "appendable" ty) of
+        Ok () -> True
+        Err _ -> False
+
+
+{-| Check if a type is a number type.
+-}
+isNumber : Env -> Type -> Bool
+isNumber env ty =
+    case resolveConstraint env (IsIn "number" ty) of
+        Ok () -> True
+        Err _ -> False
 
 
 
