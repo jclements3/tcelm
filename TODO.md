@@ -113,7 +113,14 @@
   - Desugar: convert AST.PAlias to Core.PAlias
   - Codegen: generate bindings for both alias and inner pattern
   - Working: `(x :: xs) as all -> List.length all`
-- [ ] **NEXT**: More comprehensive tests, better error messages, documentation
+- [x] 2026-01-25: Additional features:
+  - 3-tuple pattern matching in case expressions
+  - `modBy` and `remainderBy` functions added to runtime
+  - Builtin functions (identity, etc.) wrapped in closures when used as values
+  - Function composition operators `>>` and `<<` implemented via inline lambda
+  - Record update syntax `{ rec | field = value }` implemented
+  - 59 tests passing
+- [ ] **NEXT**: Type classes, more stdlib functions, FFI
 
 ---
 
