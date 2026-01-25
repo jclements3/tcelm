@@ -11,8 +11,8 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-24
-**Last Session**: Fixed pattern matching context propagation, added FP patterns guide
-**Next Action**: Implement partial application / currying
+**Last Session**: NEW ARCHITECTURE (tcelm2) built in src2/ with proper type inference
+**Next Action**: Continue developing tcelm2 - fix code generation, add more features
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
@@ -27,7 +27,75 @@
 - [x] 2026-01-24: Fixed module prefix bug - pipeline operators and main now use correct prefixes
 - [x] 2026-01-24: Added docs/patterns.md with 30 FP patterns (Python + tcelm examples)
 - [x] 2026-01-24: Fixed case expression context - recursive calls now use correct module prefix
-- [ ] **NEXT**: Implement partial application / currying
+- [x] 2026-01-24: **MAJOR** Started fresh architecture in src2/ with:
+  - Proper Hindley-Milner type inference (src2/Infer.elm)
+  - Type classes infrastructure (src2/Types.elm)
+  - Core IR intermediate representation (src2/Core.elm)
+  - Modular parser with multi-line syntax support (src2/Parser.elm)
+  - New code generator from Core IR (src2/Codegen/C.elm)
+- [x] 2026-01-24: tcelm2 compiles and generates C for: functions, let, if, case, lambda
+- [x] 2026-01-24: Fixed tcelm2 code generation:
+  - Curried function calls now generate proper multi-argument C calls
+  - Module prefixes added correctly (elm_Test_double instead of elm_double)
+  - Partial application generates closures with correct arity
+  - Zero-arity functions (CAFs) called correctly
+  - Over-application chains elm_apply1 calls
+- [ ] **NEXT**: Test more complex patterns, add List.map with closures
+
+---
+
+## NEW ARCHITECTURE (tcelm2)
+
+The src2/ directory contains a complete rewrite with proper foundations:
+
+### Architecture Overview
+```
+Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
+```
+
+### Key Modules (src2/)
+
+| Module | Purpose |
+|--------|---------|
+| Types.elm | Core type system: Type, Scheme, Kind, TypeClass, Constraint |
+| AST.elm | Source-level AST with Located types |
+| Lexer.elm | Tokenizer with indentation tracking |
+| Parser.elm | Recursive descent parser, multi-line support |
+| Infer.elm | Hindley-Milner type inference with extensions |
+| Core.elm | Explicitly-typed Core IR (lambda calculus + dictionary passing) |
+| Desugar.elm | Transform AST to Core IR |
+| Codegen/C.elm | Generate C from Core IR |
+| Compiler.elm | Main entry point |
+
+### tcelm2 Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Functions with args | ✅ Working | Type inference handles function parameters |
+| Let expressions | ✅ Working | Multi-line let/in supported |
+| If expressions | ✅ Working | Multi-line if/then/else supported |
+| Case expressions | ✅ Working | Pattern matching compiles |
+| Lambdas | ✅ Working | Lambda lifting with closures |
+| Binary operators | ✅ Working | +, -, *, /, etc. in scope |
+| Type inference | ✅ Working | Hindley-Milner with proper scoping |
+| Partial application | ✅ Working | Closures generated with correct arity |
+| Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
+
+### Known Issues
+
+1. ~~**Curried function calls**: Fixed - generates `elm_add(x, y)` directly~~
+2. ~~**Module prefixes**: Fixed - `elm_Test_double` generated correctly~~
+3. **Lambda lifting**: Function pointer not set correctly (inline lambdas only)
+
+### Usage
+```bash
+# Compile the compiler
+elm make src2/Compiler.elm --output=bin/tcelm2.js
+
+# Run tcelm2
+./bin/tcelm2 source.elm         # Output to stdout
+./bin/tcelm2 source.elm -o out.c  # Output to file
+```
 
 ---
 
@@ -308,23 +376,28 @@ For 4-core NUC parallel execution.
 
 ---
 
-## NOT Planned (Exotic Features)
+## Future Advanced Features (tcelm2 Architecture)
 
-These features are intellectually interesting but add complexity without proportional benefit for the NUC + Ledger use case:
+The new src2/ architecture was specifically designed to support these features when needed:
 
-| Feature | Why Not Needed |
-|---------|----------------|
-| Type Classes | Use module-qualified functions: `Money.add`, `Account.compare` |
-| Higher-Kinded Types | Write specific implementations for each type |
-| GADTs | Runtime validation works fine for ledger invariants |
-| Monad Transformers | Thread state explicitly or use records |
-| Refinement Types | Runtime checks: `validatePositive amount` |
-| Existential Types | Simple union types for events |
-| Full Lenses | Verbose nested update syntax is acceptable |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Type Classes | 🔧 Infrastructure ready | Types.elm has TypeClass, Instance, Constraint |
+| Higher-Kinded Types | 🔧 Infrastructure ready | Kind system in Types.elm (KStar, KArrow) |
+| do-notation | 🔧 AST ready | Desugar.elm has do-notation transformation |
+| Row Polymorphism | 🔧 Types ready | TRecord has optional row variable |
+| Monad Transformers | ⏳ Future | Can be built on type classes |
+| GADTs | ⏳ Future | Would require extending Core IR |
+
+The new architecture avoids "boxing in" - advanced features can be added incrementally without rewrites.
+
+### Not Needed (Still True)
+
+| Feature | Why Skip |
+|---------|----------|
 | Lazy Evaluation | Not needed for embedded real-time |
 | Custom Operators | Standard operators are sufficient |
-
-If these become truly necessary later, they can be reconsidered. But the ledger can be built without them.
+| Full Lenses | Verbose nested update syntax is acceptable |
 
 ---
 

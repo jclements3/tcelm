@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+/**
+ * tcelm2 - Elm to C compiler for embedded systems (v2 architecture)
+ *
+ * Usage:
+ *   tcelm2 <source.elm>              # Compile single module to stdout
+ *   tcelm2 <source.elm> -o out.c     # Compile to file
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+// Re-exec with larger stack if needed
+if (!process.env.TCELM2_STACK_SET) {
+    const args = ['--stack-size=32768', __filename, ...process.argv.slice(2)];
+    const child = spawn(process.execPath, args, {
+        stdio: 'inherit',
+        env: { ...process.env, TCELM2_STACK_SET: '1' }
+    });
+    child.on('exit', code => process.exit(code));
+    return;
+}
+
+// Parse arguments
+const args = process.argv.slice(2);
+let sourceFile = null;
+let outputFile = null;
+
+for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-o' && args[i + 1]) {
+        outputFile = args[++i];
+    } else if (args[i] === '--help' || args[i] === '-h') {
+        console.log(`tcelm2 - Elm to C compiler for embedded systems (v2)
+
+Usage:
+  tcelm2 <source.elm>              Compile single module to stdout
+  tcelm2 <source.elm> -o out.c     Compile to file
+
+Options:
+  -o <file>     Output to file instead of stdout
+  --help, -h    Show this help
+
+Features:
+  - Type inference (Hindley-Milner)
+  - Type classes (infrastructure)
+  - Core IR intermediate representation
+  - Multi-line syntax support
+`);
+        process.exit(0);
+    } else if (!args[i].startsWith('-')) {
+        sourceFile = args[i];
+    }
+}
+
+if (!sourceFile) {
+    console.error('Error: No source file specified');
+    console.error('Usage: tcelm2 <source.elm> [-o output.c]');
+    process.exit(1);
+}
+
+if (!fs.existsSync(sourceFile)) {
+    console.error(`Error: File not found: ${sourceFile}`);
+    process.exit(1);
+}
+
+// Load the compiler
+const binDir = __dirname;
+const elmCode = fs.readFileSync(path.join(binDir, 'tcelm2.js'), 'utf8');
+const context = {};
+(new Function(elmCode)).call(context);
+
+const Elm = context.Elm;
+if (!Elm || !Elm.Compiler) {
+    console.error('Error: Failed to load tcelm2 compiler');
+    process.exit(1);
+}
+
+// Compile
+const source = fs.readFileSync(sourceFile, 'utf8');
+const target = path.basename(sourceFile, '.elm');
+
+const app = Elm.Compiler.init({
+    flags: {
+        source: source,
+        target: target
+    }
+});
+
+app.ports.printOutput.subscribe(function(code) {
+    if (outputFile) {
+        fs.writeFileSync(outputFile, code);
+        console.error(`Wrote ${outputFile}`);
+    } else {
+        console.log(code);
+    }
+    process.exit(0);
+});
+
+app.ports.printErrors.subscribe(function(errors) {
+    errors.forEach(e => console.error(e));
+    process.exit(1);
+});
