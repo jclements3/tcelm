@@ -962,6 +962,40 @@ builtinTypes =
           , Scheme [ "a" ] []
                 (TArrow (TCon "Int") (TArrow (TVar "a") (TApp (TCon "Array") (TVar "a"))))
           )
+
+        -- Json.Encode module
+        , ( "Json.Encode.string"
+          , Scheme [] [] (TArrow (TCon "String") (TCon "Value"))
+          )
+        , ( "Json.Encode.int"
+          , Scheme [] [] (TArrow (TCon "Int") (TCon "Value"))
+          )
+        , ( "Json.Encode.float"
+          , Scheme [] [] (TArrow (TCon "Float") (TCon "Value"))
+          )
+        , ( "Json.Encode.bool"
+          , Scheme [] [] (TArrow (TCon "Bool") (TCon "Value"))
+          )
+        , ( "Json.Encode.null"
+          , Scheme [] [] (TCon "Value")
+          )
+        , ( "Json.Encode.list"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Value"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Value")))
+          )
+        , ( "Json.Encode.array"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Value"))
+                    (TArrow (TApp (TCon "Array") (TVar "a")) (TCon "Value")))
+          )
+        , ( "Json.Encode.object"
+          , Scheme [] []
+                (TArrow (TApp (TCon "List") (TTuple [ TCon "String", TCon "Value" ])) (TCon "Value"))
+          )
+        , ( "Json.Encode.encode"
+          , Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Value") (TCon "String")))
+          )
         ]
 
 

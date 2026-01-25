@@ -1528,38 +1528,8 @@ parseAtomicExpr state =
                     Ok ( locate tok.region (EVar { module_ = Nothing, name = tok.value }), advance state )
 
                 UpperIdent ->
-                    -- Check for qualified name: Module.name or Module.Constructor
-                    let
-                        state1 = advance state
-                    in
-                    case currentToken state1 of
-                        Just dotTok ->
-                            if dotTok.type_ == Dot then
-                                let
-                                    state2 = advance state1
-                                in
-                                case currentToken state2 of
-                                    Just nameTok ->
-                                        if nameTok.type_ == LowerIdent then
-                                            -- Module.func - qualified variable
-                                            Ok ( locate tok.region (EVar { module_ = Just tok.value, name = nameTok.value }), advance state2 )
-                                        else if nameTok.type_ == UpperIdent then
-                                            -- Module.Constructor - qualified constructor
-                                            Ok ( locate tok.region (EConstructor { module_ = Just tok.value, name = nameTok.value }), advance state2 )
-                                        else
-                                            -- Just Constructor without qualifier
-                                            Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
-
-                                    Nothing ->
-                                        -- Just Constructor
-                                        Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
-                            else
-                                -- Not a dot, just a constructor
-                                Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
-
-                        Nothing ->
-                            -- No more tokens, just a constructor
-                            Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
+                    -- Check for qualified name: Module.name, Module.Constructor, or Module.SubModule.name
+                    parseQualifiedName tok.region [ tok.value ] (advance state)
 
                 LParen ->
                     parseTupleOrParenExpr state
@@ -1622,6 +1592,76 @@ parseTupleOrParenExpr state =
                                 Err e -> Err e
                                 Ok ( _, state3 ) ->
                                     Ok ( locate tok.region (EParens first), state3 )
+
+
+{-| Parse a qualified name like Module.func, Module.Constructor, or Module.SubModule.func.
+    Takes the region for location and accumulated module parts.
+-}
+parseQualifiedName : Region -> List String -> ParseState -> Result ParseError ( Located Expr, ParseState )
+parseQualifiedName region moduleParts state =
+    case currentToken state of
+        Just dotTok ->
+            if dotTok.type_ == Dot then
+                let
+                    state1 = advance state
+                in
+                case currentToken state1 of
+                    Just nameTok ->
+                        if nameTok.type_ == LowerIdent then
+                            -- module.func - qualified variable
+                            let
+                                modulePath = String.join "." moduleParts
+                            in
+                            Ok ( locate region (EVar { module_ = Just modulePath, name = nameTok.value }), advance state1 )
+                        else if nameTok.type_ == UpperIdent then
+                            -- Could be module.Constructor OR module.SubModule (more parts follow)
+                            parseQualifiedName region (moduleParts ++ [ nameTok.value ]) (advance state1)
+                        else
+                            -- Just constructor without more qualification
+                            let
+                                allParts = moduleParts
+                            in
+                            case List.reverse allParts of
+                                name :: rest ->
+                                    let
+                                        modulePath = if List.isEmpty rest then Nothing else Just (String.join "." (List.reverse rest))
+                                    in
+                                    Ok ( locate region (EConstructor { module_ = modulePath, name = name }), state )
+                                [] ->
+                                    -- Should not happen
+                                    Ok ( locate region (EConstructor { module_ = Nothing, name = "Unknown" }), state )
+
+                    Nothing ->
+                        -- End of input, treat accumulated parts as constructor
+                        case List.reverse moduleParts of
+                            name :: rest ->
+                                let
+                                    modulePath = if List.isEmpty rest then Nothing else Just (String.join "." (List.reverse rest))
+                                in
+                                Ok ( locate region (EConstructor { module_ = modulePath, name = name }), state )
+                            [] ->
+                                Ok ( locate region (EConstructor { module_ = Nothing, name = "Unknown" }), state )
+            else
+                -- Not a dot, accumulated parts are a constructor
+                case List.reverse moduleParts of
+                    name :: rest ->
+                        let
+                            modulePath = if List.isEmpty rest then Nothing else Just (String.join "." (List.reverse rest))
+                        in
+                        Ok ( locate region (EConstructor { module_ = modulePath, name = name }), state )
+                    [] ->
+                        Ok ( locate region (EConstructor { module_ = Nothing, name = "Unknown" }), state )
+
+        Nothing ->
+            -- No more tokens, accumulated parts are a constructor
+            case List.reverse moduleParts of
+                name :: rest ->
+                    let
+                        modulePath = if List.isEmpty rest then Nothing else Just (String.join "." (List.reverse rest))
+                    in
+                    Ok ( locate region (EConstructor { module_ = modulePath, name = name }), state )
+                [] ->
+                    Ok ( locate region (EConstructor { module_ = Nothing, name = "Unknown" }), state )
 
 
 parseTupleExprRest : ParseState -> ( List (Located Expr), ParseState )

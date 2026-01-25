@@ -244,7 +244,14 @@
   - Instance resolution algorithm in Infer.elm
   - Exported isComparable, isAppendable, isNumber for code generation
   - 188 tests passing
-- [ ] **NEXT**: JSON encoding/decoding
+- [x] 2026-01-25: Json.Encode module
+  - Json.Encode.string, int, float, bool, null (primitive encoders)
+  - Json.Encode.list, array (collection encoders)
+  - Json.Encode.object (object encoder from list of pairs)
+  - Json.Encode.encode (convert Value to JSON string with optional indentation)
+  - Fixed parser to handle nested module paths (Json.Encode.func)
+  - 194 tests passing
+- [ ] **NEXT**: Json.Decode module
 
 ---
 
@@ -551,7 +558,7 @@ For embedded/protocol work:
 
 ### 5.2 JSON Serialization
 For debugging, config, API communication:
-- [ ] Json.Encode basics
+- [x] Json.Encode basics (string, int, float, bool, null, list, object, encode)
 - [ ] Json.Decode basics
 - [ ] Decode.field, Decode.map, Decode.andThen
 - [ ] Auto-derive for simple records (optional)
