@@ -1746,27 +1746,87 @@ parseLetBindings state =
 
 parseLetBinding : Parser (Located LetBinding)
 parseLetBinding state =
-    case parsePattern state of
-        Err e -> Err e
-        Ok ( pat, state1 ) ->
-            case expect Equals state1 of
-                Err e -> Err e
-                Ok ( _, state2 ) ->
-                    -- Skip newlines after = for multi-line bindings
-                    let
-                        state2a = skipNewlines state2
-                    in
-                    case parseExpr state2a of
-                        Err e -> Err e
-                        Ok ( value, state3 ) ->
-                            Ok
-                                ( locate (getRegion pat)
-                                    { pattern = pat
-                                    , typeAnnotation = Nothing
-                                    , value = value
-                                    }
-                                , state3
-                                )
+    -- Parse the name first
+    case currentToken state of
+        Just tok ->
+            if tok.type_ == LowerIdent then
+                let
+                    name = tok.value
+                    state1 = advance state
+                    -- Try to parse function arguments
+                    ( args, state2 ) = parseLetArgs state1
+                in
+                case expect Equals state2 of
+                    Err e -> Err e
+                    Ok ( _, state3 ) ->
+                        -- Skip newlines after = for multi-line bindings
+                        let
+                            state3a = skipNewlines state3
+                        in
+                        case parseExpr state3a of
+                            Err e -> Err e
+                            Ok ( value, state4 ) ->
+                                let
+                                    -- If there are args, wrap the value in a lambda
+                                    finalValue =
+                                        if List.isEmpty args then
+                                            value
+                                        else
+                                            locate (getRegion value) (ELambda args value)
+                                in
+                                Ok
+                                    ( locate tok.region
+                                        { pattern = locate tok.region (PVar name)
+                                        , typeAnnotation = Nothing
+                                        , value = finalValue
+                                        }
+                                    , state4
+                                    )
+            else
+                -- Fall back to pattern-based parsing for destructuring
+                case parsePattern state of
+                    Err e -> Err e
+                    Ok ( pat, state1 ) ->
+                        case expect Equals state1 of
+                            Err e -> Err e
+                            Ok ( _, state2 ) ->
+                                let
+                                    state2a = skipNewlines state2
+                                in
+                                case parseExpr state2a of
+                                    Err e -> Err e
+                                    Ok ( value, state3 ) ->
+                                        Ok
+                                            ( locate (getRegion pat)
+                                                { pattern = pat
+                                                , typeAnnotation = Nothing
+                                                , value = value
+                                                }
+                                            , state3
+                                            )
+
+        Nothing ->
+            Err { message = "Expected let binding", region = currentRegion state }
+
+
+{-| Parse function arguments for a let binding (e.g., the "x y" in "f x y = ...").
+-}
+parseLetArgs : ParseState -> ( List (Located Pattern), ParseState )
+parseLetArgs state =
+    case currentToken state of
+        Just tok ->
+            if tok.type_ == LowerIdent then
+                let
+                    pat = locate tok.region (PVar tok.value)
+                    state1 = advance state
+                    ( rest, state2 ) = parseLetArgs state1
+                in
+                ( pat :: rest, state2 )
+            else
+                ( [], state )
+
+        Nothing ->
+            ( [], state )
 
 
 parseDoExpr : Parser (Located Expr)

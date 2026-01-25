@@ -676,10 +676,11 @@ generateApp ctx func arg =
             let
                 funcName = tv.name
                 mangledName = mangleWithModule ctx funcName
+                isKnownFunction = Dict.member funcName ctx.functions || isBuiltin funcName
             in
-            -- Check if this is a closure parameter (function passed as argument)
-            if Set.member funcName ctx.closureParams then
-                -- Function parameter - use closure application
+            -- Check if this is a closure parameter or local variable (not a known function)
+            if Set.member funcName ctx.closureParams || not isKnownFunction then
+                -- Function parameter or local variable - use closure application
                 generateClosureApply ctx mangledName allArgs
             else
                 -- Known function or builtin
@@ -877,15 +878,19 @@ isBuiltin name =
 
 generateLambda : GenCtx -> Core.TypedVar -> Core.Expr -> String
 generateLambda ctx tv body =
-    -- For now, generate a closure
-    -- In a full implementation, we'd lift the lambda to a top-level function
+    -- Generate lambda using GCC nested function extension
+    -- This allows lambdas to capture local variables
     let
         ( funcName, ctx1 ) = freshName "lambda" ctx
-        bodyCode = generateExpr ctx1 body
+        argName = mangle tv.name
+        -- Add the lambda parameter to closureParams so it's treated as a closure if called
+        bodyCtx = { ctx1 | closureParams = Set.insert tv.name ctx1.closureParams }
+        bodyCode = generateExpr bodyCtx body
     in
     "({"
+        ++ " elm_value_t " ++ funcName ++ "(elm_value_t " ++ argName ++ ") { return " ++ bodyCode ++ "; }"
         ++ " elm_closure_t *_c = elm_alloc_closure();"
-        ++ " _c->func = NULL; /* TODO: lift lambda */;"
+        ++ " _c->func = (void *)" ++ funcName ++ ";"
         ++ " _c->arity = 1;"
         ++ " _c->applied = 0;"
         ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
