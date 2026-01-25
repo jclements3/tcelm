@@ -1568,6 +1568,7 @@ parseAppArgs state =
     -- Stop if we hit a token at column 1 (new top-level declaration)
     -- Also stop if this looks like a let binding (identifier followed by =)
     -- Also stop if this looks like a case branch (pattern followed by ->)
+    -- Also stop if this looks like a do-statement (pattern followed by <-)
     case currentToken state0 of
         Just tok ->
             if tok.region.start.column == 1 then
@@ -1577,6 +1578,9 @@ parseAppArgs state =
                 ( [], state0 )
             -- Check if this looks like a case branch (pattern followed by ->)
             else if looksLikeCaseBranch state0 then
+                ( [], state0 )
+            -- Check if this looks like a do-statement bind (pattern followed by <-)
+            else if looksLikeDoStatement state0 then
                 ( [], state0 )
             else
                 case parseAtomicExpr state0 of
@@ -2153,6 +2157,80 @@ scanForArrowAfterParen state nestLevel =
             Nothing -> False
 
 
+{-| Check if the current position looks like a do-statement bind.
+    Do statement binds have form "Pattern <-" where Pattern can start with:
+    - LowerIdent (variable)
+    - Underscore (wildcard)
+    - LParen (tuple/parenthesized)
+-}
+looksLikeDoStatement : ParseState -> Bool
+looksLikeDoStatement state =
+    case currentToken state of
+        Just tok ->
+            case tok.type_ of
+                LowerIdent -> scanForBackArrow (advance state) 0
+                Underscore -> scanForBackArrow (advance state) 0
+                LParen -> scanForBackArrowAfterParen (advance state) 1
+                _ -> False
+        Nothing -> False
+
+
+{-| Scan ahead looking for <- (do statement bind).
+    Returns True if we find <- before hitting a different expression structure.
+-}
+scanForBackArrow : ParseState -> Int -> Bool
+scanForBackArrow state depth =
+    if depth > 20 then
+        False
+    else
+        case currentToken state of
+            Just t ->
+                case t.type_ of
+                    BackArrow -> True  -- Found <-
+                    -- Pattern components that can appear before <-
+                    LowerIdent -> scanForBackArrow (advance state) (depth + 1)
+                    UpperIdent -> scanForBackArrow (advance state) (depth + 1)
+                    Underscore -> scanForBackArrow (advance state) (depth + 1)
+                    KwAs -> scanForBackArrow (advance state) (depth + 1)  -- pattern as name
+                    DoubleColon -> scanForBackArrow (advance state) (depth + 1)  -- cons pattern
+                    -- If we see an operator or expression element, it's not a bind
+                    Arrow -> False  -- Case branch
+                    Equals -> False  -- Let binding
+                    Operator -> False  -- Expression operator
+                    Newline -> False
+                    Indent _ -> False
+                    _ -> False
+            Nothing -> False
+
+
+{-| Scan for <- after an opening paren.
+    Must track balanced parens to avoid matching <- inside nested structures.
+-}
+scanForBackArrowAfterParen : ParseState -> Int -> Bool
+scanForBackArrowAfterParen state nestLevel =
+    if nestLevel > 50 then
+        False
+    else
+        case currentToken state of
+            Just t ->
+                case t.type_ of
+                    LParen -> scanForBackArrowAfterParen (advance state) (nestLevel + 1)
+                    RParen ->
+                        if nestLevel <= 1 then
+                            scanForBackArrow (advance state) 0
+                        else
+                            scanForBackArrowAfterParen (advance state) (nestLevel - 1)
+                    BackArrow ->
+                        if nestLevel == 0 then
+                            True
+                        else
+                            scanForBackArrowAfterParen (advance state) nestLevel
+                    Newline -> False
+                    Indent _ -> False
+                    _ -> scanForBackArrowAfterParen (advance state) nestLevel
+            Nothing -> False
+
+
 parseCaseBranch : Parser (Located CaseBranch)
 parseCaseBranch state =
     case parsePattern state of
@@ -2306,16 +2384,58 @@ parseDoExpr state =
     case expect KwDo state of
         Err e -> Err e
         Ok ( tok, state1 ) ->
-            let
-                ( stmts, state2 ) = parseDoStatements state1
-            in
-            Ok ( locate tok.region (EDo stmts), state2 )
+            -- Check for brace-delimited do block: do { ... }
+            if peek LBrace state1 then
+                case expect LBrace state1 of
+                    Err e -> Err e
+                    Ok ( _, state2 ) ->
+                        let
+                            ( stmts, state3 ) = parseBracedDoStatements state2
+                        in
+                        case expect RBrace state3 of
+                            Err e -> Err e
+                            Ok ( _, state4 ) ->
+                                Ok ( locate tok.region (EDo stmts), state4 )
+            else
+                -- Indentation-based do block
+                let
+                    ( stmts, state2 ) = parseDoStatements state1
+                in
+                Ok ( locate tok.region (EDo stmts), state2 )
+
+
+{-| Parse semicolon-separated do statements inside braces -}
+parseBracedDoStatements : ParseState -> ( List (Located DoStatement), ParseState )
+parseBracedDoStatements state =
+    let
+        state1 = skipNewlinesAndSemicolons state
+    in
+    -- Stop at closing brace
+    case currentToken state1 of
+        Just tok ->
+            if tok.type_ == RBrace then
+                ( [], state1 )
+            else
+                case parseDoStatement state1 of
+                    Err _ ->
+                        ( [], state1 )
+
+                    Ok ( stmt, state2 ) ->
+                        let
+                            state2a = skipNewlinesAndSemicolons state2
+                            ( rest, state3 ) = parseBracedDoStatements state2a
+                        in
+                        ( stmt :: rest, state3 )
+
+        Nothing ->
+            ( [], state1 )
 
 
 parseDoStatements : ParseState -> ( List (Located DoStatement), ParseState )
 parseDoStatements state =
     let
-        state1 = skipNewlines state
+        -- Skip newlines and semicolons before each statement
+        state1 = skipNewlinesAndSemicolons state
     in
     -- Stop if we hit a token at column 1 (new top-level declaration)
     -- This is how Elm-style indentation-sensitive parsing works
@@ -2330,13 +2450,36 @@ parseDoStatements state =
                         ( [], state1 )
 
                     Ok ( stmt, state2 ) ->
+                        -- Skip semicolons/newlines after statement
                         let
-                            ( rest, state3 ) = parseDoStatements state2
+                            state2a = skipNewlinesAndSemicolons state2
+                            ( rest, state3 ) = parseDoStatements state2a
                         in
                         ( stmt :: rest, state3 )
 
         Nothing ->
             ( [], state1 )
+
+
+{-| Skip newlines, indents, and semicolons (statement separators in do blocks) -}
+skipNewlinesAndSemicolons : ParseState -> ParseState
+skipNewlinesAndSemicolons state =
+    case currentToken state of
+        Just tok ->
+            case tok.type_ of
+                Newline ->
+                    skipNewlinesAndSemicolons (advance state)
+
+                Indent _ ->
+                    skipNewlinesAndSemicolons (advance state)
+
+                Semicolon ->
+                    skipNewlinesAndSemicolons (advance state)
+
+                _ ->
+                    state
+        Nothing ->
+            state
 
 
 isOperatorToken : TokenType -> Bool
@@ -2361,7 +2504,7 @@ parseDoStatement state =
         case parsePattern state of
             Err _ ->
                 -- Just an expression
-                case parseExpr state of
+                case parseExprSingleLine state of
                     Err e -> Err e
                     Ok ( expr, state1 ) ->
                         Ok ( locate (getRegion expr) (DoExpr expr), state1 )
@@ -2371,17 +2514,180 @@ parseDoStatement state =
                     case expect BackArrow state1 of
                         Err e -> Err e
                         Ok ( _, state2 ) ->
-                            case parseExpr state2 of
+                            case parseExprSingleLine state2 of
                                 Err e -> Err e
                                 Ok ( expr, state3 ) ->
                                     Ok ( locate (getRegion pat) (DoBind pat expr), state3 )
                 else
                     -- Pattern was actually an expression
                     -- This is a simplification - in real parser we'd backtrack
-                    case parseExpr state of
+                    case parseExprSingleLine state of
                         Err e -> Err e
                         Ok ( expr, state2 ) ->
                             Ok ( locate (getRegion expr) (DoExpr expr), state2 )
+
+
+{-| Parse an expression that doesn't span multiple lines.
+    Used in do-statements where each line should be a separate statement.
+-}
+parseExprSingleLine : Parser (Located Expr)
+parseExprSingleLine state =
+    parseBinOpExprSingleLine 0 state
+
+
+{-| Parse binary operator expression without multiline support.
+-}
+parseBinOpExprSingleLine : Int -> Parser (Located Expr)
+parseBinOpExprSingleLine minPrec state =
+    case parseUnaryExprSingleLine state of
+        Err e -> Err e
+        Ok ( left, state1 ) ->
+            parseBinOpRestSingleLine minPrec left state1
+
+
+{-| Parse the rest of a binary operator expression without multiline support.
+-}
+parseBinOpRestSingleLine : Int -> Located Expr -> Parser (Located Expr)
+parseBinOpRestSingleLine minPrec left state =
+    -- Don't skip newlines - stop at them
+    case currentToken state of
+        Just tok ->
+            if tok.type_ == Newline || tok.type_ == Semicolon then
+                Ok ( left, state )
+            else
+                let
+                    isOp = tok.type_ == Operator || tok.type_ == DoubleColon
+                    opValue = if tok.type_ == DoubleColon then "::" else tok.value
+                in
+                if isOp then
+                    let
+                        ( prec, _ ) = getOperatorPrec opValue
+                    in
+                    if prec >= minPrec then
+                        let
+                            state1 = advance state
+                        in
+                        case parseUnaryExprSingleLine state1 of
+                            Err e -> Err e
+                            Ok ( right, state2 ) ->
+                                case currentToken state2 of
+                                    Just nextTok ->
+                                        let
+                                            nextIsOp = nextTok.type_ == Operator || nextTok.type_ == DoubleColon
+                                            nextOpValue = if nextTok.type_ == DoubleColon then "::" else nextTok.value
+                                        in
+                                        if nextIsOp then
+                                            let
+                                                ( nextPrec, _ ) = getOperatorPrec nextOpValue
+                                            in
+                                            if nextPrec > prec then
+                                                case parseBinOpRestSingleLine (prec + 1) right state2 of
+                                                    Err e -> Err e
+                                                    Ok ( right2, state3 ) ->
+                                                        let
+                                                            combined = locate (getRegion left) (EBinOp left (locate tok.region opValue) right2)
+                                                        in
+                                                        parseBinOpRestSingleLine minPrec combined state3
+                                            else
+                                                let
+                                                    combined = locate (getRegion left) (EBinOp left (locate tok.region opValue) right)
+                                                in
+                                                parseBinOpRestSingleLine minPrec combined state2
+                                        else
+                                            Ok ( locate (getRegion left) (EBinOp left (locate tok.region opValue) right), state2 )
+                                    Nothing ->
+                                        Ok ( locate (getRegion left) (EBinOp left (locate tok.region opValue) right), state2 )
+                    else
+                        Ok ( left, state )
+                else
+                    Ok ( left, state )
+
+        Nothing ->
+            Ok ( left, state )
+
+
+{-| Parse unary expression without multiline support.
+-}
+parseUnaryExprSingleLine : Parser (Located Expr)
+parseUnaryExprSingleLine state =
+    case currentToken state of
+        Just tok ->
+            if tok.type_ == Operator && tok.value == "-" then
+                case expect Operator state of
+                    Err e -> Err e
+                    Ok ( _, state1 ) ->
+                        case parseUnaryExprSingleLine state1 of
+                            Err e -> Err e
+                            Ok ( inner, state2 ) ->
+                                Ok ( locate tok.region (ENegate inner), state2 )
+            else
+                parseSingleLineAppExpr state
+
+        Nothing ->
+            parseSingleLineAppExpr state
+
+
+{-| Parse function application without allowing multiline arguments.
+-}
+parseSingleLineAppExpr : Parser (Located Expr)
+parseSingleLineAppExpr state =
+    case parseAtomicExpr state of
+        Err e -> Err e
+        Ok ( first, state1 ) ->
+            let
+                ( exprWithFields, state1a ) = parseFieldAccessChain first state1
+                ( args, state2 ) = parseSingleLineAppArgs state1a
+            in
+            if List.isEmpty args then
+                Ok ( exprWithFields, state2 )
+            else
+                Ok
+                    ( List.foldl
+                        (\arg acc -> locate (getRegion acc) (EApp acc arg))
+                        exprWithFields
+                        args
+                    , state2
+                    )
+
+
+{-| Parse function arguments on the same line only.
+    Stops at newlines instead of continuing to next line.
+-}
+parseSingleLineAppArgs : ParseState -> ( List (Located Expr), ParseState )
+parseSingleLineAppArgs state =
+    -- Don't skip newlines - stop at them
+    case currentToken state of
+        Just tok ->
+            -- Stop at newline, indent, semicolon, or any structural delimiter
+            case tok.type_ of
+                Newline -> ( [], state )
+                Semicolon -> ( [], state )
+                RBrace -> ( [], state )
+                RParen -> ( [], state )
+                RBracket -> ( [], state )
+                Comma -> ( [], state )
+                KwIn -> ( [], state )
+                KwThen -> ( [], state )
+                KwElse -> ( [], state )
+                KwOf -> ( [], state )
+                Indent _ -> ( [], state )
+                _ ->
+                    if tok.region.start.column == 1 then
+                        ( [], state )
+                    else
+                        case parseAtomicExpr state of
+                            Err _ ->
+                                ( [], state )
+
+                            Ok ( arg, state1 ) ->
+                                let
+                                    ( argWithFields, state1a ) = parseFieldAccessChain arg state1
+                                    ( rest, state2 ) = parseSingleLineAppArgs state1a
+                                in
+                                ( argWithFields :: rest, state2 )
+
+        Nothing ->
+            ( [], state )
 
 
 parseAccessorExpr : Parser (Located Expr)

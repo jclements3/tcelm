@@ -5646,6 +5646,10 @@ generateAltAccum ctx renames scrutVar resultVar (Core.Alt pattern guard body) =
     let
         ( condition, bindings ) = patternCondition ctx scrutVar pattern
 
+        -- Merge pattern variable renames to shadow builtins with same name
+        patRenames = patternVarRenames pattern
+        bodyRenames = Dict.union patRenames renames
+
         ( guardCode, ctx1 ) =
             case guard of
                 Nothing ->
@@ -5653,11 +5657,11 @@ generateAltAccum ctx renames scrutVar resultVar (Core.Alt pattern guard body) =
 
                 Just g ->
                     let
-                        ( code, newCtx ) = generateExprAccum ctx renames g
+                        ( code, newCtx ) = generateExprAccum ctx bodyRenames g
                     in
                     ( " && (" ++ code ++ ").data.i", newCtx )
 
-        ( bodyCode, ctx2 ) = generateExprAccum ctx1 renames body
+        ( bodyCode, ctx2 ) = generateExprAccum ctx1 bodyRenames body
     in
     ( "if (" ++ condition ++ guardCode ++ ") { " ++ bindings ++ resultVar ++ " = " ++ bodyCode ++ "; }", ctx2 )
 
@@ -7078,9 +7082,9 @@ generateAltWithRenames : GenCtx -> Dict String String -> String -> String -> Cor
 generateAltWithRenames ctx renames scrutVar resultVar (Core.Alt pattern guard body) =
     let
         ( condition, bindings ) = patternCondition ctx scrutVar pattern
-        -- Remove pattern-bound variables from renames to avoid shadowing issues
-        patVars = Core.freeVars body  -- Use body's free vars to find what pattern binds
-        bodyRenames = renames  -- Pattern variables are fresh, don't shadow renames
+        -- Merge pattern variable renames to shadow builtins with same name
+        patRenames = patternVarRenames pattern
+        bodyRenames = Dict.union patRenames renames
 
         guardCode =
             case guard of
@@ -7222,11 +7226,13 @@ generateAlt : GenCtx -> String -> String -> Core.Alt -> String
 generateAlt ctx scrutVar resultVar (Core.Alt pattern guard body) =
     let
         ( condition, bindings ) = patternCondition ctx scrutVar pattern
+        -- Merge pattern variable renames to shadow builtins with same name
+        patRenames = patternVarRenames pattern
         guardCode =
             case guard of
                 Nothing -> ""
-                Just g -> " && (" ++ generateExpr ctx g ++ ").data.i"
-        bodyCode = generateExpr ctx body
+                Just g -> " && (" ++ generateExprWithRenames ctx patRenames g ++ ").data.i"
+        bodyCode = generateExprWithRenames ctx patRenames body
     in
     "if (" ++ condition ++ guardCode ++ ") { " ++ bindings ++ resultVar ++ " = " ++ bodyCode ++ "; }"
 
@@ -7356,6 +7362,34 @@ patternCondition ctx scrutVar pattern =
                 ( innerCond, innerBindings ) = patternCondition ctx scrutVar inner
             in
             ( innerCond, aliasBinding ++ innerBindings )
+
+
+{-| Extract variable names from a pattern and create renames mapping to mangled C names.
+This ensures pattern-bound variables shadow builtins with the same name.
+-}
+patternVarRenames : Core.Pattern -> Dict String String
+patternVarRenames pattern =
+    case pattern of
+        Core.PVar tv ->
+            Dict.singleton tv.name (mangle tv.name)
+
+        Core.PWildcard _ ->
+            Dict.empty
+
+        Core.PLit _ _ ->
+            Dict.empty
+
+        Core.PCon _ subPats _ ->
+            List.foldl (\subPat acc -> Dict.union (patternVarRenames subPat) acc) Dict.empty subPats
+
+        Core.PTuple subPats _ ->
+            List.foldl (\subPat acc -> Dict.union (patternVarRenames subPat) acc) Dict.empty subPats
+
+        Core.PRecord fields _ ->
+            List.foldl (\( _, subPat ) acc -> Dict.union (patternVarRenames subPat) acc) Dict.empty fields
+
+        Core.PAlias inner aliasName _ ->
+            Dict.insert aliasName (mangle aliasName) (patternVarRenames inner)
 
 
 generateCon : GenCtx -> String -> List Core.Expr -> String

@@ -83,6 +83,7 @@ type TokenType
     | Backslash       -- \
     | Underscore      -- _
     | At              -- @
+    | Semicolon       -- ;
     -- Layout
     | Newline
     | Indent Int
@@ -534,5 +535,6 @@ lexPunctuation state c =
         ',' -> emit Comma "," start end state1
         '\\' -> emit Backslash "\\" start end state1
         '_' -> emit Underscore "_" start end state1
+        ';' -> emit Semicolon ";" start end state1
         '\t' -> state1  -- skip tabs
         _ -> emit (Error ("Unexpected character: " ++ String.fromChar c)) (String.fromChar c) start end state1
