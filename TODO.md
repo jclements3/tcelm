@@ -354,11 +354,15 @@
 - [ ] **NEXT**: Self-hosting roadmap
   - [x] Individual module compilation works (Types.elm, AST.elm produce valid C)
   - [x] Library modules no longer generate main() (MainNone variant added)
-  - [ ] Bundler issues: duplicate main(), merged modules not working correctly
-  - [ ] Need to link against Set, Dict runtime implementations
+  - [x] tcelm-bundle.js fixed for old tcelm (extractHeaders stops before main)
+  - [x] tcelm2-merge.js created - merges modules into single source
+  - [x] Simple function-only multi-module works: Helper.double -> helper_double
+  - [ ] Type alias merging needs proper uppercase prefixing + reference updates
+  - [ ] Constructor merging needs similar fixes
   - Current blockers for self-hosting:
-    1. Multi-module bundler needs fixes
-    2. Standard library runtime (Set, Dict, etc.) needs to be included
+    1. Type definitions in merged modules need proper renaming (Ast_Position not ast_Position)
+    2. Cross-module type references need updating during merge
+    3. Alternative: implement proper cross-module type inference in tcelm2
 
 ---
 
