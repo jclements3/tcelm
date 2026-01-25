@@ -261,15 +261,27 @@ function extractModuleCode(cCode, moduleName) {
     const userFuncsStart = cCode.indexOf('/* User-defined functions */');
     const mainStart = cCode.indexOf('/* Elm main value */');
     const cMainStart = cCode.indexOf('int main(void)');
+    const libModuleStart = cCode.indexOf('/* Library module');
 
     // Find earliest module content (excluding type tags which are merged separately)
     const candidates = [forwardDeclStart, constantsStart, computedConstStart, userFuncsStart]
         .filter(x => x !== -1);
     let start = candidates.length > 0 ? Math.min(...candidates) : -1;
 
-    let end = mainStart !== -1 ? mainStart : cMainStart;
+    // Find end marker - main section or library module marker
+    let end = -1;
+    if (mainStart !== -1) {
+        end = mainStart;
+    } else if (cMainStart !== -1) {
+        end = cMainStart;
+    } else if (libModuleStart !== -1) {
+        end = libModuleStart;
+    } else {
+        // No end marker found, use end of file
+        end = cCode.length;
+    }
 
-    if (start === -1 || end === -1 || start >= end) {
+    if (start === -1 || start >= end) {
         return `/* Module ${moduleName} - no extractable code */\n`;
     }
 
@@ -283,10 +295,16 @@ function extractModuleCode(cCode, moduleName) {
 function extractHeadersAndRuntime(cCode) {
     const userFuncsStart = cCode.indexOf('/* Forward declarations */');
     const typeTagsStart = cCode.indexOf('/* Type tags for');
+    const mainStart = cCode.indexOf('/* Elm main value */');
+    const cMainStart = cCode.indexOf('int main(void)');
+    const libModuleStart = cCode.indexOf('/* Library module');
 
     const end = Math.min(
         userFuncsStart !== -1 ? userFuncsStart : cCode.length,
-        typeTagsStart !== -1 ? typeTagsStart : cCode.length
+        typeTagsStart !== -1 ? typeTagsStart : cCode.length,
+        mainStart !== -1 ? mainStart : cCode.length,
+        cMainStart !== -1 ? cMainStart : cCode.length,
+        libModuleStart !== -1 ? libModuleStart : cCode.length
     );
 
     let headers = cCode.substring(0, end);
