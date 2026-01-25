@@ -184,6 +184,7 @@ Provides callbacks to shared code generation functions.
 tccCodegenConfig : TCC.CodegenConfig
 tccCodegenConfig =
     { extractMain = extractMain
+    , extractMainWithCtx = extractMainWithCtx
     , generateImportCode = generateImportCode
     , generateUserFunction = generateUserFunction
     , collectLocalFunctionsWithScope = collectLocalFunctionsWithScope
@@ -1908,6 +1909,19 @@ extractMain ast =
         |> Maybe.withDefault (MainString "Hello from tcelm!")
 
 
+{-| Extract main value with module context for proper function name prefixing
+-}
+extractMainWithCtx : String -> List String -> Src.Module -> MainValue
+extractMainWithCtx modulePrefix userFunctions ast =
+    let
+        ctx = { funcPrefix = "main", modulePrefix = modulePrefix, userFunctions = userFunctions }
+    in
+    ast.values
+        |> List.filterMap (extractMainValueWithCtx ctx)
+        |> List.head
+        |> Maybe.withDefault (MainString "Hello from tcelm!")
+
+
 {-| Extract main value from a located value
 -}
 extractMainValue : Src.Located Src.Value -> Maybe MainValue
@@ -1923,6 +1937,21 @@ extractMainValue (Src.At _ value) =
         Nothing
 
 
+{-| Extract main value with context for proper function prefixing
+-}
+extractMainValueWithCtx : ExprCtx -> Src.Located Src.Value -> Maybe MainValue
+extractMainValueWithCtx ctx (Src.At _ value) =
+    let
+        (Src.At _ name) =
+            value.name
+    in
+    if name == "main" then
+        Just (exprToMainValueWithTypeCtx ctx value.type_ value.body)
+
+    else
+        Nothing
+
+
 {-| Convert an expression to a MainValue, using type annotation if available
 -}
 exprToMainValueWithType : Maybe Src.Type -> Src.Expr -> MainValue
@@ -1930,6 +1959,26 @@ exprToMainValueWithType maybeType expr =
     let
         baseValue =
             exprToMainValue expr
+    in
+    -- If type annotation says String, override int inference
+    if Shared.mainTypeIsString maybeType then
+        case baseValue of
+            MainExpr "int" cCode ->
+                MainExpr "const char *" cCode
+
+            _ ->
+                baseValue
+    else
+        baseValue
+
+
+{-| Convert an expression to a MainValue with context for proper function prefixing
+-}
+exprToMainValueWithTypeCtx : ExprCtx -> Maybe Src.Type -> Src.Expr -> MainValue
+exprToMainValueWithTypeCtx ctx maybeType expr =
+    let
+        baseValue =
+            exprToMainValueWithCtx ctx expr
     in
     -- If type annotation says String, override int inference
     if Shared.mainTypeIsString maybeType then
@@ -2022,6 +2071,101 @@ exprToMainValue locatedExpr =
                 cCode = generateStandaloneExpr locatedExpr
                 -- Infer type from generated code patterns
                 -- Check for string literals inside ternary/case expressions (e.g., ? "string" :)
+                hasStringLiteralInBranch =
+                    String.contains "? \"" cCode
+                        || String.contains ": \"" cCode
+                        || String.contains "const char *elm_" cCode
+
+                inferredType =
+                    if String.contains "elm_str_" cCode
+                        || String.contains "elm_from_int" cCode
+                        || String.contains "elm_from_float" cCode
+                        || String.startsWith "\"" cCode
+                        || hasStringLiteralInBranch then
+                        "const char *"
+                    else
+                        "int"
+            in
+            MainExpr inferredType cCode
+
+
+{-| Convert an expression to a MainValue with context for proper function prefixing
+-}
+exprToMainValueWithCtx : ExprCtx -> Src.Expr -> MainValue
+exprToMainValueWithCtx ctx locatedExpr =
+    let
+        (Src.At region expr) =
+            locatedExpr
+    in
+    case expr of
+        Src.Str s ->
+            MainString s
+
+        Src.Int n ->
+            MainInt n
+
+        Src.Negate innerExpr ->
+            case exprToMainValueWithCtx ctx innerExpr of
+                MainInt n ->
+                    MainInt -n
+
+                other ->
+                    other
+
+        Src.Binops pairs finalExpr ->
+            -- Generate C code for binary operations with context
+            let
+                cCode = generateStandaloneBinopsWithCtx ctx pairs finalExpr
+
+                -- Check if this is string concatenation
+                isStringConcat =
+                    List.all (\( _, Src.At _ op ) -> op == "++") pairs
+
+                cType =
+                    if isStringConcat then
+                        "const char *"
+
+                    else
+                        "int"
+            in
+            MainExpr cType cCode
+
+        Src.If branches elseExpr ->
+            -- Infer type from first branch's then-expression
+            let
+                cCode = generateStandaloneIfWithCtx ctx branches elseExpr
+                inferredType =
+                    case branches of
+                        ( _, thenExpr ) :: _ ->
+                            case exprToMainValueWithCtx ctx thenExpr of
+                                MainString _ -> "const char *"
+                                MainInt _ -> "int"
+                                MainExpr t _ -> t
+                        [] ->
+                            case exprToMainValueWithCtx ctx elseExpr of
+                                MainString _ -> "const char *"
+                                MainInt _ -> "int"
+                                MainExpr t _ -> t
+            in
+            MainExpr inferredType cCode
+
+        Src.Let defs body ->
+            -- Infer type from body expression
+            let
+                cCode = generateStandaloneLetWithCtx ctx defs body
+                inferredType =
+                    case exprToMainValueWithCtx ctx body of
+                        MainString _ -> "const char *"
+                        MainInt _ -> "int"
+                        MainExpr t _ -> t
+            in
+            MainExpr inferredType cCode
+
+        _ ->
+            -- Fallback: try to generate as expression and infer type with context
+            let
+                cCode = generateStandaloneExprWithCtx ctx locatedExpr
+                -- Infer type from generated code patterns
                 hasStringLiteralInBranch =
                     String.contains "? \"" cCode
                         || String.contains ": \"" cCode
@@ -4453,11 +4597,163 @@ inferCTypeAndInit locatedExpr =
             ( "double", generateStandaloneExpr locatedExpr )
 
 
+{-| Infer C type and initializer for an expression with context for module prefixing
+-}
+inferCTypeAndInitWithCtx : ExprCtx -> Src.Expr -> ( String, String )
+inferCTypeAndInitWithCtx ctx locatedExpr =
+    let
+        (Src.At _ expr) =
+            locatedExpr
+    in
+    case expr of
+        Src.Record fields ->
+            let
+                inferFieldType : Src.Expr -> String
+                inferFieldType fieldValue =
+                    let
+                        valueStr = generateStandaloneExprWithCtx ctx fieldValue
+                    in
+                    if String.startsWith "\"" valueStr then
+                        "const char *"
+                    else if String.contains "elm_str_" valueStr || String.contains "elm_from_" valueStr then
+                        "const char *"
+                    else
+                        "double"
+
+                fieldDefs =
+                    fields
+                        |> List.map (\( Src.At _ fieldName, fieldValue ) -> inferFieldType fieldValue ++ " " ++ fieldName)
+                        |> String.join "; "
+
+                fieldValues =
+                    fields
+                        |> List.map
+                            (\( Src.At _ fieldName, fieldValue ) ->
+                                "." ++ fieldName ++ " = " ++ generateStandaloneExprWithCtx ctx fieldValue
+                            )
+                        |> String.join ", "
+            in
+            ( "struct { " ++ fieldDefs ++ "; }", "{" ++ fieldValues ++ "}" )
+
+        Src.Tuple first second rest ->
+            let
+                elements =
+                    first :: second :: rest
+
+                numElements =
+                    List.length elements
+
+                tupleType =
+                    if numElements == 2 then
+                        "elm_tuple2_t"
+                    else if numElements == 3 then
+                        "elm_tuple3_t"
+                    else
+                        "struct { " ++ (List.indexedMap (\i _ -> "int _" ++ String.fromInt i) elements |> String.join "; ") ++ "; }"
+
+                values =
+                    List.map (generateStandaloneExprWithCtx ctx) elements
+                        |> String.join ", "
+            in
+            ( tupleType, "{" ++ values ++ "}" )
+
+        Src.Update (Src.At _ recordName) updates ->
+            let
+                updateAssignments =
+                    updates
+                        |> List.map
+                            (\( Src.At _ fieldName, valueExpr ) ->
+                                "__update_tmp." ++ fieldName ++ " = " ++ generateStandaloneExprWithCtx ctx valueExpr ++ ";"
+                            )
+                        |> String.join " "
+            in
+            ( "typeof(elm_" ++ recordName ++ ")"
+            , "({ typeof(elm_" ++ recordName ++ ") __update_tmp = elm_" ++ recordName ++ "; " ++ updateAssignments ++ " __update_tmp; })"
+            )
+
+        Src.Str s ->
+            ( "const char *", "\"" ++ escapeC s ++ "\"" )
+
+        Src.Int n ->
+            ( "double", String.fromInt n )
+
+        Src.Float f ->
+            ( "double", String.fromFloat f )
+
+        Src.Call (Src.At _ (Src.Var Src.CapVar _)) _ ->
+            ( "elm_union_t", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.Call (Src.At _ (Src.VarQual Src.CapVar _ _)) _ ->
+            ( "elm_union_t", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.Call (Src.At _ (Src.VarQual _ "String" _)) _ ->
+            ( "const char *", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.Call (Src.At _ (Src.VarQual _ "List" "partition")) _ ->
+            ( "struct { elm_list_t _0; elm_list_t _1; }", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.Call (Src.At _ (Src.VarQual _ "List" "unzip")) _ ->
+            ( "struct { elm_list_t _0; elm_list_t _1; }", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.Call (Src.At _ (Src.Var _ funcName)) _ ->
+            let
+                cExpr = generateStandaloneExprWithCtx ctx locatedExpr
+                isStringResult =
+                    String.contains "elm_str_" cExpr
+                        || String.contains "elm_from_" cExpr
+                        || String.contains "Header" funcName
+                        || String.contains "header" funcName
+                        || String.contains "List" funcName
+                        || String.contains "String" funcName
+                        || String.contains "format" funcName
+            in
+            if isStringResult then
+                ( "const char *", cExpr )
+            else
+                ( "typeof(" ++ cExpr ++ ")", cExpr )
+
+        Src.Binops pairs finalExpr ->
+            let
+                isStringConcat = List.all (\( _, Src.At _ op ) -> op == "++") pairs
+                cExpr = generateStandaloneExprWithCtx ctx locatedExpr
+            in
+            if isStringConcat then
+                ( "const char *", cExpr )
+            else
+                ( "double", cExpr )
+
+        Src.Var Src.CapVar _ ->
+            ( "elm_union_t", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.VarQual Src.CapVar _ _ ->
+            ( "elm_union_t", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        Src.Var Src.LowVar name ->
+            -- Check if this is a user function that needs module prefix
+            if List.member name ctx.userFunctions && not (String.isEmpty ctx.modulePrefix) then
+                ( "typeof(elm_" ++ ctx.modulePrefix ++ "_" ++ name ++ ")", "elm_" ++ ctx.modulePrefix ++ "_" ++ name )
+            else
+                ( "typeof(elm_" ++ name ++ ")", "elm_" ++ name )
+
+        Src.List _ ->
+            ( "elm_list_t", generateStandaloneExprWithCtx ctx locatedExpr )
+
+        _ ->
+            ( "double", generateStandaloneExprWithCtx ctx locatedExpr )
+
+
 {-| Generate standalone C code for let bindings using GCC compound statements
 -}
 generateStandaloneLet : List (Src.Located Src.Def) -> Src.Expr -> String
 generateStandaloneLet defs body =
     generateStandaloneLetWithPrefix "main" defs body
+
+
+{-| Generate standalone C code for let bindings with full context
+-}
+generateStandaloneLetWithCtx : ExprCtx -> List (Src.Located Src.Def) -> Src.Expr -> String
+generateStandaloneLetWithCtx ctx defs body =
+    generateStandaloneLetWithPrefixAndCtx ctx.funcPrefix ctx defs body
 
 
 {-| Generate standalone C code for let bindings with a known prefix for lifted functions
@@ -4585,6 +4881,122 @@ generateStandaloneLetWithPrefix prefix defs body =
         -- Use context-aware generation for the body to handle nested lets correctly
         bodyStr =
             generateStandaloneExprWithCtx { funcPrefix = prefix, modulePrefix = "", userFunctions = [] } body
+
+        undefStrs =
+            if List.isEmpty undefMacros then
+                ""
+            else
+                "\n        " ++ String.join "\n        " undefMacros
+    in
+    "({\n        " ++ String.join "\n        " defStrs ++ "\n        " ++ bodyStr ++ ";" ++ undefStrs ++ "\n    })"
+
+
+{-| Generate standalone C code for let bindings with full context for module prefixing
+-}
+generateStandaloneLetWithPrefixAndCtx : String -> ExprCtx -> List (Src.Located Src.Def) -> Src.Expr -> String
+generateStandaloneLetWithPrefixAndCtx prefix ctx defs body =
+    let
+        -- Collect info about local functions for macro generation
+        localFuncInfo =
+            defs
+                |> List.filterMap
+                    (\(Src.At _ def) ->
+                        case def of
+                            Src.Define (Src.At _ name) args defBody _ ->
+                                if not (List.isEmpty args) then
+                                    let
+                                        argNames =
+                                            List.concatMap patternVars args
+
+                                        allRefs =
+                                            collectVarRefs defBody |> Shared.uniqueStrings
+
+                                        letValueNames =
+                                            defs
+                                                |> List.filterMap
+                                                    (\(Src.At _ d) ->
+                                                        case d of
+                                                            Src.Define (Src.At _ n) a _ _ ->
+                                                                if List.isEmpty a then Just n else Nothing
+                                                            _ ->
+                                                                Nothing
+                                                    )
+
+                                        localFuncNames =
+                                            defs
+                                                |> List.filterMap
+                                                    (\(Src.At _ d) ->
+                                                        case d of
+                                                            Src.Define (Src.At _ n) a _ _ ->
+                                                                if not (List.isEmpty a) then Just n else Nothing
+                                                            _ ->
+                                                                Nothing
+                                                    )
+
+                                        stdlibNames =
+                                            [ "String", "List", "Maybe", "Result", "Debug", "Basics" ]
+
+                                        capturedVars =
+                                            allRefs
+                                                |> List.filter
+                                                    (\v ->
+                                                        not (List.member v argNames)
+                                                            && not (List.member v localFuncNames)
+                                                            && not (List.member v stdlibNames)
+                                                    )
+                                    in
+                                    Just { name = name, numArgs = List.length args, capturedVars = capturedVars }
+
+                                else
+                                    Nothing
+
+                            Src.Destruct _ _ ->
+                                Nothing
+                    )
+
+        generateDef (Src.At _ def) =
+            case def of
+                Src.Define (Src.At _ name) args defBody _ ->
+                    if List.isEmpty args then
+                        let
+                            ( varType, varInit ) =
+                                inferCTypeAndInitWithCtx ctx defBody
+                        in
+                        varType ++ " elm_" ++ name ++ " = " ++ varInit ++ ";"
+
+                    else
+                        let
+                            funcInfo =
+                                localFuncInfo
+                                    |> List.filter (\f -> f.name == name)
+                                    |> List.head
+
+                            capturedVars =
+                                funcInfo
+                                    |> Maybe.map .capturedVars
+                                    |> Maybe.withDefault []
+
+                            capturedArgs =
+                                if List.isEmpty capturedVars then
+                                    ""
+                                else
+                                    ", " ++ (capturedVars |> List.map (\v -> "elm_" ++ v) |> String.join ", ")
+                        in
+                        "#define elm_" ++ name ++ "(...) elm_" ++ prefix ++ "_" ++ name ++ "(__VA_ARGS__" ++ capturedArgs ++ ")"
+
+                Src.Destruct pattern expr ->
+                    generateDestructuringWithCtx ctx pattern expr
+
+        undefMacros =
+            localFuncInfo
+                |> List.map (\f -> "#undef elm_" ++ f.name)
+
+        defStrs =
+            List.map generateDef defs
+
+        -- Use full context for the body to handle module-prefixed function calls
+        bodyStr =
+            generateStandaloneExprWithCtx { funcPrefix = prefix, modulePrefix = ctx.modulePrefix, userFunctions = ctx.userFunctions } body
 
         undefStrs =
             if List.isEmpty undefMacros then
@@ -4808,6 +5220,73 @@ generateDestructuring pattern expr =
 
                 _ ->
                     "/* unsupported destructuring pattern */"
+
+
+{-| Generate C code for pattern destructuring with context for module prefixing.
+    This is a simplified version that uses context for expression generation.
+-}
+generateDestructuringWithCtx : ExprCtx -> Src.Pattern -> Src.Expr -> String
+generateDestructuringWithCtx ctx pattern expr =
+    let
+        exprStr =
+            generateStandaloneExprWithCtx ctx expr
+
+        tempName =
+            "__destruct_" ++ String.fromInt (String.length exprStr |> modBy 1000)
+    in
+    case pattern of
+        Src.At _ (Src.PTuple first second rest) ->
+            let
+                numElements =
+                    2 + List.length rest
+
+                tupleType =
+                    if numElements == 2 then
+                        "elm_tuple2_t"
+                    else if numElements == 3 then
+                        "elm_tuple3_t"
+                    else
+                        "elm_tuple" ++ String.fromInt numElements ++ "_t"
+
+                tupleDecl =
+                    tupleType ++ " " ++ tempName ++ " = " ++ exprStr ++ ";"
+
+                allPatterns =
+                    first :: second :: rest
+
+                generateBinding idx pat =
+                    case pat of
+                        Src.At _ (Src.PVar name) ->
+                            Just ("double elm_" ++ name ++ " = " ++ tempName ++ "._" ++ String.fromInt idx ++ ".d;")
+                        Src.At _ Src.PAnything ->
+                            Nothing
+                        _ ->
+                            Just ("/* unsupported pattern in tuple position " ++ String.fromInt idx ++ " */")
+
+                bindings =
+                    allPatterns
+                        |> List.indexedMap generateBinding
+                        |> List.filterMap identity
+            in
+            tupleDecl ++ " " ++ String.join " " bindings
+
+        Src.At _ (Src.PVar name) ->
+            "double elm_" ++ name ++ " = " ++ exprStr ++ ";"
+
+        Src.At _ (Src.PRecord fields) ->
+            let
+                fieldBindings =
+                    fields
+                        |> List.map (\(Src.At _ fieldName) ->
+                            "double elm_" ++ fieldName ++ " = (" ++ exprStr ++ ")." ++ fieldName ++ ";")
+            in
+            String.join " " fieldBindings
+
+        Src.At _ Src.PAnything ->
+            "(void)(" ++ exprStr ++ ");"
+
+        _ ->
+            "/* unsupported destructuring pattern */"
 
 
 {-| Generate standalone C code for if/else expressions using ternary operator

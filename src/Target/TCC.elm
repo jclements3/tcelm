@@ -23,6 +23,7 @@ Provides callbacks to shared code generation functions in Cli.elm.
 -}
 type alias CodegenConfig =
     { extractMain : Src.Module -> MainValue
+    , extractMainWithCtx : String -> List String -> Src.Module -> MainValue
     , generateImportCode : List Src.Import -> String
     , generateUserFunction : String -> List String -> String -> List Src.Pattern -> Src.Expr -> String
     , collectLocalFunctionsWithScope : String -> List String -> Src.Expr -> List LiftedFunc
@@ -76,7 +77,7 @@ generateCode config ast =
             config.generateImportCode ast.imports
 
         mainValue =
-            config.extractMain ast
+            config.extractMainWithCtx modulePrefix userFunctionNames ast
 
         -- Extract lambdas from record fields and generate static functions
         extractRecordLambdas : String -> Src.Expr -> List ( String, String )

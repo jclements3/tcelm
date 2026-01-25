@@ -11,8 +11,8 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-24
-**Last Session**: Completed Phase 1.1 - Extracted all target code generation to Target modules
-**Next Action**: Fix core language features (closures, pipelines, pattern matching)
+**Last Session**: Fixed module prefix bug in pipeline operators and main extraction
+**Next Action**: Complete pattern matching (cons patterns, nested constructors)
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
@@ -22,7 +22,10 @@
 - [x] 2026-01-24: Extracted generateNativeCode to Target/Native.elm (~100 lines)
 - [x] 2026-01-24: Expanded Target/TCC.elm with full TCC code generation (~1350 lines)
 - [x] 2026-01-24: Reorganized TODO.md for practical NUC+Ledger priorities
-- [ ] **NEXT**: Fix lambda/closure capture bugs
+- [x] 2026-01-24: Fixed closure capture prefix and output order in TCC target
+- [x] 2026-01-24: Implemented fixComplexConstantRefs to transform complex constant references
+- [x] 2026-01-24: Fixed module prefix bug - pipeline operators and main now use correct prefixes
+- [ ] **NEXT**: Complete pattern matching
 
 ---
 
@@ -31,13 +34,13 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Parser | ~90% | Most Elm syntax parsed |
-| Cli.elm | 6,353 lines | Orchestrates code generators |
+| Cli.elm | 6,800+ lines | Orchestrates code generators |
 | Target/RTEMS.elm | Complete | RTEMS target with CodegenConfig |
 | Target/TCC.elm | Complete | TCC target with CodegenConfig |
 | Target/Native.elm | Complete | Native target with CodegenConfig |
 | Codegen.Pattern | ~60% | Simple patterns only, complex in Cli |
-| Codegen.Lambda | Fragile | Lambda lifting works, capture buggy |
-| Pipeline operators | Not done | |> and <| need desugaring |
+| Codegen.Lambda | Working | Lambda lifting + capture fixed |
+| Pipeline operators | Working | |> and <| fully implemented |
 | do-notation | Not done | Needs parser + desugaring |
 | Standard library | Partial | Many C implementations missing |
 
@@ -56,12 +59,12 @@ Current: Lambda lifting works but variable capture is fragile.
 - [ ] Test: Nested lambdas with multiple capture levels
 - [ ] Test: Parser combinator patterns (andThen chains)
 
-### 1.2 Pipeline Operators (BLOCKING)
-Current: `|>` and `<|` not supported.
-- [ ] Add `|>` desugaring: `a |> f` → `f a`
-- [ ] Add `<|` desugaring: `f <| a` → `f a`
-- [ ] Add `|>` with partial application: `a |> f b` → `f b a`
-- [ ] Verify `<<` and `>>` composition works
+### 1.2 Pipeline Operators ✅ DONE
+- [x] `|>` desugaring: `a |> f` → `f a`
+- [x] `<|` desugaring: `f <| a` → `f a`
+- [x] `|>` with partial application: `a |> f b` → `f b a`
+- [x] `<<` and `>>` composition works
+- [x] Fixed module prefix bug in pipeline function calls
 
 ### 1.3 Complete Pattern Matching
 Current: Simple patterns work, complex ones partial.
