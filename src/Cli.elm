@@ -40,6 +40,7 @@ import Codegen.Shared as Shared exposing (ExprCtx, MainValue(..), collectAllFunc
 import Codegen.Union as Union
 import Generate.C as C
 import Json.Decode as Decode
+import Target.Native as Native
 import Target.RTEMS as RTEMS exposing (CodegenConfig)
 import Target.TCC as TCC
 import Json.Encode as Encode
@@ -121,7 +122,7 @@ compile target source =
                         RTEMS.generateCode rtemsCodegenConfig ast
 
                     else if target == "native" then
-                        generateNativeCode ast
+                        Native.generateCode nativeCodegenConfig ast
 
                     else if target == "native-worker" then
                         C.generateNativeWorkerModule ast
@@ -162,6 +163,18 @@ rtemsCodegenConfig =
     , generateUserFunction = generateUserFunction
     , collectLocalFunctionsWithScope = collectLocalFunctionsWithScope
     , generateLiftedFunction = generateLiftedFunction
+    }
+
+
+{-| Configuration for native code generation.
+Provides callbacks to shared code generation functions.
+-}
+nativeCodegenConfig : Native.CodegenConfig
+nativeCodegenConfig =
+    { extractMain = extractMain
+    , generateImportCode = generateImportCode
+    , generateStandaloneForwardDecl = generateStandaloneForwardDecl
+    , generateStandaloneFunction = generateStandaloneFunction
     }
 
 
