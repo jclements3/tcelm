@@ -1,0 +1,8 @@
+-- expect: 15
+module Test exposing (main)
+
+-- Foreign function that takes a callback with two arguments
+foreign import apply_binary : (Int -> Int -> Int) -> Int -> Int -> Int
+
+main =
+    apply_binary (\x y -> x + y) 7 8

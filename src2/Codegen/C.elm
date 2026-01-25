@@ -139,6 +139,7 @@ generateC opts module_ =
     in
     let
         foreignWrappers = generateForeignWrappers finalCtx
+        callbackSupport = generateCallbackSupport finalCtx
     in
     String.join "\n"
         [ generateHeader ctx1
@@ -147,6 +148,7 @@ generateC opts module_ =
         , ""
         , generateTypeDecls ctx1
         , ""
+        , if String.isEmpty callbackSupport then "" else callbackSupport ++ "\n"
         , generateForeignExterns finalCtx
         , ""
         , generateForwardDecls ctx1
@@ -4603,6 +4605,22 @@ generateForeignWrapper ctx foreignDef =
                     |> List.map (\i -> "elm_value_t arg" ++ String.fromInt i)
                     |> String.join ", "
 
+        -- Generate callback setup for function type parameters
+        -- This sets the global closure variable before conversion
+        callbackSetup =
+            List.indexedMap (\i ty ->
+                if isFunctionType ty then
+                    let
+                        ( cbArgs, cbRet ) = collectCallbackTypes ty
+                        sigName = callbackSignatureName cbArgs cbRet
+                        argName = "arg" ++ String.fromInt i
+                    in
+                    Just ("    " ++ sigName ++ "_closure = " ++ argName ++ ";")
+                else
+                    Nothing
+            ) argTypes
+                |> List.filterMap identity
+
         -- Generate argument conversions (elm_value_t -> C type)
         argConversions =
             List.indexedMap (\i ty ->
@@ -4635,6 +4653,7 @@ generateForeignWrapper ctx foreignDef =
     in
     String.join "\n"
         ([ "static elm_value_t " ++ wrapperName ++ "(" ++ wrapperParams ++ ") {" ]
+         ++ callbackSetup
          ++ argConversions
          ++ returnConversion
          ++ [ "}" ]
@@ -4674,6 +4693,12 @@ typeToCType ty =
         TCon "Char" -> "char"
         TApp (TCon "Ptr") _ -> "void*"
         TApp (TCon "Task") _ -> "void*"  -- Task becomes opaque pointer
+        TArrow _ _ ->
+            -- Function type becomes a function pointer typedef
+            let
+                ( argTypes, returnType ) = collectCallbackTypes ty
+            in
+            callbackSignatureName argTypes returnType ++ "_t"
         _ -> "elm_value_t"  -- For complex types, use the generic value type
 
 
@@ -4688,6 +4713,13 @@ elmValueToC ty varName =
         TCon "String" -> varName ++ ".data.s"
         TCon "Char" -> "(char)" ++ varName ++ ".data.i"
         TApp (TCon "Ptr") _ -> varName ++ ".data.p"
+        TArrow _ _ ->
+            -- Function type - handled specially in foreign wrapper
+            -- This returns the trampoline name (callback setup done separately)
+            let
+                ( argTypes, returnType ) = collectCallbackTypes ty
+            in
+            callbackSignatureName argTypes returnType ++ "_trampoline"
         _ -> varName  -- For complex types, pass as-is
 
 
@@ -4714,6 +4746,202 @@ isUnitType ty =
         TCon "()" -> True
         TTuple [] -> True
         _ -> False
+
+
+{-| Check if a type is a function type (callback).
+-}
+isFunctionType : Type -> Bool
+isFunctionType ty =
+    case ty of
+        TArrow _ _ -> True
+        _ -> False
+
+
+{-| Collect argument types and return type from an arrow type.
+-}
+collectCallbackTypes : Type -> ( List Type, Type )
+collectCallbackTypes ty =
+    case ty of
+        TArrow arg rest ->
+            let
+                ( moreArgs, ret ) = collectCallbackTypes rest
+            in
+            ( arg :: moreArgs, ret )
+
+        _ ->
+            ( [], ty )
+
+
+{-| Generate a unique callback signature name based on types.
+-}
+callbackSignatureName : List Type -> Type -> String
+callbackSignatureName argTypes returnType =
+    let
+        argPart =
+            argTypes
+                |> List.map typeToShortName
+                |> String.join "_"
+
+        retPart = typeToShortName returnType
+    in
+    "elm_callback_" ++ argPart ++ "_to_" ++ retPart
+
+
+{-| Get a short name for a type (for callback signature naming).
+-}
+typeToShortName : Type -> String
+typeToShortName ty =
+    case ty of
+        TCon "Int" -> "int"
+        TCon "Float" -> "float"
+        TCon "Bool" -> "bool"
+        TCon "String" -> "str"
+        TCon "()" -> "void"
+        TCon "Char" -> "char"
+        TApp (TCon "Ptr") _ -> "ptr"
+        _ -> "val"
+
+
+{-| Generate a callback typedef for a function type.
+-}
+generateCallbackTypedef : List Type -> Type -> String
+generateCallbackTypedef argTypes returnType =
+    let
+        sigName = callbackSignatureName argTypes returnType
+        cRetType = typeToCType returnType
+        cArgList =
+            if List.isEmpty argTypes then
+                "void"
+            else
+                argTypes
+                    |> List.indexedMap (\i ty -> typeToCType ty)
+                    |> String.join ", "
+    in
+    "typedef " ++ cRetType ++ " (*" ++ sigName ++ "_t)(" ++ cArgList ++ ");"
+
+
+{-| Generate a callback trampoline function.
+    This is a static function that reads the Elm closure from a global
+    and invokes it with the C arguments converted to elm_value_t.
+-}
+generateCallbackTrampoline : List Type -> Type -> String
+generateCallbackTrampoline argTypes returnType =
+    let
+        sigName = callbackSignatureName argTypes returnType
+        cRetType = typeToCType returnType
+
+        -- Generate parameter list
+        cParams =
+            if List.isEmpty argTypes then
+                "void"
+            else
+                argTypes
+                    |> List.indexedMap (\i ty -> typeToCType ty ++ " arg" ++ String.fromInt i)
+                    |> String.join ", "
+
+        -- Generate argument conversions (C -> elm_value_t)
+        argConversions =
+            argTypes
+                |> List.indexedMap (\i ty ->
+                    "    elm_value_t elm_arg" ++ String.fromInt i ++ " = " ++ cToElmValue ty ("arg" ++ String.fromInt i) ++ ";"
+                )
+
+        -- Generate elm_apply calls (chain for multiple args)
+        -- elm_apply1 expects elm_closure_t*, so we extract from the elm_value_t
+        closurePtr = "(elm_closure_t *)" ++ sigName ++ "_closure.data.p"
+        applyCode =
+            case List.length argTypes of
+                0 ->
+                    "    elm_value_t result = elm_apply1(" ++ closurePtr ++ ", elm_unit());"
+
+                1 ->
+                    "    elm_value_t result = elm_apply1(" ++ closurePtr ++ ", elm_arg0);"
+
+                _ ->
+                    let
+                        -- Chain: apply first arg, then apply remaining args one by one
+                        firstApply = "    elm_value_t temp0 = elm_apply1(" ++ closurePtr ++ ", elm_arg0);"
+                        remainingApplies =
+                            List.range 1 (List.length argTypes - 1)
+                                |> List.indexedMap (\idx i ->
+                                    "    elm_value_t temp" ++ String.fromInt (idx + 1) ++ " = elm_apply1((elm_closure_t *)temp" ++ String.fromInt idx ++ ".data.p, elm_arg" ++ String.fromInt i ++ ");"
+                                )
+                        lastIdx = List.length argTypes - 1
+                        finalAssign = "    elm_value_t result = temp" ++ String.fromInt lastIdx ++ ";"
+                    in
+                    String.join "\n" ([firstApply] ++ remainingApplies ++ [finalAssign])
+
+        -- Return statement
+        returnStmt =
+            if isUnitType returnType then
+                "    (void)result;\n"
+            else
+                "    return " ++ elmValueToC returnType "result" ++ ";\n"
+
+        closureGlobal = "static elm_value_t " ++ sigName ++ "_closure;"
+    in
+    String.join "\n"
+        ([ closureGlobal
+         , ""
+         , "static " ++ cRetType ++ " " ++ sigName ++ "_trampoline(" ++ cParams ++ ") {"
+         ]
+         ++ argConversions
+         ++ [ applyCode
+            , returnStmt ++ "}"
+            ]
+        )
+
+
+{-| Collect all unique callback types from foreign function definitions.
+-}
+collectCallbackTypes_ : GenCtx -> List ( List Type, Type )
+collectCallbackTypes_ ctx =
+    ctx.foreignFunctions
+        |> Dict.values
+        |> List.concatMap (\fd ->
+            let
+                ( argTypes, _ ) = collectForeignArgTypes fd.type_
+            in
+            argTypes
+                |> List.filterMap (\ty ->
+                    if isFunctionType ty then
+                        let
+                            ( cbArgs, cbRet ) = collectCallbackTypes ty
+                        in
+                        Just ( cbArgs, cbRet )
+                    else
+                        Nothing
+                )
+        )
+        |> List.foldl (\sig acc ->
+            if List.member sig acc then acc else sig :: acc
+        ) []
+
+
+{-| Generate all callback support code (typedefs and trampolines).
+-}
+generateCallbackSupport : GenCtx -> String
+generateCallbackSupport ctx =
+    let
+        callbackSigs = collectCallbackTypes_ ctx
+    in
+    if List.isEmpty callbackSigs then
+        ""
+    else
+        let
+            typedefs =
+                callbackSigs
+                    |> List.map (\( args, ret ) -> generateCallbackTypedef args ret)
+                    |> String.join "\n"
+
+            trampolines =
+                callbackSigs
+                    |> List.map (\( args, ret ) -> generateCallbackTrampoline args ret)
+                    |> String.join "\n\n"
+        in
+        "/* ===== CALLBACK SUPPORT ===== */\n\n"
+            ++ typedefs ++ "\n\n"
+            ++ trampolines
 
 
 -- FUNCTIONS

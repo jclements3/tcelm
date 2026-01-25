@@ -295,7 +295,16 @@
   - `let (a, b) = expr in ...` now correctly binds a and b with proper types
   - Complex patterns in let bindings desugared to case expressions
   - 218 tests passing
-- [ ] **NEXT**: Continue with more advanced features or ledger work
+- [x] 2026-01-25: Fix record destructuring in let bindings
+  - Use `elm_record_get` for record pattern matching in let bindings
+  - 219 tests passing
+- [x] 2026-01-25: Callbacks (Phase 4.3)
+  - Generate C function pointers from Elm closures
+  - Support callbacks with multiple arguments
+  - Callback trampolines convert between C and Elm types
+  - Example: `foreign import register_callback : (Int -> Int) -> Task ()`
+  - 219 tests passing (callback tests require external stubs)
+- [ ] **NEXT**: Continue with deriving, ledger work, or multi-core
 
 ---
 
@@ -582,12 +591,14 @@ foreign import fclose : FileHandle -> Task ()
 - [x] Safe handle patterns (Ptr.toMaybe for optional access)
 - [x] Null pointer handling (Ptr.null, Ptr.isNull)
 
-### 4.3 Callbacks
+### 4.3 Callbacks ✅ COMPLETE
 ```elm
 foreign import register_callback : (Int -> ()) -> Task ()
 ```
-- [ ] Generate C function pointers from Elm functions
-- [ ] Handle callback invocation
+- [x] Generate C function pointers from Elm functions
+- [x] Handle callback invocation
+- [x] Support multiple argument callbacks
+- [x] Callback trampolines convert C types to Elm and invoke closures
 
 ---
 

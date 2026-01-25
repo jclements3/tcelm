@@ -1,0 +1,11 @@
+-- expect: 42
+module Test exposing (main)
+
+-- Foreign function that takes a callback that returns Int (simpler test)
+foreign import run_callback : (Int -> Int) -> Int -> Int
+
+doNothing : Int -> Int
+doNothing x = x
+
+main =
+    run_callback doNothing 42

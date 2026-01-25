@@ -1,0 +1,8 @@
+-- expect: 10
+module Test exposing (main)
+
+-- Foreign function that takes a callback
+foreign import apply_callback : (Int -> Int) -> Int -> Int
+
+main =
+    apply_callback (\x -> x * 2) 5
