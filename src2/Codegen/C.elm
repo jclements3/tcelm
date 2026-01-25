@@ -1275,6 +1275,69 @@ generateRuntime _ =
         , "    }"
         , "    return result;"
         , "}"
+        , ""
+        , "static elm_value_t elm_Dict_update(elm_value_t key, elm_value_t updater, elm_value_t dict) {"
+        , "    elm_value_t maybeValue = elm_Dict_get(key, dict);"
+        , "    elm_value_t newMaybeValue = elm_apply1((elm_closure_t *)updater.data.p, maybeValue);"
+        , "    if (newMaybeValue.tag == 200) { /* Nothing */"
+        , "        return elm_Dict_remove(key, dict);"
+        , "    } else { /* Just value */"
+        , "        return elm_Dict_insert(key, *newMaybeValue.data.c, dict);"
+        , "    }"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_map(elm_value_t f, elm_value_t dict) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        elm_value_t v = *entry.next;"
+        , "        elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, k);"
+        , "        elm_value_t newV = elm_apply1((elm_closure_t *)f1.data.p, v);"
+        , "        result = elm_cons(elm_tuple2(k, newV), result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_filter(elm_value_t pred, elm_value_t dict) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        elm_value_t v = *entry.next;"
+        , "        elm_value_t pred1 = elm_apply1((elm_closure_t *)pred.data.p, k);"
+        , "        elm_value_t keep = elm_apply1((elm_closure_t *)pred1.data.p, v);"
+        , "        if (keep.tag == 5) { /* True */"
+        , "            result = elm_cons(entry, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_foldl(elm_value_t f, elm_value_t acc, elm_value_t dict) {"
+        , "    elm_value_t result = acc;"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        elm_value_t v = *entry.next;"
+        , "        elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, k);"
+        , "        elm_value_t f2 = elm_apply1((elm_closure_t *)f1.data.p, v);"
+        , "        result = elm_apply1((elm_closure_t *)f2.data.p, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_foldr(elm_value_t f, elm_value_t acc, elm_value_t dict) {"
+        , "    /* foldr processes in reverse order - reverse the list first */"
+        , "    elm_value_t reversed = elm_List_reverse(dict);"
+        , "    return elm_Dict_foldl(f, acc, reversed);"
+        , "}"
         ]
 
 
@@ -2260,8 +2323,15 @@ getFunctionArity ctx name =
         "Dict.remove" -> 2
         "Dict.member" -> 2
 
+        -- Dict module (binary)
+        "Dict.map" -> 2
+        "Dict.filter" -> 2
+
         -- Dict module (ternary)
         "Dict.insert" -> 3
+        "Dict.update" -> 3
+        "Dict.foldl" -> 3
+        "Dict.foldr" -> 3
 
         -- User-defined functions - get arity from definition
         _ ->
@@ -2364,7 +2434,8 @@ isBuiltin name =
         -- Dict module
         , "Dict.empty", "Dict.singleton", "Dict.insert", "Dict.get", "Dict.remove"
         , "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values"
-        , "Dict.toList", "Dict.fromList"
+        , "Dict.toList", "Dict.fromList", "Dict.update", "Dict.map", "Dict.filter"
+        , "Dict.foldl", "Dict.foldr"
         ]
 
 

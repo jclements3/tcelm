@@ -374,6 +374,37 @@ builtinTypes =
           , Scheme [ "k", "v" ] []
                 (TArrow (TApp (TCon "List") (TTuple [ TVar "k", TVar "v" ])) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))
           )
+        , ( "Dict.update"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TVar "k")
+                    (TArrow (TArrow (TApp (TCon "Maybe") (TVar "v")) (TApp (TCon "Maybe") (TVar "v")))
+                        (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                            (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))))
+          )
+        , ( "Dict.map"
+          , Scheme [ "k", "a", "b" ] []
+                (TArrow (TArrow (TVar "k") (TArrow (TVar "a") (TVar "b")))
+                    (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "a"))
+                        (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "b"))))
+          )
+        , ( "Dict.filter"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TCon "Bool")))
+                    (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                        (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
+          )
+        , ( "Dict.foldl"
+          , Scheme [ "k", "v", "b" ] []
+                (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TArrow (TVar "b") (TVar "b"))))
+                    (TArrow (TVar "b")
+                        (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TVar "b"))))
+          )
+        , ( "Dict.foldr"
+          , Scheme [ "k", "v", "b" ] []
+                (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TArrow (TVar "b") (TVar "b"))))
+                    (TArrow (TVar "b")
+                        (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TVar "b"))))
+          )
         ]
 
 

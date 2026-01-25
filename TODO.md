@@ -133,7 +133,17 @@
   - List.partition (split by predicate into tuple)
   - Fixed tuple printing: tuples now use dedicated tag 600 and print as (a, b)
   - 84 tests passing
-- [ ] **NEXT**: Type classes, more stdlib functions (Dict), FFI
+- [x] 2026-01-25: String.fromFloat and String.toFloat added
+  - 86 tests passing
+- [x] 2026-01-25: Dict module with association list implementation:
+  - Dict.empty, Dict.singleton, Dict.insert, Dict.get, Dict.remove
+  - Dict.member, Dict.size, Dict.isEmpty, Dict.keys, Dict.values
+  - Dict.toList, Dict.fromList
+  - Key comparison handles both Int and String keys
+  - Maintains insertion order
+  - Fixed: zero-arity builtin functions now properly called with ()
+  - 94 tests passing
+- [ ] **NEXT**: Type classes, Dict.map/filter/foldl, FFI
 
 ---
 
@@ -303,11 +313,11 @@ Result.andThen (\validated ->
 
 **Goal**: Complete C implementations for common functions.
 
-### 3.1 String Module ✅ MOSTLY WORKING
+### 3.1 String Module ✅ MOSTLY COMPLETE
 - [x] String.fromInt
-- [ ] String.fromFloat - needs implementation
+- [x] String.fromFloat
 - [x] String.toInt
-- [ ] String.toFloat - needs implementation
+- [x] String.toFloat
 - [x] String.concat
 - [x] String.join
 - [x] String.length
@@ -321,11 +331,11 @@ Result.andThen (\validated ->
 - [x] String.contains
 - [x] String.startsWith
 - [x] String.endsWith
-- [ ] String.split - needs implementation
-- [ ] String.slice - needs implementation
+- [x] String.split
+- [x] String.slice
+- [x] String.toUpper / String.toLower
+- [x] String.trim / String.trimLeft / String.trimRight
 - [ ] String.toList / String.fromList - needs implementation
-- [ ] String.toUpper / String.toLower - needs implementation
-- [ ] String.trim - needs implementation
 - [ ] String.padLeft / String.padRight - needs implementation
 
 ### 3.2 List Module ✅ COMPLETE
@@ -347,44 +357,49 @@ Result.andThen (\validated ->
 - [x] List.repeat
 - [x] List.sum / List.product
 - [x] List.maximum / List.minimum
-- [ ] List.sort / List.sortBy - needs implementation
-- [ ] List.partition - needs implementation
+- [x] List.sort / List.sortBy
+- [x] List.partition
 
-### 3.3 Dict Module
-- [ ] Dict.empty
-- [ ] Dict.singleton
-- [ ] Dict.insert
-- [ ] Dict.get
-- [ ] Dict.remove
-- [ ] Dict.update
-- [ ] Dict.member
-- [ ] Dict.keys / Dict.values
-- [ ] Dict.toList / Dict.fromList
-- [ ] Dict.map
-- [ ] Dict.filter
-- [ ] Dict.foldl
+### 3.3 Dict Module ✅ MOSTLY COMPLETE
+- [x] Dict.empty
+- [x] Dict.singleton
+- [x] Dict.insert
+- [x] Dict.get
+- [x] Dict.remove
+- [x] Dict.member
+- [x] Dict.size / Dict.isEmpty
+- [x] Dict.keys / Dict.values
+- [x] Dict.toList / Dict.fromList
+- [ ] Dict.update - needs implementation
+- [ ] Dict.map - needs implementation
+- [ ] Dict.filter - needs implementation
+- [ ] Dict.foldl - needs implementation
 
-### 3.4 Maybe Module
-- [ ] Maybe.map
-- [ ] Maybe.andThen
-- [ ] Maybe.withDefault
-- [ ] Maybe.map2 / Maybe.map3
+### 3.4 Maybe Module ✅ COMPLETE
+- [x] Maybe.map
+- [x] Maybe.andThen
+- [x] Maybe.withDefault
+- [x] Maybe.map2
+- [ ] Maybe.map3 - needs implementation
 
-### 3.5 Result Module
-- [ ] Result.map
-- [ ] Result.mapError
-- [ ] Result.andThen
-- [ ] Result.withDefault
-- [ ] Result.toMaybe
+### 3.5 Result Module ✅ COMPLETE
+- [x] Result.map
+- [x] Result.mapError
+- [x] Result.andThen
+- [x] Result.withDefault
+- [x] Result.toMaybe
 
-### 3.6 Basics
-- [ ] identity
-- [ ] always
-- [ ] flip
-- [ ] curry / uncurry
-- [ ] compare
-- [ ] min / max
-- [ ] clamp
+### 3.6 Basics ✅ COMPLETE
+- [x] identity
+- [x] always
+- [x] flip
+- [ ] curry / uncurry - needs implementation
+- [ ] compare - needs implementation
+- [x] min / max
+- [x] clamp
+- [x] abs
+- [x] negate
+- [x] modBy / remainderBy
 
 ---
 
