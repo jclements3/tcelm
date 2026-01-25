@@ -376,7 +376,7 @@
   - Created `lib/Rtems/Atomic.elm` - lock-free atomic int/bool operations
   - Expanded `runtime/tcelm_atomic.h` with full atomic operations for FFI
   - Updated `docs/patterns.md` and `docs/RTEMS.md` for current state
-- [ ] **NEXT**: Self-hosting roadmap
+- [x] **COMPLETE**: Self-hosting roadmap
   - [x] Individual module compilation works (Types.elm, AST.elm produce valid C)
   - [x] Library modules no longer generate main() (MainNone variant added)
   - [x] tcelm-bundle.js fixed for old tcelm (extractHeaders stops before main)
@@ -390,11 +390,11 @@
   - [x] Handle `import X exposing (Name1, Type(..))` properly
   - [x] Handle `import X exposing (..)` wildcard imports
   - [x] Lambda pattern desugaring for complex patterns
-  - Current blockers for self-hosting with tcelm2:
-    1. **Type inference bug**: polymorphic record type alias + case expression with function call
-       in scrutinee causes infinite type error. See minimal repro in session log.
-    2. Original tcelm (not tcelm2) can compile the merged file correctly
-  - **Workaround**: Use original tcelm compiler for self-hosting until type inference bug is fixed
+  - [x] **Self-hosting works!** tcelm2 compiles its own merged source to valid C
+  - Known limitations (non-blockers):
+    - Mutual recursion requires forward declarations (isEven/isOdd pattern)
+    - Record pattern destructuring in let bindings not fully supported
+    - Cons operator (::) type inference has edge cases
 
 ---
 
@@ -769,7 +769,7 @@ For 4-core NUC parallel execution.
 
 ### 7.2 Testing
 - [ ] Unit tests for Codegen modules
-- [ ] Integration tests (Elm → C → execution)
+- [x] Integration tests (Elm → C → execution) - 47 tests in tests/tcelm2/integration/
 - [ ] Ledger-specific test cases
 
 ---
