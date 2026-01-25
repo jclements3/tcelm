@@ -892,6 +892,33 @@ generateRuntime _ =
         , "    if (suffixLen > sLen) return elm_bool(false);"
         , "    return elm_bool(strcmp(s.data.s + sLen - suffixLen, suffix.data.s) == 0);"
         , "}"
+        , ""
+        , "/* Tuple module */"
+        , "static elm_value_t elm_Tuple_pair(elm_value_t a, elm_value_t b) {"
+        , "    return elm_cons(a, b);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Tuple_first(elm_value_t tuple) {"
+        , "    return *tuple.data.c;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Tuple_second(elm_value_t tuple) {"
+        , "    return *tuple.next;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Tuple_mapFirst(elm_value_t f, elm_value_t tuple) {"
+        , "    elm_value_t first = *tuple.data.c;"
+        , "    elm_value_t second = *tuple.next;"
+        , "    elm_value_t newFirst = elm_apply1((elm_closure_t *)f.data.p, first);"
+        , "    return elm_cons(newFirst, second);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Tuple_mapSecond(elm_value_t f, elm_value_t tuple) {"
+        , "    elm_value_t first = *tuple.data.c;"
+        , "    elm_value_t second = *tuple.next;"
+        , "    elm_value_t newSecond = elm_apply1((elm_closure_t *)f.data.p, second);"
+        , "    return elm_cons(first, newSecond);"
+        , "}"
         ]
 
 
@@ -1797,6 +1824,15 @@ getFunctionArity ctx name =
         "String.startsWith" -> 2
         "String.endsWith" -> 2
 
+        -- Tuple module (unary)
+        "Tuple.first" -> 1
+        "Tuple.second" -> 1
+
+        -- Tuple module (binary)
+        "Tuple.pair" -> 2
+        "Tuple.mapFirst" -> 2
+        "Tuple.mapSecond" -> 2
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -1890,6 +1926,8 @@ isBuiltin name =
         , "String.append", "String.join", "String.fromInt", "String.toInt"
         , "String.left", "String.right", "String.dropLeft", "String.dropRight"
         , "String.contains", "String.startsWith", "String.endsWith"
+        -- Tuple module
+        , "Tuple.pair", "Tuple.first", "Tuple.second", "Tuple.mapFirst", "Tuple.mapSecond"
         ]
 
 
