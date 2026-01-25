@@ -10,9 +10,9 @@
 
 ## Current Progress
 
-**Last Updated**: 2026-01-24
-**Last Session**: NEW ARCHITECTURE (tcelm2) built in src2/ with proper type inference
-**Next Action**: Continue developing tcelm2 - fix code generation, add more features
+**Last Updated**: 2026-01-25
+**Last Session**: Fixed-size integer types (Int8/16/32/64, UInt8/16/32/64) fully implemented
+**Next Action**: Continue with ledger work or other advanced features
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
@@ -280,7 +280,13 @@
   - Json.Decode.maybe (wrap result in Maybe)
   - Json.Decode.value (return raw JSON value)
   - 204 tests passing
-- [ ] **NEXT**: Fixed-Size Integers (Phase 5.1) or more advanced features
+- [x] 2026-01-25: Fixed-Size Integer Types (Phase 5.1)
+  - Int8, Int16, Int32, Int64: fromInt, toInt, add/sub/mul/div/mod
+  - UInt8, UInt16, UInt32, UInt64: fromInt, toInt, add/sub/mul/div/mod
+  - Bitwise operations: and, or, xor, complement, shiftLeftBy, shiftRightBy
+  - Proper wrap-around behavior (e.g., Int8.fromInt 128 = -128)
+  - 214 tests passing
+- [ ] **NEXT**: Continue with more advanced features or ledger work
 
 ---
 
@@ -578,12 +584,12 @@ foreign import register_callback : (Int -> ()) -> Task ()
 
 ## Phase 5: Practical Additions (MEDIUM PRIORITY)
 
-### 5.1 Fixed-Size Integers
+### 5.1 Fixed-Size Integers ✅ COMPLETE
 For embedded/protocol work:
-- [ ] Int8, Int16, Int32, Int64
-- [ ] UInt8, UInt16, UInt32, UInt64
-- [ ] Bit operations: and, or, xor, shiftLeft, shiftRight
-- [ ] Overflow behavior (wrap vs error)
+- [x] Int8, Int16, Int32, Int64
+- [x] UInt8, UInt16, UInt32, UInt64
+- [x] Bit operations: and, or, xor, complement, shiftLeftBy, shiftRightBy
+- [x] Overflow behavior (wrapping - C standard behavior)
 
 ### 5.2 JSON Serialization ✅ COMPLETE
 For debugging, config, API communication:

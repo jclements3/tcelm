@@ -2396,6 +2396,467 @@ generateRuntime _ =
         , "    return elm_int((int64_t)((uint64_t)value.data.i >> bits.data.i));"
         , "}"
         , ""
+        , "/* ===== FIXED-SIZE INTEGER TYPES ===== */"
+        , "/* Tags for fixed-size integers: 800-807 for signed, 808-815 for unsigned */"
+        , "/* Int8=800, Int16=801, Int32=802, Int64=803 */"
+        , "/* UInt8=808, UInt16=809, UInt32=810, UInt64=811 */"
+        , ""
+        , "static elm_value_t elm_int8(int8_t n) {"
+        , "    return (elm_value_t){ .tag = 800, .data.i = (int64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_int16(int16_t n) {"
+        , "    return (elm_value_t){ .tag = 801, .data.i = (int64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_int32(int32_t n) {"
+        , "    return (elm_value_t){ .tag = 802, .data.i = (int64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_int64v(int64_t n) {"
+        , "    return (elm_value_t){ .tag = 803, .data.i = n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_uint8(uint8_t n) {"
+        , "    return (elm_value_t){ .tag = 808, .data.i = (int64_t)(uint64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_uint16(uint16_t n) {"
+        , "    return (elm_value_t){ .tag = 809, .data.i = (int64_t)(uint64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_uint32(uint32_t n) {"
+        , "    return (elm_value_t){ .tag = 810, .data.i = (int64_t)(uint64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_uint64v(uint64_t n) {"
+        , "    return (elm_value_t){ .tag = 811, .data.i = (int64_t)n, .next = NULL };"
+        , "}"
+        , ""
+        , "/* Int8 operations */"
+        , "static elm_value_t elm_Int8_fromInt(elm_value_t n) {"
+        , "    return elm_int8((int8_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(int8_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i + (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i - (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i * (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i / (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i % (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i & (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i | (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int8((int8_t)((int8_t)a.data.i ^ (int8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_complement(elm_value_t a) {"
+        , "    return elm_int8((int8_t)(~(int8_t)a.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int8((int8_t)((int8_t)value.data.i << (int)bits.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int8_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int8((int8_t)((int8_t)value.data.i >> (int)bits.data.i));"
+        , "}"
+        , ""
+        , "/* Int16 operations */"
+        , "static elm_value_t elm_Int16_fromInt(elm_value_t n) {"
+        , "    return elm_int16((int16_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(int16_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i + (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i - (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i * (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i / (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i % (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i & (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i | (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int16((int16_t)((int16_t)a.data.i ^ (int16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_complement(elm_value_t a) {"
+        , "    return elm_int16((int16_t)(~(int16_t)a.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int16((int16_t)((int16_t)value.data.i << (int)bits.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int16_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int16((int16_t)((int16_t)value.data.i >> (int)bits.data.i));"
+        , "}"
+        , ""
+        , "/* Int32 operations */"
+        , "static elm_value_t elm_Int32_fromInt(elm_value_t n) {"
+        , "    return elm_int32((int32_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(int32_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i + (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i - (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i * (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i / (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i % (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i & (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i | (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int32((int32_t)((int32_t)a.data.i ^ (int32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_complement(elm_value_t a) {"
+        , "    return elm_int32((int32_t)(~(int32_t)a.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int32((int32_t)((int32_t)value.data.i << (int)bits.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int32_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int32((int32_t)((int32_t)value.data.i >> (int)bits.data.i));"
+        , "}"
+        , ""
+        , "/* Int64 operations */"
+        , "static elm_value_t elm_Int64_fromInt(elm_value_t n) {"
+        , "    return elm_int64v(n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_toInt(elm_value_t n) {"
+        , "    return elm_int(n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i + b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i - b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i * b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i / b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i % b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i & b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i | b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int64v(a.data.i ^ b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_complement(elm_value_t a) {"
+        , "    return elm_int64v(~a.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int64v(value.data.i << (int)bits.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Int64_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int64v(value.data.i >> (int)bits.data.i);"
+        , "}"
+        , ""
+        , "/* UInt8 operations */"
+        , "static elm_value_t elm_UInt8_fromInt(elm_value_t n) {"
+        , "    return elm_uint8((uint8_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(uint8_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i + (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i - (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i * (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i / (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i % (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i & (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i | (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)a.data.i ^ (uint8_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_complement(elm_value_t a) {"
+        , "    return elm_uint8((uint8_t)(~(uint8_t)a.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)value.data.i << (int)bits.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt8_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint8((uint8_t)((uint8_t)value.data.i >> (int)bits.data.i));"
+        , "}"
+        , ""
+        , "/* UInt16 operations */"
+        , "static elm_value_t elm_UInt16_fromInt(elm_value_t n) {"
+        , "    return elm_uint16((uint16_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(uint16_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i + (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i - (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i * (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i / (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i % (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i & (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i | (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)a.data.i ^ (uint16_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_complement(elm_value_t a) {"
+        , "    return elm_uint16((uint16_t)(~(uint16_t)a.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)value.data.i << (int)bits.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt16_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint16((uint16_t)((uint16_t)value.data.i >> (int)bits.data.i));"
+        , "}"
+        , ""
+        , "/* UInt32 operations */"
+        , "static elm_value_t elm_UInt32_fromInt(elm_value_t n) {"
+        , "    return elm_uint32((uint32_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(uint32_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i + (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i - (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i * (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i / (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i % (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i & (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i | (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)a.data.i ^ (uint32_t)b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_complement(elm_value_t a) {"
+        , "    return elm_uint32((uint32_t)(~(uint32_t)a.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)value.data.i << (int)bits.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt32_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint32((uint32_t)((uint32_t)value.data.i >> (int)bits.data.i));"
+        , "}"
+        , ""
+        , "/* UInt64 operations */"
+        , "static elm_value_t elm_UInt64_fromInt(elm_value_t n) {"
+        , "    return elm_uint64v((uint64_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_toInt(elm_value_t n) {"
+        , "    return elm_int((int64_t)(uint64_t)n.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_add(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i + (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_sub(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i - (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_mul(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i * (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_div(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i / (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_mod(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i % (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i & (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i | (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_uint64v((uint64_t)a.data.i ^ (uint64_t)b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_complement(elm_value_t a) {"
+        , "    return elm_uint64v(~(uint64_t)a.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint64v((uint64_t)value.data.i << (int)bits.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_UInt64_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_uint64v((uint64_t)value.data.i >> (int)bits.data.i);"
+        , "}"
+        , ""
         , "/* ===== ARRAY MODULE ===== */"
         , "/* Array implemented as a list for simplicity - can optimize to true arrays later */"
         , ""
@@ -5355,6 +5816,126 @@ getFunctionArity ctx name =
         "Bytes.Decode.succeed" -> 1
         "Bytes.Decode.fail" -> 0
 
+        -- Int8 module
+        "Int8.fromInt" -> 1
+        "Int8.toInt" -> 1
+        "Int8.add" -> 2
+        "Int8.sub" -> 2
+        "Int8.mul" -> 2
+        "Int8.div" -> 2
+        "Int8.mod" -> 2
+        "Int8.and" -> 2
+        "Int8.or" -> 2
+        "Int8.xor" -> 2
+        "Int8.complement" -> 1
+        "Int8.shiftLeftBy" -> 2
+        "Int8.shiftRightBy" -> 2
+
+        -- Int16 module
+        "Int16.fromInt" -> 1
+        "Int16.toInt" -> 1
+        "Int16.add" -> 2
+        "Int16.sub" -> 2
+        "Int16.mul" -> 2
+        "Int16.div" -> 2
+        "Int16.mod" -> 2
+        "Int16.and" -> 2
+        "Int16.or" -> 2
+        "Int16.xor" -> 2
+        "Int16.complement" -> 1
+        "Int16.shiftLeftBy" -> 2
+        "Int16.shiftRightBy" -> 2
+
+        -- Int32 module
+        "Int32.fromInt" -> 1
+        "Int32.toInt" -> 1
+        "Int32.add" -> 2
+        "Int32.sub" -> 2
+        "Int32.mul" -> 2
+        "Int32.div" -> 2
+        "Int32.mod" -> 2
+        "Int32.and" -> 2
+        "Int32.or" -> 2
+        "Int32.xor" -> 2
+        "Int32.complement" -> 1
+        "Int32.shiftLeftBy" -> 2
+        "Int32.shiftRightBy" -> 2
+
+        -- Int64 module
+        "Int64.fromInt" -> 1
+        "Int64.toInt" -> 1
+        "Int64.add" -> 2
+        "Int64.sub" -> 2
+        "Int64.mul" -> 2
+        "Int64.div" -> 2
+        "Int64.mod" -> 2
+        "Int64.and" -> 2
+        "Int64.or" -> 2
+        "Int64.xor" -> 2
+        "Int64.complement" -> 1
+        "Int64.shiftLeftBy" -> 2
+        "Int64.shiftRightBy" -> 2
+
+        -- UInt8 module
+        "UInt8.fromInt" -> 1
+        "UInt8.toInt" -> 1
+        "UInt8.add" -> 2
+        "UInt8.sub" -> 2
+        "UInt8.mul" -> 2
+        "UInt8.div" -> 2
+        "UInt8.mod" -> 2
+        "UInt8.and" -> 2
+        "UInt8.or" -> 2
+        "UInt8.xor" -> 2
+        "UInt8.complement" -> 1
+        "UInt8.shiftLeftBy" -> 2
+        "UInt8.shiftRightBy" -> 2
+
+        -- UInt16 module
+        "UInt16.fromInt" -> 1
+        "UInt16.toInt" -> 1
+        "UInt16.add" -> 2
+        "UInt16.sub" -> 2
+        "UInt16.mul" -> 2
+        "UInt16.div" -> 2
+        "UInt16.mod" -> 2
+        "UInt16.and" -> 2
+        "UInt16.or" -> 2
+        "UInt16.xor" -> 2
+        "UInt16.complement" -> 1
+        "UInt16.shiftLeftBy" -> 2
+        "UInt16.shiftRightBy" -> 2
+
+        -- UInt32 module
+        "UInt32.fromInt" -> 1
+        "UInt32.toInt" -> 1
+        "UInt32.add" -> 2
+        "UInt32.sub" -> 2
+        "UInt32.mul" -> 2
+        "UInt32.div" -> 2
+        "UInt32.mod" -> 2
+        "UInt32.and" -> 2
+        "UInt32.or" -> 2
+        "UInt32.xor" -> 2
+        "UInt32.complement" -> 1
+        "UInt32.shiftLeftBy" -> 2
+        "UInt32.shiftRightBy" -> 2
+
+        -- UInt64 module
+        "UInt64.fromInt" -> 1
+        "UInt64.toInt" -> 1
+        "UInt64.add" -> 2
+        "UInt64.sub" -> 2
+        "UInt64.mul" -> 2
+        "UInt64.div" -> 2
+        "UInt64.mod" -> 2
+        "UInt64.and" -> 2
+        "UInt64.or" -> 2
+        "UInt64.xor" -> 2
+        "UInt64.complement" -> 1
+        "UInt64.shiftLeftBy" -> 2
+        "UInt64.shiftRightBy" -> 2
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -5530,6 +6111,30 @@ isBuiltin name =
         , "Bytes.Decode.succeed", "Bytes.Decode.fail"
         -- Endianness (used as constructors)
         , "LE", "BE"
+        -- Int8 module
+        , "Int8.fromInt", "Int8.toInt", "Int8.add", "Int8.sub", "Int8.mul", "Int8.div", "Int8.mod"
+        , "Int8.and", "Int8.or", "Int8.xor", "Int8.complement", "Int8.shiftLeftBy", "Int8.shiftRightBy"
+        -- Int16 module
+        , "Int16.fromInt", "Int16.toInt", "Int16.add", "Int16.sub", "Int16.mul", "Int16.div", "Int16.mod"
+        , "Int16.and", "Int16.or", "Int16.xor", "Int16.complement", "Int16.shiftLeftBy", "Int16.shiftRightBy"
+        -- Int32 module
+        , "Int32.fromInt", "Int32.toInt", "Int32.add", "Int32.sub", "Int32.mul", "Int32.div", "Int32.mod"
+        , "Int32.and", "Int32.or", "Int32.xor", "Int32.complement", "Int32.shiftLeftBy", "Int32.shiftRightBy"
+        -- Int64 module
+        , "Int64.fromInt", "Int64.toInt", "Int64.add", "Int64.sub", "Int64.mul", "Int64.div", "Int64.mod"
+        , "Int64.and", "Int64.or", "Int64.xor", "Int64.complement", "Int64.shiftLeftBy", "Int64.shiftRightBy"
+        -- UInt8 module
+        , "UInt8.fromInt", "UInt8.toInt", "UInt8.add", "UInt8.sub", "UInt8.mul", "UInt8.div", "UInt8.mod"
+        , "UInt8.and", "UInt8.or", "UInt8.xor", "UInt8.complement", "UInt8.shiftLeftBy", "UInt8.shiftRightBy"
+        -- UInt16 module
+        , "UInt16.fromInt", "UInt16.toInt", "UInt16.add", "UInt16.sub", "UInt16.mul", "UInt16.div", "UInt16.mod"
+        , "UInt16.and", "UInt16.or", "UInt16.xor", "UInt16.complement", "UInt16.shiftLeftBy", "UInt16.shiftRightBy"
+        -- UInt32 module
+        , "UInt32.fromInt", "UInt32.toInt", "UInt32.add", "UInt32.sub", "UInt32.mul", "UInt32.div", "UInt32.mod"
+        , "UInt32.and", "UInt32.or", "UInt32.xor", "UInt32.complement", "UInt32.shiftLeftBy", "UInt32.shiftRightBy"
+        -- UInt64 module
+        , "UInt64.fromInt", "UInt64.toInt", "UInt64.add", "UInt64.sub", "UInt64.mul", "UInt64.div", "UInt64.mod"
+        , "UInt64.and", "UInt64.or", "UInt64.xor", "UInt64.complement", "UInt64.shiftLeftBy", "UInt64.shiftRightBy"
         ]
 
 

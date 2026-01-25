@@ -299,6 +299,15 @@ kindOf ty =
                 "Result" -> KArrow KStar (KArrow KStar KStar)
                 "IO" -> KArrow KStar KStar
                 "Task" -> KArrow KStar (KArrow KStar KStar)
+                -- Fixed-size integer types
+                "Int8" -> KStar
+                "Int16" -> KStar
+                "Int32" -> KStar
+                "Int64" -> KStar
+                "UInt8" -> KStar
+                "UInt16" -> KStar
+                "UInt32" -> KStar
+                "UInt64" -> KStar
                 _ -> KStar  -- default
 
         TApp t1 _ ->
