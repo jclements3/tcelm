@@ -264,6 +264,30 @@ builtinTypes =
                     (TArrow (TApp (TCon "Maybe") (TVar "a"))
                         (TArrow (TApp (TCon "Maybe") (TVar "b")) (TApp (TCon "Maybe") (TVar "c")))))
           )
+        , ( "Maybe.map3"
+          , Scheme [ "a", "b", "c", "d" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TVar "d"))))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a"))
+                        (TArrow (TApp (TCon "Maybe") (TVar "b"))
+                            (TArrow (TApp (TCon "Maybe") (TVar "c")) (TApp (TCon "Maybe") (TVar "d"))))))
+          )
+        , ( "Maybe.map4"
+          , Scheme [ "a", "b", "c", "d", "e" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TArrow (TVar "d") (TVar "e")))))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a"))
+                        (TArrow (TApp (TCon "Maybe") (TVar "b"))
+                            (TArrow (TApp (TCon "Maybe") (TVar "c"))
+                                (TArrow (TApp (TCon "Maybe") (TVar "d")) (TApp (TCon "Maybe") (TVar "e")))))))
+          )
+        , ( "Maybe.map5"
+          , Scheme [ "a", "b", "c", "d", "e", "f" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TArrow (TVar "d") (TArrow (TVar "e") (TVar "f"))))))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a"))
+                        (TArrow (TApp (TCon "Maybe") (TVar "b"))
+                            (TArrow (TApp (TCon "Maybe") (TVar "c"))
+                                (TArrow (TApp (TCon "Maybe") (TVar "d"))
+                                    (TArrow (TApp (TCon "Maybe") (TVar "e")) (TApp (TCon "Maybe") (TVar "f"))))))))
+          )
 
         -- Result module (simplified - using type var for error)
         , ( "Result.withDefault"

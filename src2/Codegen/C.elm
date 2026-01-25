@@ -835,6 +835,30 @@ generateRuntime _ =
         , "    return elm_just(elm_apply1((elm_closure_t *)f1.data.p, *m2.data.c));"
         , "}"
         , ""
+        , "static elm_value_t elm_Maybe_map3(elm_value_t f, elm_value_t m1, elm_value_t m2, elm_value_t m3) {"
+        , "    if (m1.tag == 200 || m2.tag == 200 || m3.tag == 200) return elm_nothing();"
+        , "    elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, *m1.data.c);"
+        , "    elm_value_t f2 = elm_apply1((elm_closure_t *)f1.data.p, *m2.data.c);"
+        , "    return elm_just(elm_apply1((elm_closure_t *)f2.data.p, *m3.data.c));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Maybe_map4(elm_value_t f, elm_value_t m1, elm_value_t m2, elm_value_t m3, elm_value_t m4) {"
+        , "    if (m1.tag == 200 || m2.tag == 200 || m3.tag == 200 || m4.tag == 200) return elm_nothing();"
+        , "    elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, *m1.data.c);"
+        , "    elm_value_t f2 = elm_apply1((elm_closure_t *)f1.data.p, *m2.data.c);"
+        , "    elm_value_t f3 = elm_apply1((elm_closure_t *)f2.data.p, *m3.data.c);"
+        , "    return elm_just(elm_apply1((elm_closure_t *)f3.data.p, *m4.data.c));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Maybe_map5(elm_value_t f, elm_value_t m1, elm_value_t m2, elm_value_t m3, elm_value_t m4, elm_value_t m5) {"
+        , "    if (m1.tag == 200 || m2.tag == 200 || m3.tag == 200 || m4.tag == 200 || m5.tag == 200) return elm_nothing();"
+        , "    elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, *m1.data.c);"
+        , "    elm_value_t f2 = elm_apply1((elm_closure_t *)f1.data.p, *m2.data.c);"
+        , "    elm_value_t f3 = elm_apply1((elm_closure_t *)f2.data.p, *m3.data.c);"
+        , "    elm_value_t f4 = elm_apply1((elm_closure_t *)f3.data.p, *m4.data.c);"
+        , "    return elm_just(elm_apply1((elm_closure_t *)f4.data.p, *m5.data.c));"
+        , "}"
+        , ""
         , "/* Result module */"
         , "static elm_value_t elm_Result_withDefault(elm_value_t def, elm_value_t result) {"
         , "    if (result.tag == 300) return def;"
@@ -2597,6 +2621,9 @@ getFunctionArity ctx name =
         "Maybe.map" -> 2
         "Maybe.andThen" -> 2
         "Maybe.map2" -> 3
+        "Maybe.map3" -> 4
+        "Maybe.map4" -> 5
+        "Maybe.map5" -> 6
 
         -- Result module
         "Result.withDefault" -> 2
@@ -2823,7 +2850,7 @@ isBuiltin name =
         , "List.any", "List.all", "List.concatMap", "List.indexedMap"
         , "List.sort", "List.sortBy", "List.partition"
         -- Maybe module
-        , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2"
+        , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5"
         -- Result module
         , "Result.withDefault", "Result.map", "Result.mapError", "Result.andThen", "Result.toMaybe"
         -- String module
