@@ -1,27 +1,28 @@
 # tcelm TODO - Master Plan
 
+## Target Use Case
+
+**Primary Goal**: Build a production-grade, event-sourced double-entry accounting ledger running on Intel NUC with RTEMS.
+
+**Design Philosophy**: Keep it simple. Elm's existing type system + do-notation + good FFI is sufficient. Avoid exotic Haskell features that add complexity without proportional benefit.
+
+---
+
 ## Current Progress
 
 **Last Updated**: 2026-01-24
 **Last Session**: Completed Phase 1.1 - Extracted all target code generation to Target modules
-**Next Action**: Start Phase 1.2 - Expand Codegen.Pattern
+**Next Action**: Fix core language features (closures, pipelines, pattern matching)
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
 - [x] 2025-01-24: Analyzed Cli.elm structure (6,353 lines, 168 case statements)
 - [x] 2025-01-24: Documented Codegen/ module responsibilities
 - [x] 2026-01-24: Extracted generateRtemsCode to Target/RTEMS.elm (~1600 lines)
-  - Created CodegenConfig type for callback injection pattern
-  - Moved all RTEMS preambles, runtime code, helpers
-  - Cli.elm now calls RTEMS.generateCode via config
 - [x] 2026-01-24: Extracted generateNativeCode to Target/Native.elm (~100 lines)
-  - Uses simpler CodegenConfig with forward decl and function callbacks
-  - Cli.elm now calls Native.generateCode via config
 - [x] 2026-01-24: Expanded Target/TCC.elm with full TCC code generation (~1350 lines)
-  - Added CodegenConfig with 7 callbacks for shared functions
-  - Moved generateTccCode, generateTccLibCode, generateTccHeader
-  - Cli.elm now calls TCC.generateCode/generateLibCode/generateHeader via config
-- [ ] **NEXT**: Continue Phase 1.2 - Expand Codegen.Pattern
+- [x] 2026-01-24: Reorganized TODO.md for practical NUC+Ledger priorities
+- [ ] **NEXT**: Fix lambda/closure capture bugs
 
 ---
 
@@ -30,258 +31,344 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Parser | ~90% | Most Elm syntax parsed |
-| Cli.elm | 6,353 lines | Needs refactoring, contains 5 code generators |
-| Codegen.Shared | Complete | Types, name mangling, utilities |
-| Codegen.Expr | Complete | Literals, binops, if/record/tuple/list |
-| Codegen.Builtins | ~90% | 100+ built-ins, some lambda-using funcs in Cli |
+| Cli.elm | 6,353 lines | Orchestrates code generators |
+| Target/RTEMS.elm | Complete | RTEMS target with CodegenConfig |
+| Target/TCC.elm | Complete | TCC target with CodegenConfig |
+| Target/Native.elm | Complete | Native target with CodegenConfig |
 | Codegen.Pattern | ~60% | Simple patterns only, complex in Cli |
-| Codegen.Union | Complete | Custom type definitions |
-| Codegen.Lambda | Complete | Lambda lifting types & var collection |
-| Generate.C | Complete | Module-based generation |
+| Codegen.Lambda | Fragile | Lambda lifting works, capture buggy |
+| Pipeline operators | Not done | |> and <| need desugaring |
+| do-notation | Not done | Needs parser + desugaring |
+| Standard library | Partial | Many C implementations missing |
 
 ---
 
-## Phase 1: Refactoring (Current Focus)
+## Phase 1: Core Language (CRITICAL)
 
-Goal: Reduce Cli.elm from 6,353 lines to <2,000 lines by extracting to focused modules.
+**Goal**: Make basic Elm features work reliably before adding anything new.
 
-### 1.1 Extract Target Generators ✓
-- [x] Create `Target/RTEMS.elm` - move generateRtemsCode (lines 159-770)
-- [x] Create `Target/Native.elm` - move generateNativeCode (lines 775-851)
-- [x] Create `Target/TCC.elm` - move generateTccCode, generateTccLibCode, generateTccHeader (lines 858-1620)
-- [x] Cli.elm now orchestrates via CodegenConfig callbacks to Target modules
-
-### 1.2 Expand Codegen.Pattern
-- [ ] Move generateStandaloneCaseFallback (lines 4725-5100) to Codegen.Pattern
-- [ ] Add tuple pattern support
-- [ ] Add constructor pattern support (union types)
-- [ ] Add nested pattern support
-- [ ] Add as-pattern support (@)
-- [ ] Add list cons pattern support (x :: xs)
-
-### 1.3 Extract Type Inference
-- [ ] Create `Codegen/TypeInference.elm`
-- [ ] Move parameter type detection from generateUserFunction (lines 3044-3400)
-- [ ] Create predicates: isUnionType, isListType, isStringType, isRecordType
-- [ ] Replace string-based type detection with proper type tracking
-
-### 1.4 Clean Up Expression Generation
-- [ ] Move remaining expression cases from generateStandaloneExprWithCtxImpl to Codegen.Expr
-- [ ] Reduce the 168-case statement to dispatcher only
-
-### 1.5 Lambda/Local Function Cleanup
-- [ ] Move collectLocalFunctionsWithScope to Codegen.Lambda
-- [ ] Move generateLiftedFunction to Codegen.Lambda
-- [ ] Move record lambda extraction to Codegen.Lambda
-
----
-
-## Phase 2: Bootstrap (Self-Hosting Blockers)
-
-Goal: tcelm can compile itself to C for RTEMS.
-
-### 2.1 Lambda/Closure C Generation (HIGH PRIORITY)
-Current: Lambda lifting works but closure capture is fragile.
+### 1.1 Fix Lambda/Closure Capture (BLOCKING)
+Current: Lambda lifting works but variable capture is fragile.
 - [ ] Implement proper closure struct in C runtime
 - [ ] Generate closure creation code (allocate, capture vars)
 - [ ] Generate closure invocation code (extract env, call)
-- [ ] Test with parser combinator patterns (P.andThen)
+- [ ] Test: `List.map (\x -> x + offset) items` where `offset` is captured
+- [ ] Test: Nested lambdas with multiple capture levels
+- [ ] Test: Parser combinator patterns (andThen chains)
 
-### 2.2 Pipeline Operators (HIGH PRIORITY)
-Current: |> and <| not directly supported.
-- [ ] Add |> desugaring in parser or early transform: `a |> f` → `f a`
-- [ ] Add <| desugaring: `f <| a` → `f a`
-- [ ] Verify << and >> composition works (partially implemented)
+### 1.2 Pipeline Operators (BLOCKING)
+Current: `|>` and `<|` not supported.
+- [ ] Add `|>` desugaring: `a |> f` → `f a`
+- [ ] Add `<|` desugaring: `f <| a` → `f a`
+- [ ] Add `|>` with partial application: `a |> f b` → `f b a`
+- [ ] Verify `<<` and `>>` composition works
 
-### 2.3 Partial Application / Currying (HIGH PRIORITY)
+### 1.3 Complete Pattern Matching
+Current: Simple patterns work, complex ones partial.
+- [ ] List cons patterns: `x :: xs`
+- [ ] Nested constructor patterns: `Just (Ok value)`
+- [ ] As-patterns: `(x :: xs) as list`
+- [ ] Tuple patterns in case: `(a, b, c) ->`
+- [ ] Record patterns: `{ name, balance } ->`
+
+### 1.4 Partial Application / Currying
 Current: Not implemented.
 - [ ] Detect partial application sites
 - [ ] Generate closure for partially applied functions
 - [ ] Handle curried function definitions
 
-### 2.4 Standard Library C Implementations (HIGH PRIORITY)
+---
 
-#### String module
+## Phase 2: do-notation (HIGH PRIORITY)
+
+**Goal**: Clean, readable monadic code for Result/Maybe/Task chains.
+
+### 2.1 Parser Support
+- [ ] Parse `do` keyword as expression starter
+- [ ] Parse `<-` bind operator
+- [ ] Parse `let` bindings inside do-blocks
+- [ ] Parse `pure` / `return` (alias for identity wrap)
+
+### 2.2 Desugaring
+```elm
+-- This:
+do
+    validated <- validate txn
+    balanced <- checkBalance validated
+    pure (TransactionPosted balanced)
+
+-- Becomes:
+validate txn
+    |> Result.andThen (\validated ->
+        checkBalance validated
+            |> Result.andThen (\balanced ->
+                Ok (TransactionPosted balanced)
+            )
+    )
+```
+- [ ] Desugar bind (`<-`) to `andThen` calls
+- [ ] Desugar `let` to regular let bindings
+- [ ] Infer which `andThen` to use based on type (Result.andThen, Maybe.andThen, etc.)
+- [ ] Handle `pure` as type-appropriate wrapper
+
+### 2.3 Integration
+- [ ] Works with Result, Maybe, Task
+- [ ] Works with custom types that have `andThen`
+- [ ] Good error messages for type mismatches
+
+---
+
+## Phase 3: Standard Library (HIGH PRIORITY)
+
+**Goal**: Complete C implementations for common functions.
+
+### 3.1 String Module
 - [ ] String.fromInt
 - [ ] String.fromFloat
-- [ ] String.fromChar
+- [ ] String.toInt
+- [ ] String.toFloat
 - [ ] String.concat
 - [ ] String.join
-- [ ] String.toList
+- [ ] String.split
 - [ ] String.slice
-- [ ] String.dropLeft
-- [ ] String.uncons
-- [ ] String.toUpper (partial)
+- [ ] String.left / String.right
+- [ ] String.dropLeft / String.dropRight
+- [ ] String.contains
+- [ ] String.startsWith / String.endsWith
+- [ ] String.toList / String.fromList
+- [ ] String.toUpper / String.toLower
+- [ ] String.trim
+- [ ] String.padLeft / String.padRight
 
-#### List module
-- [ ] List.map (needs closures)
-- [ ] List.concat
+### 3.2 List Module
+- [ ] List.map (needs working closures)
+- [ ] List.filter
 - [ ] List.filterMap
+- [ ] List.foldl / List.foldr
+- [ ] List.concat
+- [ ] List.concatMap
+- [ ] List.head / List.tail
+- [ ] List.take / List.drop
+- [ ] List.length
+- [ ] List.reverse
+- [ ] List.member
+- [ ] List.any / List.all
+- [ ] List.sort / List.sortBy
 - [ ] List.indexedMap
 - [ ] List.partition
-- [ ] List.isEmpty
-- [ ] List.map2
-- [ ] List.repeat
+- [ ] List.intersperse
+- [ ] List.range
 
-#### Maybe module
+### 3.3 Dict Module
+- [ ] Dict.empty
+- [ ] Dict.singleton
+- [ ] Dict.insert
+- [ ] Dict.get
+- [ ] Dict.remove
+- [ ] Dict.update
+- [ ] Dict.member
+- [ ] Dict.keys / Dict.values
+- [ ] Dict.toList / Dict.fromList
+- [ ] Dict.map
+- [ ] Dict.filter
+- [ ] Dict.foldl
+
+### 3.4 Maybe Module
 - [ ] Maybe.map
-- [ ] Maybe.withDefault (partial)
 - [ ] Maybe.andThen
+- [ ] Maybe.withDefault
+- [ ] Maybe.map2 / Maybe.map3
 
-#### Char module
-- [ ] Char.toCode
-- [ ] Char.isAlphaNum (partial)
+### 3.5 Result Module
+- [ ] Result.map
+- [ ] Result.mapError
+- [ ] Result.andThen
+- [ ] Result.withDefault
+- [ ] Result.toMaybe
 
-### 2.5 Pattern Matching Gaps
-- [ ] List cons patterns (x :: xs) in case expressions
-- [ ] Nested constructor patterns
-- [ ] As-patterns (@)
+### 3.6 Basics
+- [ ] identity
+- [ ] always
+- [ ] flip
+- [ ] curry / uncurry
+- [ ] compare
+- [ ] min / max
+- [ ] clamp
 
 ---
 
-## Phase 3: RTEMS Multi-Core (4-Core NUC)
+## Phase 4: FFI for RTEMS (HIGH PRIORITY)
 
-Goal: Efficient parallel execution on Intel NUC with RTEMS SMP.
+**Goal**: Call C functions from Elm, integrate with RTEMS APIs.
 
-### 3.1 Core Primitives
-- [ ] Core affinity type and syntax
-- [ ] Core ID query function
-- [ ] Core count query function
+### 4.1 Basic FFI
+```elm
+foreign import rtems_task_wake_after : Int -> Task ()
+foreign import serial_write : String -> Task ()
+foreign import gpio_read : Int -> Task Int
+```
+- [ ] Parse `foreign import` declarations
+- [ ] Generate C function call wrappers
+- [ ] Handle return type conversion
+- [ ] Handle Task wrapping for async operations
 
-### 3.2 Parallelism Primitives
+### 4.2 Pointer Types
+```elm
+type alias FileHandle = Ptr
+foreign import fopen : String -> String -> Task FileHandle
+foreign import fclose : FileHandle -> Task ()
+```
+- [ ] Opaque `Ptr` type
+- [ ] Safe handle patterns
+- [ ] Null pointer handling
+
+### 4.3 Callbacks
+```elm
+foreign import register_callback : (Int -> ()) -> Task ()
+```
+- [ ] Generate C function pointers from Elm functions
+- [ ] Handle callback invocation
+
+---
+
+## Phase 5: Practical Additions (MEDIUM PRIORITY)
+
+### 5.1 Fixed-Size Integers
+For embedded/protocol work:
+- [ ] Int8, Int16, Int32, Int64
+- [ ] UInt8, UInt16, UInt32, UInt64
+- [ ] Bit operations: and, or, xor, shiftLeft, shiftRight
+- [ ] Overflow behavior (wrap vs error)
+
+### 5.2 JSON Serialization
+For debugging, config, API communication:
+- [ ] Json.Encode basics
+- [ ] Json.Decode basics
+- [ ] Decode.field, Decode.map, Decode.andThen
+- [ ] Auto-derive for simple records (optional)
+
+### 5.3 Binary Serialization
+For efficient storage/network:
+- [ ] Bytes type
+- [ ] Encode.int32, Encode.float64, etc.
+- [ ] Decode.int32, Decode.float64, etc.
+- [ ] Endianness control
+
+### 5.4 Simple Deriving
+Reduce boilerplate for common cases:
+- [ ] deriving Eq (structural equality)
+- [ ] deriving Show (debug string)
+- [ ] deriving ToJson / FromJson
+
+---
+
+## Phase 6: RTEMS Multi-Core (LOWER PRIORITY)
+
+For 4-core NUC parallel execution.
+
+### 6.1 Core Primitives
+- [ ] Core affinity type
+- [ ] Core ID query
+- [ ] Core count query
+
+### 6.2 Parallelism
 - [ ] `Par` type for parallel computations
 - [ ] `parMap` - parallel map over array
-- [ ] `par2`, `par3`, `par4` - parallel independent operations
 - [ ] Barrier synchronization
 
-### 3.3 Inter-Core Communication
-- [ ] `Channel a` - bounded MPSC/MPMC queues
-- [ ] `send`, `receive`, `tryReceive` operations
+### 6.3 Inter-Core Communication
+- [ ] `Channel a` - bounded queues
 - [ ] `MVar a` - synchronized mutable variable
-- [ ] Atomic variables (Int, Bool)
-
-### 3.4 Pipeline Parallelism
-- [ ] Stage type with queues
-- [ ] Pipeline composition
-- [ ] Backpressure handling
+- [ ] Atomic variables
 
 ---
 
-## Phase 4: Language Extensions
+## Phase 7: Code Cleanup (ONGOING)
 
-Goal: Features needed for embedded systems programming.
+### 7.1 Refactoring Cli.elm
+- [x] Extract Target/RTEMS.elm
+- [x] Extract Target/Native.elm
+- [x] Expand Target/TCC.elm
+- [ ] Move generateStandaloneCaseFallback to Codegen.Pattern
+- [ ] Extract type inference to Codegen/TypeInference.elm
+- [ ] Move lambda functions to Codegen.Lambda
+- [ ] Remove dead code (old generator functions)
 
-### 4.1 FFI (C Interop) - CRITICAL
-- [ ] `foreign import` syntax for C functions
-- [ ] Pointer types (opaque handles)
-- [ ] Memory layout control for structs
-- [ ] Inline C code blocks
-
-### 4.2 Numeric Types - CRITICAL
-- [ ] Fixed-size integers: Int8, Int16, Int32, Int64
-- [ ] Unsigned integers: UInt8, UInt16, UInt32, UInt64
-- [ ] Bit operations: and, or, xor, shift, rotate
-- [ ] Fixed-point arithmetic
-
-### 4.3 Binary Serialization - CRITICAL
-- [ ] ByteArray primitive type
-- [ ] Pack/unpack functions
-- [ ] Endianness control
-- [ ] Deriving Binary (auto-generate encode/decode)
-
-### 4.4 Type Classes - HIGH
-- [ ] Type class syntax
-- [ ] Instance definitions
-- [ ] Eq, Ord, Show basics
-- [ ] Device abstraction class
-
-### 4.5 Lazy Evaluation / Streams - HIGH
-- [ ] Stream type primitive
-- [ ] Lazy evaluation for infinite structures
-- [ ] Stream fusion optimization
-
-### 4.6 Custom Operators - MEDIUM
-- [ ] Operator definition syntax
-- [ ] Precedence/associativity
-- [ ] Common operators: |>>, <<<, >>>
-
-### 4.7 Do Notation - MEDIUM
-- [ ] do-block syntax
-- [ ] Desugar to andThen chains
-
-### 4.8 GADTs - LOW
-- [ ] Type-safe protocol state machines
-
----
-
-## Phase 5: Tooling & Quality
-
-### 5.1 Build System
-- [ ] Cross-compilation to Intel NUC
-- [ ] RTEMS BSP integration
-- [ ] Makefile/build script generation
-
-### 5.2 Testing
+### 7.2 Testing
 - [ ] Unit tests for Codegen modules
-- [ ] Integration tests (Elm source → C → execution)
-- [ ] Bootstrap test (compile tcelm with tcelm)
-
-### 5.3 Debugging
-- [ ] Source maps (Elm line → C line)
-- [ ] GDB integration hints
-- [ ] Stack usage analysis
+- [ ] Integration tests (Elm → C → execution)
+- [ ] Ledger-specific test cases
 
 ---
 
-## Phase 6: Digital Twin Development
+## NOT Planned (Exotic Features)
 
-Goal: Develop in browser, deploy to RTEMS.
+These features are intellectually interesting but add complexity without proportional benefit for the NUC + Ledger use case:
 
-### 6.1 Portable Processing Core
-- [ ] Define platform-agnostic IRProcessing module
-- [ ] Ensure same code runs in browser (Elm) and RTEMS (C)
+| Feature | Why Not Needed |
+|---------|----------------|
+| Type Classes | Use module-qualified functions: `Money.add`, `Account.compare` |
+| Higher-Kinded Types | Write specific implementations for each type |
+| GADTs | Runtime validation works fine for ledger invariants |
+| Monad Transformers | Thread state explicitly or use records |
+| Refinement Types | Runtime checks: `validatePositive amount` |
+| Existential Types | Simple union types for events |
+| Full Lenses | Verbose nested update syntax is acceptable |
+| Lazy Evaluation | Not needed for embedded real-time |
+| Custom Operators | Standard operators are sufficient |
 
-### 6.2 Browser Development Environment
-- [ ] Synthetic IR data generation
-- [ ] WebGL visualization
-- [ ] Performance profiling
-
-### 6.3 Hardware Verification
-- [ ] Record/playback of real sensor data
-- [ ] Bit-exact comparison: browser vs RTEMS output
-
----
-
-## Implementation Order
-
-### Immediate (This Week)
-1. Continue Cli.elm refactoring (Phase 1.1-1.2)
-2. Document current lambda/closure implementation
-
-### Short Term (Next 2-4 Weeks)
-1. Complete Phase 1 refactoring
-2. Implement pipeline operator desugaring (Phase 2.2)
-3. Start closure implementation (Phase 2.1)
-
-### Medium Term (1-2 Months)
-1. Complete Phase 2 bootstrap blockers
-2. Attempt first self-hosting compile
-3. Fix issues discovered during bootstrap
-
-### Long Term (3+ Months)
-1. Phase 3 multi-core support
-2. Phase 4 language extensions
-3. Phase 5 tooling
-4. Phase 6 digital twin
+If these become truly necessary later, they can be reconsidered. But the ledger can be built without them.
 
 ---
 
-## Notes
+## Implementation Priority
 
-- **Bootstrap is the priority** - Extensions are worthless if basic Elm doesn't compile
-- **Refactoring enables progress** - Smaller modules are easier to understand and fix
-- **Test incrementally** - Each feature should be tested before moving on
-- **Document as you go** - Update this file and CLAUDE.md with learnings
+### Now (Blocking Issues)
+1. Fix lambda/closure capture
+2. Implement pipeline operators
+3. Complete pattern matching
+
+### Next (Enable Productivity)
+1. do-notation
+2. Standard library completion
+3. Basic FFI
+
+### Later (Nice to Have)
+1. Fixed-size integers
+2. JSON/Binary serialization
+3. Simple deriving
+4. Multi-core support
+
+---
+
+## Success Criteria
+
+**Milestone 1**: Can compile and run:
+```elm
+main =
+    [ 1, 2, 3 ]
+        |> List.map (\x -> x * 2)
+        |> List.filter (\x -> x > 2)
+        |> List.sum
+```
+
+**Milestone 2**: Can compile and run:
+```elm
+processTransaction : Transaction -> Result Error TransactionId
+processTransaction txn = do
+    validated <- validate txn
+    balanced <- checkBalance validated
+    eventId <- recordEvent (TransactionPosted balanced)
+    pure eventId
+```
+
+**Milestone 3**: Can compile a basic ledger module with:
+- Account CRUD
+- Transaction posting
+- Balance queries
+- Event sourcing
+
+**Milestone 4**: Ledger runs on NUC with RTEMS, communicates via serial/network.
 
 ---
 
@@ -300,4 +387,12 @@ Goal: Develop in browser, deploy to RTEMS.
 | src/Codegen/Pattern.elm | Pattern matching | 468 |
 | src/Codegen/Union.elm | Custom types | 105 |
 | src/Codegen/Lambda.elm | Lambda lifting | 143 |
-| BOOTSTRAP_AUDIT.md | Feature gap analysis | 202 |
+
+---
+
+## Notes
+
+- **Working code beats elegant code** - Ship features that work reliably
+- **Elm's type system is already powerful** - Don't need Haskell's complexity
+- **Runtime validation is fine** - Types don't need to prove everything
+- **Focus on the ledger** - Every feature should serve that goal
