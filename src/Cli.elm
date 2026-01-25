@@ -2796,7 +2796,7 @@ generateStandaloneExprWithCtxImpl ctx expr =
                     "elm_" ++ prefixedModuleName ++ "_" ++ name
 
         Src.Case scrutinee branches ->
-            generateStandaloneCase scrutinee branches
+            generateStandaloneCaseWithCtx ctx scrutinee branches
 
         Src.Tuple first second rest ->
             -- Generate tuple as compound struct literal
@@ -5318,13 +5318,34 @@ generateStandaloneCase scrutinee branches =
             generateStandaloneCaseFallback scrutinee branches
 
 
+{-| Generate case expressions with context for module-prefixed function calls
+-}
+generateStandaloneCaseWithCtx : ExprCtx -> Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+generateStandaloneCaseWithCtx ctx scrutinee branches =
+    -- First try the extracted pattern handlers with context
+    case Pattern.generateCaseExpr (generateStandaloneExprWithCtx ctx) scrutinee branches of
+        Just result ->
+            result
+
+        Nothing ->
+            -- Fall back to the full implementation with context
+            generateStandaloneCaseFallbackWithCtx ctx scrutinee branches
+
+
 {-| Fallback implementation for complex pattern matching not yet migrated
 -}
 generateStandaloneCaseFallback : Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
 generateStandaloneCaseFallback scrutinee branches =
+    generateStandaloneCaseFallbackWithCtx Shared.defaultExprCtx scrutinee branches
+
+
+{-| Context-aware fallback for complex pattern matching with module prefix support
+-}
+generateStandaloneCaseFallbackWithCtx : ExprCtx -> Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> String
+generateStandaloneCaseFallbackWithCtx ctx scrutinee branches =
     let
         scrutineeStr =
-            generateStandaloneExpr scrutinee
+            generateStandaloneExprWithCtx ctx scrutinee
 
         -- Check if any branch uses a variable binding pattern
         hasVarBinding =
@@ -5417,7 +5438,7 @@ generateStandaloneCaseFallback scrutinee branches =
             case branches of
                 ( _, _, firstResult ) :: _ ->
                     let
-                        resultStr = generateStandaloneExpr firstResult
+                        resultStr = generateStandaloneExprWithCtx ctx firstResult
                     in
                     String.contains "((elm_union_t){TAG_" resultStr
                         || String.contains "elm_union_t" resultStr
@@ -5441,7 +5462,7 @@ generateStandaloneCaseFallback scrutinee branches =
 
                 Just guardExpr ->
                     let
-                        guardStr = generateStandaloneExpr guardExpr
+                        guardStr = generateStandaloneExprWithCtx ctx guardExpr
                     in
                     "(" ++ guardStr ++ " ? " ++ bodyStr ++ " : " ++ restStr ++ ")"
 
@@ -5455,7 +5476,7 @@ generateStandaloneCaseFallback scrutinee branches =
                     case pattern of
                         Src.PAnything ->
                             -- Wildcard always matches (but guard may filter)
-                            wrapWithGuard maybeGuard (generateStandaloneExpr resultExpr) (generateBranches rest)
+                            wrapWithGuard maybeGuard (generateStandaloneExprWithCtx ctx resultExpr) (generateBranches rest)
 
                         Src.PVar varName ->
                             -- Variable binding - bind scrutinee to variable name
@@ -5475,11 +5496,11 @@ generateStandaloneCaseFallback scrutinee branches =
                                         ++ " = elm_case_scrutinee;\n            "
                                         ++ (case maybeGuard of
                                                 Nothing ->
-                                                    generateStandaloneExpr resultExpr
+                                                    generateStandaloneExprWithCtx ctx resultExpr
 
                                                 Just guardExpr ->
-                                                    "(" ++ generateStandaloneExpr guardExpr ++ " ? "
-                                                        ++ generateStandaloneExpr resultExpr
+                                                    "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? "
+                                                        ++ generateStandaloneExprWithCtx ctx resultExpr
                                                         ++ " : " ++ generateBranches rest ++ ")"
                                            )
                                         ++ ";\n        })"
@@ -5490,7 +5511,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             -- Integer pattern
                             let
                                 condition = "elm_case_scrutinee == " ++ String.fromInt n
-                                bodyStr = generateStandaloneExpr resultExpr
+                                bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                 fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                             in
                             "(" ++ condition ++ " ? " ++ fullBody ++ " : " ++ generateBranches rest ++ ")"
@@ -5499,7 +5520,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             -- String pattern
                             let
                                 condition = "strcmp(elm_case_scrutinee, \"" ++ escapeC s ++ "\") == 0"
-                                bodyStr = generateStandaloneExpr resultExpr
+                                bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                 fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                             in
                             "(" ++ condition ++ " ? " ++ fullBody ++ " : " ++ generateBranches rest ++ ")"
@@ -5508,7 +5529,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             -- Char pattern
                             let
                                 condition = "elm_case_scrutinee == '" ++ escapeC c ++ "'"
-                                bodyStr = generateStandaloneExpr resultExpr
+                                bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                 fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                             in
                             "(" ++ condition ++ " ? " ++ fullBody ++ " : " ++ generateBranches rest ++ ")"
@@ -5549,7 +5570,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                         |> String.join "\n                "
 
                                 bodyStr =
-                                    generateStandaloneExpr resultExpr
+                                    generateStandaloneExprWithCtx ctx resultExpr
 
                                 -- Add guard condition if present
                                 guardedBodyStr =
@@ -5558,7 +5579,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                             bodyStr
 
                                         Just guardExpr ->
-                                            "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ bodyStr ++ " : " ++ generateBranches rest ++ ")"
+                                            "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ bodyStr ++ " : " ++ generateBranches rest ++ ")"
                             in
                             if List.isEmpty conditions then
                                 -- No conditions - just bind variables and return
@@ -5596,7 +5617,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             case ctorName of
                                 "True" ->
                                     let
-                                        bodyStr = generateStandaloneExpr resultExpr
+                                        bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                         fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                                     in
                                     "(elm_case_scrutinee ? "
@@ -5607,7 +5628,7 @@ generateStandaloneCaseFallback scrutinee branches =
 
                                 "False" ->
                                     let
-                                        bodyStr = generateStandaloneExpr resultExpr
+                                        bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                         fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                                     in
                                     "(!elm_case_scrutinee ? "
@@ -5620,7 +5641,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                     if List.isEmpty ctorPatterns then
                                         -- Simple enum constructor - compare tag
                                         let
-                                            bodyStr = generateStandaloneExpr resultExpr
+                                            bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                             fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                                         in
                                         "(elm_case_scrutinee.tag == TAG_"
@@ -5635,7 +5656,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                         -- Constructor with data - bind variable and compare tag
                                         -- Check if the variable is used as a union (passed to function with elm_union_t param)
                                         let
-                                            resultStr = generateStandaloneExpr resultExpr
+                                            resultStr = generateStandaloneExprWithCtx ctx resultExpr
 
                                             -- Generate conditions for nested constructor patterns (e.g., Just North -> check inner tag)
                                             innerConditions =
@@ -5811,7 +5832,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                         resultStr
 
                                                     Just guardExpr ->
-                                                        "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
+                                                        "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
 
                                             -- Combine outer tag condition with inner conditions
                                             fullCondition =
@@ -5836,7 +5857,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             if List.isEmpty ctorPatterns then
                                 -- Simple enum constructor - compare tag
                                 let
-                                    bodyStr = generateStandaloneExpr resultExpr
+                                    bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                     fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                                 in
                                 "(elm_case_scrutinee.tag == TAG_"
@@ -5850,7 +5871,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             else if List.all (\(Src.At _ p) -> p == Src.PAnything) ctorPatterns then
                                 -- Constructor with wildcard args - just compare tag
                                 let
-                                    bodyStr = generateStandaloneExpr resultExpr
+                                    bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                     fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                                 in
                                 "(elm_case_scrutinee.tag == TAG_"
@@ -5864,7 +5885,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             else
                                 -- Constructor with data - bind variable and compare tag
                                 let
-                                    resultStr = generateStandaloneExpr resultExpr
+                                    resultStr = generateStandaloneExprWithCtx ctx resultExpr
 
                                     -- Generate conditions for nested constructor patterns (e.g., Just North -> check inner tag)
                                     innerConditions2 =
@@ -6036,7 +6057,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                 resultStr
 
                                             Just guardExpr ->
-                                                "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
+                                                "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
 
                                     -- Combine outer tag condition with inner conditions
                                     fullCondition2 =
@@ -6056,7 +6077,7 @@ generateStandaloneCaseFallback scrutinee branches =
                         -- Empty list pattern
                         Src.PList [] ->
                             let
-                                bodyStr = generateStandaloneExpr resultExpr
+                                bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                 fullBody = wrapWithGuard maybeGuard bodyStr (generateBranches rest)
                             in
                             "(elm_case_scrutinee.length == 0 ? "
@@ -6118,7 +6139,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                         |> String.join " "
 
                                 resultStr =
-                                    generateStandaloneExpr resultExpr
+                                    generateStandaloneExprWithCtx ctx resultExpr
 
                                 -- Apply guard if present
                                 guardedResultStr =
@@ -6127,7 +6148,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                             resultStr
 
                                         Just guardExpr ->
-                                            "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
+                                            "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
 
                                 condition =
                                     "elm_case_scrutinee.length == " ++ String.fromInt patLen
@@ -6299,7 +6320,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                 -- If the variable is used with .tag access, it's a union type
                                 -- If the variable is used with string functions, it's a string
                                 -- Otherwise, default to double
-                                resultStr = generateStandaloneExpr resultExpr
+                                resultStr = generateStandaloneExprWithCtx ctx resultExpr
 
                                 -- Check if head variable is used as a union type
                                 headVarUsedAsUnion =
@@ -6390,7 +6411,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                             resultStr
 
                                         Just guardExpr ->
-                                            "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
+                                            "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateBranches rest ++ ")"
                             in
                             "(" ++ condition ++ " ? ({ "
                                 ++ allBindings
@@ -6416,7 +6437,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                     aliasType ++ " elm_" ++ aliasName ++ " = elm_case_scrutinee;"
 
                                 aliasResultStr =
-                                    generateStandaloneExpr resultExpr
+                                    generateStandaloneExprWithCtx ctx resultExpr
 
                                 -- Apply guard if present
                                 aliasGuardedResultStr =
@@ -6425,7 +6446,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                             aliasResultStr
 
                                         Just guardExpr ->
-                                            "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ aliasResultStr ++ " : " ++ generateBranches rest ++ ")"
+                                            "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ aliasResultStr ++ " : " ++ generateBranches rest ++ ")"
 
                                 -- Generate inner pattern handling
                                 innerResult =
@@ -6510,11 +6531,11 @@ generateStandaloneCaseFallback scrutinee branches =
                                     Src.PStr s ->
                                         let
                                             cond = "strcmp(__str_scrutinee, \"" ++ escapeC s ++ "\") == 0"
-                                            body = generateStandaloneExpr resultExpr
+                                            body = generateStandaloneExprWithCtx ctx resultExpr
                                             guardedBody =
                                                 case maybeGuard of
                                                     Nothing -> body
-                                                    Just g -> "(" ++ generateStandaloneExpr g ++ " ? " ++ body ++ " : __default_result)"
+                                                    Just g -> "(" ++ generateStandaloneExprWithCtx ctx g ++ " ? " ++ body ++ " : __default_result)"
                                         in
                                         "if (" ++ cond ++ ") __result = " ++ guardedBody ++ ";"
 
@@ -6528,19 +6549,19 @@ generateStandaloneCaseFallback scrutinee branches =
                     case wildcardBranch of
                         Just ( Src.At _ (Src.PVar vn), maybeGuard, resultExpr ) ->
                             let
-                                body = generateStandaloneExpr resultExpr
+                                body = generateStandaloneExprWithCtx ctx resultExpr
                             in
                             case maybeGuard of
                                 Nothing -> body
-                                Just g -> "(" ++ generateStandaloneExpr g ++ " ? " ++ body ++ " : " ++ fallbackValue ++ ")"
+                                Just g -> "(" ++ generateStandaloneExprWithCtx ctx g ++ " ? " ++ body ++ " : " ++ fallbackValue ++ ")"
 
                         Just ( _, maybeGuard, resultExpr ) ->
                             let
-                                body = generateStandaloneExpr resultExpr
+                                body = generateStandaloneExprWithCtx ctx resultExpr
                             in
                             case maybeGuard of
                                 Nothing -> body
-                                Just g -> "(" ++ generateStandaloneExpr g ++ " ? " ++ body ++ " : " ++ fallbackValue ++ ")"
+                                Just g -> "(" ++ generateStandaloneExprWithCtx ctx g ++ " ? " ++ body ++ " : " ++ fallbackValue ++ ")"
 
                         Nothing ->
                             fallbackValue
@@ -6601,7 +6622,7 @@ generateStandaloneCaseFallback scrutinee branches =
 
                     Just guardExpr ->
                         let
-                            guardStr = generateStandaloneExpr guardExpr
+                            guardStr = generateStandaloneExprWithCtx ctx guardExpr
                         in
                         "(" ++ guardStr ++ " ? " ++ bodyStr ++ " : " ++ restStr ++ ")"
 
@@ -6614,11 +6635,11 @@ generateStandaloneCaseFallback scrutinee branches =
                     ( Src.At _ pattern, maybeGuard, resultExpr ) :: rest ->
                         case pattern of
                             Src.PAnything ->
-                                wrapSimpleWithGuard maybeGuard (generateStandaloneExpr resultExpr) (generateSimpleBranches rest)
+                                wrapSimpleWithGuard maybeGuard (generateStandaloneExprWithCtx ctx resultExpr) (generateSimpleBranches rest)
 
                             Src.PInt n ->
                                 let
-                                    bodyStr = generateStandaloneExpr resultExpr
+                                    bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                     fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                 in
                                 "("
@@ -6633,7 +6654,7 @@ generateStandaloneCaseFallback scrutinee branches =
 
                             Src.PStr s ->
                                 let
-                                    bodyStr = generateStandaloneExpr resultExpr
+                                    bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                     fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                 in
                                 "(strcmp("
@@ -6648,7 +6669,7 @@ generateStandaloneCaseFallback scrutinee branches =
 
                             Src.PChr c ->
                                 let
-                                    bodyStr = generateStandaloneExpr resultExpr
+                                    bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                     fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                 in
                                 "("
@@ -6665,7 +6686,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                 case ctorName of
                                     "True" ->
                                         let
-                                            bodyStr = generateStandaloneExpr resultExpr
+                                            bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                             fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                         in
                                         "("
@@ -6678,7 +6699,7 @@ generateStandaloneCaseFallback scrutinee branches =
 
                                     "False" ->
                                         let
-                                            bodyStr = generateStandaloneExpr resultExpr
+                                            bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                             fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                         in
                                         "(!"
@@ -6693,7 +6714,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                         if List.isEmpty ctorPatterns then
                                             -- Simple enum constructor - compare tag
                                             let
-                                                bodyStr = generateStandaloneExpr resultExpr
+                                                bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                                 fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                             in
                                             "("
@@ -6723,7 +6744,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                         |> List.filter (not << String.isEmpty)
                                                         |> String.join " "
 
-                                                resultStr = generateStandaloneExpr resultExpr
+                                                resultStr = generateStandaloneExprWithCtx ctx resultExpr
 
                                                 guardedResultStr =
                                                     case maybeGuard of
@@ -6731,7 +6752,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                             resultStr
 
                                                         Just guardExpr ->
-                                                            "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateSimpleBranches rest ++ ")"
+                                                            "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateSimpleBranches rest ++ ")"
                                             in
                                             "("
                                                 ++ inlineScrutinee
@@ -6769,7 +6790,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                             |> String.join "\n            "
 
                                     bodyStr =
-                                        generateStandaloneExpr resultExpr
+                                        generateStandaloneExprWithCtx ctx resultExpr
 
                                     guardedBodyStr =
                                         case maybeGuard of
@@ -6777,7 +6798,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                 bodyStr
 
                                             Just guardExpr ->
-                                                "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ bodyStr ++ " : " ++ generateSimpleBranches rest ++ ")"
+                                                "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ bodyStr ++ " : " ++ generateSimpleBranches rest ++ ")"
                                 in
                                 "({\n            "
                                     ++ bindings
@@ -6793,7 +6814,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                 if List.isEmpty ctorPatterns then
                                     -- Simple enum constructor - compare tag
                                     let
-                                        bodyStr = generateStandaloneExpr resultExpr
+                                        bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                         fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                     in
                                     "("
@@ -6809,7 +6830,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                 else if List.all (\(Src.At _ p) -> p == Src.PAnything) ctorPatterns then
                                     -- Constructor with wildcard args - just compare tag
                                     let
-                                        bodyStr = generateStandaloneExpr resultExpr
+                                        bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                         fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                     in
                                     "("
@@ -6839,7 +6860,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                 |> List.filter (not << String.isEmpty)
                                                 |> String.join " "
 
-                                        resultStr = generateStandaloneExpr resultExpr
+                                        resultStr = generateStandaloneExprWithCtx ctx resultExpr
 
                                         guardedResultStr =
                                             case maybeGuard of
@@ -6847,7 +6868,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                     resultStr
 
                                                 Just guardExpr ->
-                                                    "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateSimpleBranches rest ++ ")"
+                                                    "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateSimpleBranches rest ++ ")"
                                     in
                                     "("
                                         ++ inlineScrutinee
@@ -6864,7 +6885,7 @@ generateStandaloneCaseFallback scrutinee branches =
                             -- Empty list pattern
                             Src.PList [] ->
                                 let
-                                    bodyStr = generateStandaloneExpr resultExpr
+                                    bodyStr = generateStandaloneExprWithCtx ctx resultExpr
                                     fullBody = wrapSimpleWithGuard maybeGuard bodyStr (generateSimpleBranches rest)
                                 in
                                 "("
@@ -6906,7 +6927,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                             |> List.filter (not << String.isEmpty)
                                             |> String.join " "
 
-                                    resultStr = generateStandaloneExpr resultExpr
+                                    resultStr = generateStandaloneExprWithCtx ctx resultExpr
 
                                     guardedResultStr =
                                         case maybeGuard of
@@ -6914,7 +6935,7 @@ generateStandaloneCaseFallback scrutinee branches =
                                                 resultStr
 
                                             Just guardExpr ->
-                                                "(" ++ generateStandaloneExpr guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateSimpleBranches rest ++ ")"
+                                                "(" ++ generateStandaloneExprWithCtx ctx guardExpr ++ " ? " ++ resultStr ++ " : " ++ generateSimpleBranches rest ++ ")"
                                 in
                                 "("
                                     ++ inlineScrutinee
