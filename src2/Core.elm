@@ -17,6 +17,9 @@ module Core exposing
     , exprType
     , freeVars
     , substitute
+    , printExpr
+    , printDecl
+    , printModule
     )
 
 {-| Core IR (Intermediate Representation).
@@ -465,3 +468,170 @@ substituteAlt var replacement (Alt pat guard body) =
         Alt pat
             (Maybe.map (substitute var replacement) guard)
             (substitute var replacement body)
+
+
+-- PRETTY PRINTING
+
+
+{-| Pretty print a Core expression for debugging.
+-}
+printExpr : Expr -> String
+printExpr expr =
+    case expr of
+        EVar tv ->
+            tv.name
+
+        ELit lit _ ->
+            printLiteral lit
+
+        EApp func arg _ ->
+            "(" ++ printExpr func ++ " " ++ printExpr arg ++ ")"
+
+        ELam tv body _ ->
+            "(\\" ++ tv.name ++ " -> " ++ printExpr body ++ ")"
+
+        ELet v e1 e2 _ ->
+            "(let " ++ v ++ " = " ++ printExpr e1 ++ " in " ++ printExpr e2 ++ ")"
+
+        ELetRec bindings body _ ->
+            let
+                bindingsStr =
+                    bindings
+                        |> List.map (\( v, e ) -> v ++ " = " ++ printExpr e)
+                        |> String.join "; "
+            in
+            "(let rec " ++ bindingsStr ++ " in " ++ printExpr body ++ ")"
+
+        ECase scrutinee alts _ ->
+            let
+                altsStr =
+                    alts
+                        |> List.map printAlt
+                        |> String.join " | "
+            in
+            "(case " ++ printExpr scrutinee ++ " of " ++ altsStr ++ ")"
+
+        ECon name args _ ->
+            if List.isEmpty args then
+                name
+            else
+                "(" ++ name ++ " " ++ String.join " " (List.map printExpr args) ++ ")"
+
+        ETuple exprs _ ->
+            "(" ++ String.join ", " (List.map printExpr exprs) ++ ")"
+
+        ERecord fields _ ->
+            let
+                fieldsStr =
+                    fields
+                        |> List.map (\( n, e ) -> n ++ " = " ++ printExpr e)
+                        |> String.join ", "
+            in
+            "{ " ++ fieldsStr ++ " }"
+
+        ERecordAccess e field _ ->
+            printExpr e ++ "." ++ field
+
+        ERecordUpdate e fields _ ->
+            let
+                fieldsStr =
+                    fields
+                        |> List.map (\( n, fe ) -> n ++ " = " ++ printExpr fe)
+                        |> String.join ", "
+            in
+            "{ " ++ printExpr e ++ " | " ++ fieldsStr ++ " }"
+
+        ETyApp e _ _ ->
+            printExpr e
+
+        ETyLam _ e _ ->
+            printExpr e
+
+        EDictApp e1 e2 _ ->
+            "(" ++ printExpr e1 ++ " @" ++ printExpr e2 ++ ")"
+
+        EDictLam tv body _ ->
+            "(\\" ++ tv.name ++ " -> " ++ printExpr body ++ ")"
+
+        EDict cls _ _ ->
+            "<dict:" ++ cls ++ ">"
+
+
+printLiteral : Literal -> String
+printLiteral lit =
+    case lit of
+        LInt n -> String.fromInt n
+        LFloat f -> String.fromFloat f
+        LString s -> "\"" ++ s ++ "\""
+        LChar c -> "'" ++ String.fromChar c ++ "'"
+
+
+printAlt : Alt -> String
+printAlt (Alt pat guard body) =
+    let
+        patStr = printPattern pat
+        guardStr = case guard of
+            Just g -> " if " ++ printExpr g
+            Nothing -> ""
+    in
+    patStr ++ guardStr ++ " -> " ++ printExpr body
+
+
+printPattern : Pattern -> String
+printPattern pat =
+    case pat of
+        PVar tv -> tv.name
+        PWildcard _ -> "_"
+        PLit lit _ -> printLiteral lit
+        PCon name pats _ ->
+            if List.isEmpty pats then
+                name
+            else
+                "(" ++ name ++ " " ++ String.join " " (List.map printPattern pats) ++ ")"
+        PTuple pats _ ->
+            "(" ++ String.join ", " (List.map printPattern pats) ++ ")"
+        PRecord fields _ ->
+            let
+                fieldsStr =
+                    fields
+                        |> List.map (\( n, p ) -> n ++ " = " ++ printPattern p)
+                        |> String.join ", "
+            in
+            "{ " ++ fieldsStr ++ " }"
+        PAlias p name _ ->
+            printPattern p ++ " as " ++ name
+
+
+{-| Print a declaration.
+-}
+printDecl : Decl -> String
+printDecl decl =
+    case decl of
+        FuncDecl funcDef ->
+            let
+                argsStr =
+                    funcDef.args
+                        |> List.map .name
+                        |> String.join " "
+            in
+            funcDef.name ++ " " ++ argsStr ++ " =\n    " ++ printExpr funcDef.body
+
+        DataDecl dataDef ->
+            "type " ++ dataDef.name ++ " = ..."
+
+        ClassDecl classDef ->
+            "class " ++ classDef.name ++ " ..."
+
+        InstDecl instDef ->
+            "instance " ++ instDef.className ++ " ..."
+
+        ForeignDecl foreignDef ->
+            "foreign " ++ foreignDef.name ++ " = " ++ foreignDef.cName
+
+
+{-| Print a module.
+-}
+printModule : Module -> String
+printModule mod =
+    "module " ++ mod.name ++ "\n\n" ++
+        String.join "\n\n" (List.map printDecl mod.decls)

@@ -1561,19 +1561,27 @@ parseFieldAccessChain expr state =
 
 parseAppArgs : ParseState -> ( List (Located Expr), ParseState )
 parseAppArgs state =
+    -- Skip newlines/indentation before checking for next argument
+    let
+        state0 = skipNewlinesUnlessAtColumn1 state
+    in
     -- Stop if we hit a token at column 1 (new top-level declaration)
     -- Also stop if this looks like a let binding (identifier followed by =)
-    case currentToken state of
+    -- Also stop if this looks like a case branch (pattern followed by ->)
+    case currentToken state0 of
         Just tok ->
             if tok.region.start.column == 1 then
-                ( [], state )
+                ( [], state0 )
             -- Check if this looks like a let binding (will be parsed by parseLetBindings)
-            else if looksLikeLetBinding state then
-                ( [], state )
+            else if looksLikeLetBinding state0 then
+                ( [], state0 )
+            -- Check if this looks like a case branch (pattern followed by ->)
+            else if looksLikeCaseBranch state0 then
+                ( [], state0 )
             else
-                case parseAtomicExpr state of
+                case parseAtomicExpr state0 of
                     Err _ ->
-                        ( [], state )
+                        ( [], state0 )
 
                     Ok ( arg, state1 ) ->
                         -- Parse field access chain on the argument (e.g., ledger.accounts)
@@ -1585,7 +1593,7 @@ parseAppArgs state =
                         ( argWithFields :: rest, state2 )
 
         Nothing ->
-            ( [], state )
+            ( [], state0 )
 
 
 parseAtomicExpr : Parser (Located Expr)
@@ -2039,6 +2047,109 @@ scanForEqualsVsArrow state depth =
                     Newline -> False  -- Hit newline before = or ->, stop
                     Indent _ -> False
                     _ -> False
+            Nothing -> False
+
+
+{-| Check if the current position looks like a case branch pattern.
+    Case branches have form "Pattern ->" where Pattern can start with:
+    - UpperIdent (constructor)
+    - LowerIdent (variable)
+    - Underscore (wildcard)
+    - Literal (Int, Float, String, Char)
+    - LParen (tuple/parenthesized)
+    - LBracket (list)
+    - LBrace (record)
+-}
+looksLikeCaseBranch : ParseState -> Bool
+looksLikeCaseBranch state =
+    case currentToken state of
+        Just tok ->
+            case tok.type_ of
+                UpperIdent -> scanForArrow (advance state) 0
+                LowerIdent -> scanForArrow (advance state) 0
+                Underscore -> scanForArrow (advance state) 0
+                IntLit -> scanForArrow (advance state) 0
+                FloatLit -> scanForArrow (advance state) 0
+                StringLit -> scanForArrow (advance state) 0
+                CharLit -> scanForArrow (advance state) 0
+                -- Complex patterns - start with nest level 1 since we've seen the open
+                LParen -> scanForArrowAfterParen (advance state) 1
+                LBracket -> scanForArrowAfterParen (advance state) 1
+                LBrace -> scanForArrowAfterParen (advance state) 1
+                _ -> False
+        Nothing -> False
+
+
+{-| Scan ahead looking for -> (case branch arrow).
+    Returns True if we find -> before hitting a different expression structure.
+-}
+scanForArrow : ParseState -> Int -> Bool
+scanForArrow state depth =
+    if depth > 20 then
+        False
+    else
+        case currentToken state of
+            Just t ->
+                case t.type_ of
+                    Arrow -> True  -- Found ->
+                    -- Pattern components that can appear before ->
+                    LowerIdent -> scanForArrow (advance state) (depth + 1)
+                    UpperIdent -> scanForArrow (advance state) (depth + 1)
+                    Underscore -> scanForArrow (advance state) (depth + 1)
+                    IntLit -> scanForArrow (advance state) (depth + 1)
+                    FloatLit -> scanForArrow (advance state) (depth + 1)
+                    StringLit -> scanForArrow (advance state) (depth + 1)
+                    CharLit -> scanForArrow (advance state) (depth + 1)
+                    Dot -> scanForArrow (advance state) (depth + 1)  -- Qualified names in patterns
+                    KwAs -> scanForArrow (advance state) (depth + 1)  -- pattern as name
+                    -- Stop at things that indicate not a pattern
+                    Equals -> False  -- Let binding
+                    Newline -> False
+                    Indent _ -> False
+                    _ -> False
+            Nothing -> False
+
+
+{-| Scan for -> after an opening paren/bracket/brace.
+    Must track balanced parens to avoid matching -> inside nested structures.
+-}
+scanForArrowAfterParen : ParseState -> Int -> Bool
+scanForArrowAfterParen state nestLevel =
+    if nestLevel > 50 then
+        False
+    else
+        case currentToken state of
+            Just t ->
+                case t.type_ of
+                    -- Track nesting: increase nest level for opens
+                    LParen -> scanForArrowAfterParen (advance state) (nestLevel + 1)
+                    LBracket -> scanForArrowAfterParen (advance state) (nestLevel + 1)
+                    LBrace -> scanForArrowAfterParen (advance state) (nestLevel + 1)
+                    -- Decrease nest level for closes; when we reach 0, continue scanning for ->
+                    RParen ->
+                        if nestLevel <= 1 then
+                            scanForArrow (advance state) 0
+                        else
+                            scanForArrowAfterParen (advance state) (nestLevel - 1)
+                    RBracket ->
+                        if nestLevel <= 1 then
+                            scanForArrow (advance state) 0
+                        else
+                            scanForArrowAfterParen (advance state) (nestLevel - 1)
+                    RBrace ->
+                        if nestLevel <= 1 then
+                            scanForArrow (advance state) 0
+                        else
+                            scanForArrowAfterParen (advance state) (nestLevel - 1)
+                    -- Only match -> if at top level (after closing paren)
+                    Arrow ->
+                        if nestLevel == 0 then
+                            True
+                        else
+                            scanForArrowAfterParen (advance state) nestLevel
+                    Newline -> False
+                    Indent _ -> False
+                    _ -> scanForArrowAfterParen (advance state) nestLevel
             Nothing -> False
 
 
