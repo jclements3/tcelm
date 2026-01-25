@@ -1868,6 +1868,25 @@ generateRuntime _ =
         , "    return elm_Dict_foldl(f, acc, reversed);"
         , "}"
         , ""
+        , "static elm_value_t elm_Dict_partition(elm_value_t pred, elm_value_t dict) {"
+        , "    elm_value_t trues = elm_nil();"
+        , "    elm_value_t falses = elm_nil();"
+        , "    while (dict.tag == 101) {"
+        , "        elm_value_t entry = *dict.data.c; /* (key, value) tuple */"
+        , "        elm_value_t key = *entry.data.c;"
+        , "        elm_value_t value = *entry.next;"
+        , "        elm_value_t pred1 = elm_apply1((elm_closure_t *)pred.data.p, key);"
+        , "        elm_value_t keep = elm_apply1((elm_closure_t *)pred1.data.p, value);"
+        , "        if (keep.data.i) {"
+        , "            trues = elm_cons(entry, trues);"
+        , "        } else {"
+        , "            falses = elm_cons(entry, falses);"
+        , "        }"
+        , "        dict = *dict.next;"
+        , "    }"
+        , "    return elm_tuple2(elm_List_reverse(trues), elm_List_reverse(falses));"
+        , "}"
+        , ""
         , "/* ===== SET MODULE ===== */"
         , "/* Set implemented as a list of unique elements */"
         , ""
@@ -2008,6 +2027,22 @@ generateRuntime _ =
         , "static elm_value_t elm_Set_foldr(elm_value_t f, elm_value_t acc, elm_value_t set) {"
         , "    elm_value_t reversed = elm_List_reverse(set);"
         , "    return elm_Set_foldl(f, acc, reversed);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_partition(elm_value_t pred, elm_value_t set) {"
+        , "    elm_value_t trues = elm_nil();"
+        , "    elm_value_t falses = elm_nil();"
+        , "    while (set.tag == 101) {"
+        , "        elm_value_t elem = *set.data.c;"
+        , "        elm_value_t keep = elm_apply1((elm_closure_t *)pred.data.p, elem);"
+        , "        if (keep.data.i) {"
+        , "            trues = elm_cons(elem, trues);"
+        , "        } else {"
+        , "            falses = elm_cons(elem, falses);"
+        , "        }"
+        , "        set = *set.next;"
+        , "    }"
+        , "    return elm_tuple2(elm_List_reverse(trues), elm_List_reverse(falses));"
         , "}"
         , ""
         , "/* ===== CHAR MODULE ===== */"
@@ -3576,6 +3611,7 @@ getFunctionArity ctx name =
         "Dict.update" -> 3
         "Dict.foldl" -> 3
         "Dict.foldr" -> 3
+        "Dict.partition" -> 2
 
         -- Set module (zero-arity)
         "Set.empty" -> 0
@@ -3600,6 +3636,9 @@ getFunctionArity ctx name =
         -- Set module (ternary)
         "Set.foldl" -> 3
         "Set.foldr" -> 3
+
+        -- Set module additional
+        "Set.partition" -> 2
 
         -- Char module (all unary)
         "Char.toCode" -> 1
@@ -3772,12 +3811,12 @@ isBuiltin name =
         , "Dict.empty", "Dict.singleton", "Dict.insert", "Dict.get", "Dict.remove"
         , "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values"
         , "Dict.toList", "Dict.fromList", "Dict.update", "Dict.map", "Dict.filter"
-        , "Dict.foldl", "Dict.foldr"
+        , "Dict.foldl", "Dict.foldr", "Dict.partition"
         -- Set module
         , "Set.empty", "Set.singleton", "Set.insert", "Set.remove", "Set.member"
         , "Set.size", "Set.isEmpty", "Set.toList", "Set.fromList"
         , "Set.union", "Set.intersect", "Set.diff"
-        , "Set.map", "Set.filter", "Set.foldl", "Set.foldr"
+        , "Set.map", "Set.filter", "Set.foldl", "Set.foldr", "Set.partition"
         -- Char module
         , "Char.toCode", "Char.fromCode"
         , "Char.isDigit", "Char.isLower", "Char.isUpper", "Char.isAlpha", "Char.isAlphaNum"

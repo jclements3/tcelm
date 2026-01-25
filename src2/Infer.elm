@@ -575,6 +575,13 @@ builtinTypes =
                     (TArrow (TVar "b")
                         (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TVar "b"))))
           )
+        , ( "Dict.partition"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TArrow (TVar "k") (TArrow (TVar "v") (TCon "Bool")))
+                    (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                        (TTuple [ TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")
+                                , TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v") ])))
+          )
 
         -- Set module
         , ( "Set.empty"
@@ -645,6 +652,12 @@ builtinTypes =
                 (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
                     (TArrow (TVar "b")
                         (TArrow (TApp (TCon "Set") (TVar "a")) (TVar "b"))))
+          )
+        , ( "Set.partition"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "Set") (TVar "a"))
+                        (TTuple [ TApp (TCon "Set") (TVar "a"), TApp (TCon "Set") (TVar "a") ])))
           )
 
         -- Char module
