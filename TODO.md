@@ -221,6 +221,12 @@
   - Task.sequence - sequence a list of tasks
   - Do-notation support with automatic Task monad detection
   - 175 tests passing
+- [x] 2026-01-25: More utility functions
+  - List.getAt : Int -> List a -> Maybe a (element at index)
+  - List.last : List a -> Maybe a (last element)
+  - Maybe.filter : (a -> Bool) -> Maybe a -> Maybe a (filter with predicate)
+  - Dict.union, Dict.diff, Dict.intersect (set operations on dicts)
+  - 184 tests passing, ~260 builtin functions
 - [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution)
 
 ---
