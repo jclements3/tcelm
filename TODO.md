@@ -11,8 +11,8 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-24
-**Last Session**: Fixed module prefix bug in pipeline operators and main extraction
-**Next Action**: Complete pattern matching (cons patterns, nested constructors)
+**Last Session**: Fixed pattern matching context propagation, added FP patterns guide
+**Next Action**: Implement partial application / currying
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
@@ -25,7 +25,9 @@
 - [x] 2026-01-24: Fixed closure capture prefix and output order in TCC target
 - [x] 2026-01-24: Implemented fixComplexConstantRefs to transform complex constant references
 - [x] 2026-01-24: Fixed module prefix bug - pipeline operators and main now use correct prefixes
-- [ ] **NEXT**: Complete pattern matching
+- [x] 2026-01-24: Added docs/patterns.md with 30 FP patterns (Python + tcelm examples)
+- [x] 2026-01-24: Fixed case expression context - recursive calls now use correct module prefix
+- [ ] **NEXT**: Implement partial application / currying
 
 ---
 
@@ -34,13 +36,14 @@
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Parser | ~90% | Most Elm syntax parsed |
-| Cli.elm | 6,800+ lines | Orchestrates code generators |
+| Cli.elm | 7,000+ lines | Orchestrates code generators |
 | Target/RTEMS.elm | Complete | RTEMS target with CodegenConfig |
 | Target/TCC.elm | Complete | TCC target with CodegenConfig |
 | Target/Native.elm | Complete | Native target with CodegenConfig |
 | Codegen.Pattern | ~60% | Simple patterns only, complex in Cli |
 | Codegen.Lambda | Working | Lambda lifting + capture fixed |
 | Pipeline operators | Working | |> and <| fully implemented |
+| Pattern matching | ~85% | Cons, nested, tuples work; as-patterns partial |
 | do-notation | Not done | Needs parser + desugaring |
 | Standard library | Partial | Many C implementations missing |
 
@@ -66,13 +69,14 @@ Current: Lambda lifting works but variable capture is fragile.
 - [x] `<<` and `>>` composition works
 - [x] Fixed module prefix bug in pipeline function calls
 
-### 1.3 Complete Pattern Matching
-Current: Simple patterns work, complex ones partial.
-- [ ] List cons patterns: `x :: xs`
-- [ ] Nested constructor patterns: `Just (Ok value)`
-- [ ] As-patterns: `(x :: xs) as list`
-- [ ] Tuple patterns in case: `(a, b, c) ->`
-- [ ] Record patterns: `{ name, balance } ->`
+### 1.3 Complete Pattern Matching ⚠️ MOSTLY DONE
+Current: Most patterns work, module prefix context propagated through case expressions.
+- [x] List cons patterns: `x :: xs` - Working with recursive calls
+- [x] Nested constructor patterns: `Just (Ok value)` - Working
+- [x] Tuple patterns in case: `(a, b, c) ->` - Working (up to 3 elements)
+- [x] Record patterns: `{ name, balance } ->` - Working
+- [ ] As-patterns: `(x :: xs) as list` - Parse issues in some cases
+- [ ] Tuple patterns > 3 elements - Not supported
 
 ### 1.4 Partial Application / Currying
 Current: Not implemented.
