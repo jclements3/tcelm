@@ -186,6 +186,7 @@ builtinTypes =
         , ( "List.intersperse", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
         , ( "List.range", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TApp (TCon "List") (TCon "Int")))) )
         , ( "List.repeat", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TVar "a") (TApp (TCon "List") (TVar "a")))) )
+        , ( "List.singleton", Scheme [ "a" ] [] (TArrow (TVar "a") (TApp (TCon "List") (TVar "a"))) )
         , ( "List.map"
           , Scheme [ "a", "b" ] []
                 (TArrow (TArrow (TVar "a") (TVar "b"))

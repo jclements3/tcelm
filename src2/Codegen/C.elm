@@ -680,6 +680,10 @@ generateRuntime _ =
         , "    return acc;"
         , "}"
         , ""
+        , "static elm_value_t elm_List_singleton(elm_value_t x) {"
+        , "    return elm_cons(x, elm_nil());"
+        , "}"
+        , ""
         , "/* Higher-order List functions */"
         , "static elm_value_t elm_List_map(elm_value_t f, elm_value_t xs) {"
         , "    elm_value_t acc = elm_nil();"
@@ -2876,6 +2880,7 @@ getFunctionArity ctx name =
         "List.maximum" -> 1
         "List.minimum" -> 1
         "List.concat" -> 1
+        "List.singleton" -> 1
 
         -- List module (binary)
         "List.member" -> 2
@@ -3141,7 +3146,7 @@ isBuiltin name =
         , "List.append", "List.concat", "List.intersperse", "List.range", "List.repeat"
         , "List.map", "List.filter", "List.filterMap", "List.foldl", "List.foldr"
         , "List.any", "List.all", "List.concatMap", "List.indexedMap"
-        , "List.sort", "List.sortBy", "List.partition"
+        , "List.sort", "List.sortBy", "List.partition", "List.singleton"
         -- Maybe module
         , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5"
         -- Result module
