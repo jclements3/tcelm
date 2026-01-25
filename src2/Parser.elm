@@ -1150,7 +1150,20 @@ parsePatterns state =
 
 parsePattern : Parser (Located Pattern)
 parsePattern state =
-    parseConsPattern state
+    case parseConsPattern state of
+        Err e -> Err e
+        Ok ( pat, state1 ) ->
+            -- Check for as-pattern: pattern as name
+            if peek KwAs state1 then
+                case expect KwAs state1 of
+                    Err e -> Err e
+                    Ok ( _, state2 ) ->
+                        case expectIdent LowerIdent state2 of
+                            Err e -> Err e
+                            Ok ( name, state3 ) ->
+                                Ok ( locate (getRegion pat) (PAlias pat (locate (currentRegion state3) name)), state3 )
+            else
+                Ok ( pat, state1 )
 
 
 parseConsPattern : Parser (Located Pattern)

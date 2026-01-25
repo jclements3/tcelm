@@ -184,6 +184,7 @@ type Pattern
     | PCon DataCon (List Pattern) Type
     | PTuple (List Pattern) Type
     | PRecord (List ( String, Pattern )) Type
+    | PAlias Pattern String Type  -- inner pattern, alias name, type
 
 
 
@@ -355,6 +356,9 @@ patternVars pat =
             fields
                 |> List.map (\( _, p ) -> patternVars p)
                 |> List.foldl Set.union Set.empty
+
+        PAlias inner alias_ _ ->
+            Set.insert alias_ (patternVars inner)
 
 
 {-| Substitute a variable with an expression.

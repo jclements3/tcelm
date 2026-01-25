@@ -2513,6 +2513,15 @@ patternCondition ctx scrutVar pattern =
             in
             ( "1", bindings )
 
+        Core.PAlias inner aliasName _ ->
+            -- As-pattern: pattern as name
+            -- Bind the alias to the whole scrutinee, then process inner pattern
+            let
+                aliasBinding = "elm_value_t " ++ mangle aliasName ++ " = " ++ scrutVar ++ "; "
+                ( innerCond, innerBindings ) = patternCondition ctx scrutVar inner
+            in
+            ( innerCond, aliasBinding ++ innerBindings )
+
 
 generateCon : GenCtx -> String -> List Core.Expr -> String
 generateCon ctx name args =

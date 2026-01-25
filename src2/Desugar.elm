@@ -720,9 +720,11 @@ desugarPattern ctx pattern =
             Core.PCon "Cons" [ headCore, tailCore ] (TApp (TCon "List") (TVar "a"))
 
         AST.PAlias inner alias_ ->
-            -- Pattern aliases need special handling in Core
-            -- For now, just return the inner pattern
-            desugarPattern ctx (AST.getValue inner)
+            let
+                innerCore = desugarPattern ctx (AST.getValue inner)
+                aliasName = AST.getValue alias_
+            in
+            Core.PAlias innerCore aliasName (TVar "a")
 
         AST.PParens inner ->
             desugarPattern ctx (AST.getValue inner)
