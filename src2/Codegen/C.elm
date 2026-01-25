@@ -705,6 +705,10 @@ generateApp ctx func arg =
                     in
                     generateClosureApply ctx baseCall extraArgs
 
+        Core.ECon name existingArgs _ ->
+            -- Constructor application - collect args and generate direct call
+            generateCon ctx name (existingArgs ++ allArgs)
+
         _ ->
             -- Dynamic application (closure)
             "elm_apply1((elm_closure_t *)(" ++ generateExpr ctx baseFunc ++ ").data.p, " ++ generateExpr ctx arg ++ ")"
@@ -1194,6 +1198,22 @@ generateMain ctx =
             , "                curr = *curr.next;"
             , "            }"
             , "            printf(\"]\");"
+            , "            break;"
+            , "        }"
+            , "        case 200: printf(\"Nothing\"); break;"
+            , "        case 201: {"
+            , "            printf(\"Just \");"
+            , "            print_value(*v.data.c);"
+            , "            break;"
+            , "        }"
+            , "        case 300: {"
+            , "            printf(\"Err \");"
+            , "            print_value(*v.data.c);"
+            , "            break;"
+            , "        }"
+            , "        case 301: {"
+            , "            printf(\"Ok \");"
+            , "            print_value(*v.data.c);"
             , "            break;"
             , "        }"
             , "        default: printf(\"<value:%d>\", v.tag); break;"
