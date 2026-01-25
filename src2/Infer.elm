@@ -650,6 +650,24 @@ builtinTypes =
                         (TTuple [ TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")
                                 , TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v") ])))
           )
+        , ( "Dict.union"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                    (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                        (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
+          )
+        , ( "Dict.diff"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                    (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                        (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
+          )
+        , ( "Dict.intersect"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                    (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+                        (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
+          )
 
         -- Set module
         , ( "Set.empty"
