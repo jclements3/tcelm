@@ -217,76 +217,128 @@ function prefixDeclarations(source, moduleName) {
 function rewriteQualifiedNames(source, moduleNames) {
     let result = source;
 
-    // For each non-builtin module, replace Module.function with module_function
+    // For each non-builtin module, replace qualified names
     for (const modName of moduleNames) {
         // Use lowercase prefix for functions (Elm functions must start lowercase)
         const lowerPrefix = modName.replace('.', '_').toLowerCase();
+        // Use original case for types
+        const upperPrefix = modName.replace('.', '_');
 
-        // Replace Module.function with module_function
-        // Match: ModuleName.identifier where identifier starts with lowercase
-        const pattern = new RegExp(`\\b${modName.replace('.', '\\.')}\\.([a-z][a-zA-Z0-9_]*)`, 'g');
-        result = result.replace(pattern, `${lowerPrefix}_$1`);
+        // Replace Module.function with module_function (functions start lowercase)
+        const funcPattern = new RegExp(`\\b${modName.replace('.', '\\.')}\\.([a-z][a-zA-Z0-9_]*)`, 'g');
+        result = result.replace(funcPattern, `${lowerPrefix}_$1`);
 
-        // Replace Module.Constructor with module_Constructor
-        // (Constructors start uppercase but prefix should be lowercase to avoid clash)
-        const ctorPattern = new RegExp(`\\b${modName.replace('.', '\\.')}\\.([A-Z][a-zA-Z0-9_]*)`, 'g');
-        result = result.replace(ctorPattern, `${lowerPrefix}_$1`);
+        // Replace Module.Type with Module_Type (types start uppercase)
+        const typePattern = new RegExp(`\\b${modName.replace('.', '\\.')}\\.([A-Z][a-zA-Z0-9_]*)`, 'g');
+        result = result.replace(typePattern, `${upperPrefix}_$1`);
     }
 
     return result;
 }
 
 /**
- * Prefix all top-level definitions in a module with the module name
- * Uses lowercase prefix for functions to keep them valid Elm identifiers
+ * Collect all type names defined in a module
  */
-function prefixModuleDefinitions(source, moduleName) {
-    // Use lowercase for the prefix since Elm function names must start lowercase
-    const prefix = moduleName.replace(/\./g, '_').toLowerCase();
+function collectTypeNames(source) {
+    const typeNames = [];
+    const typePattern = /^type\s+(?:alias\s+)?([A-Z][a-zA-Z0-9_]*)/gm;
+    let match;
+    while ((match = typePattern.exec(source)) !== null) {
+        typeNames.push(match[1]);
+    }
+    return typeNames;
+}
+
+/**
+ * Collect all function names defined in a module
+ */
+function collectFunctionNames(source) {
+    const funcNames = [];
     const lines = source.split('\n');
-    const processedLines = [];
-
-    for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-
-        // Check for type annotation: "funcName : Type"
+    for (const line of lines) {
+        // Function with type annotation
         const typeAnnotMatch = line.match(/^([a-z][a-zA-Z0-9_]*)\s*:/);
         if (typeAnnotMatch) {
-            const funcName = typeAnnotMatch[1];
-            if (!['if', 'then', 'else', 'case', 'of', 'let', 'in', 'type', 'module', 'import', 'exposing', 'port'].includes(funcName)) {
-                line = `${prefix}_${line}`;
+            const name = typeAnnotMatch[1];
+            if (!['if', 'then', 'else', 'case', 'of', 'let', 'in', 'type', 'module', 'import', 'exposing', 'port'].includes(name)) {
+                if (!funcNames.includes(name)) funcNames.push(name);
             }
         }
-        // Check for function definition: "funcName args = body"
-        else {
-            const fnMatch = line.match(/^([a-z][a-zA-Z0-9_]*)\s+([^=]+=)/);
-            if (fnMatch) {
-                const funcName = fnMatch[1];
-                if (!['if', 'then', 'else', 'case', 'of', 'let', 'in', 'type', 'module', 'import', 'exposing', 'port'].includes(funcName)) {
-                    line = `${prefix}_${line}`;
-                }
-            }
-            // Also check for value definition: "valueName = expr"
-            const valMatch = line.match(/^([a-z][a-zA-Z0-9_]*)\s*=/);
-            if (valMatch) {
-                const valName = valMatch[1];
-                if (!['if', 'then', 'else', 'case', 'of', 'let', 'in', 'type', 'module', 'import', 'exposing', 'port'].includes(valName)) {
-                    line = `${prefix}_${line}`;
-                }
+        // Function definition
+        const fnMatch = line.match(/^([a-z][a-zA-Z0-9_]*)\s+[^=]*=/);
+        if (fnMatch) {
+            const name = fnMatch[1];
+            if (!['if', 'then', 'else', 'case', 'of', 'let', 'in', 'type', 'module', 'import', 'exposing', 'port'].includes(name)) {
+                if (!funcNames.includes(name)) funcNames.push(name);
             }
         }
+        // Value definition
+        const valMatch = line.match(/^([a-z][a-zA-Z0-9_]*)\s*=/);
+        if (valMatch) {
+            const name = valMatch[1];
+            if (!['if', 'then', 'else', 'case', 'of', 'let', 'in', 'type', 'module', 'import', 'exposing', 'port'].includes(name)) {
+                if (!funcNames.includes(name)) funcNames.push(name);
+            }
+        }
+    }
+    return funcNames;
+}
 
-        // Check for type declarations
-        const typeMatch = line.match(/^type\s+(alias\s+)?([A-Z][a-zA-Z0-9_]*)/);
-        if (typeMatch) {
-            const typeName = typeMatch[2];
-            line = line.replace(new RegExp(`^(type\\s+(?:alias\\s+)?)${typeName}`), `$1${prefix}_${typeName}`);
-        }
+/**
+ * Prefix all top-level definitions in a module with the module name
+ * Uses lowercase prefix for functions, uppercase for types
+ */
+function prefixModuleDefinitions(source, moduleName) {
+    // Get prefix forms
+    const lowerPrefix = moduleName.replace(/\./g, '_').toLowerCase();
+    const upperPrefix = moduleName.replace(/\./g, '_');  // Keep case for types (e.g., AST -> AST_)
 
-        processedLines.push(line);
+    // Collect all names defined in this module
+    const typeNames = collectTypeNames(source);
+    const funcNames = collectFunctionNames(source);
+
+    let result = source;
+
+    // First, rename type declarations: "type alias Foo" -> "type alias Module_Foo"
+    for (const typeName of typeNames) {
+        // Replace type definition
+        result = result.replace(
+            new RegExp(`^(type\\s+(?:alias\\s+)?)${typeName}\\b`, 'gm'),
+            `$1${upperPrefix}_${typeName}`
+        );
+        // Replace all references to this type (uppercase, not at start of line)
+        // Be careful not to replace inside strings or qualified names
+        result = result.replace(
+            new RegExp(`(?<!\\.)\\b${typeName}\\b(?!\\.)`, 'g'),
+            `${upperPrefix}_${typeName}`
+        );
     }
 
-    return processedLines.join('\n');
+    // Then, rename function definitions and type annotations
+    for (const funcName of funcNames) {
+        // Replace type annotation
+        result = result.replace(
+            new RegExp(`^${funcName}\\s*:`, 'gm'),
+            `${lowerPrefix}_${funcName} :`
+        );
+        // Replace function definition
+        result = result.replace(
+            new RegExp(`^${funcName}\\s+([^=]*)=`, 'gm'),
+            `${lowerPrefix}_${funcName} $1=`
+        );
+        // Replace value definition (no args)
+        result = result.replace(
+            new RegExp(`^${funcName}\\s*=`, 'gm'),
+            `${lowerPrefix}_${funcName} =`
+        );
+        // Replace references to this function within the module
+        result = result.replace(
+            new RegExp(`(?<!\\.)\\b${funcName}\\b(?!\\s*[=:])`, 'g'),
+            `${lowerPrefix}_${funcName}`
+        );
+    }
+
+    return result;
 }
 
 /**
