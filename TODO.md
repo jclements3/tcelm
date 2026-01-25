@@ -213,7 +213,15 @@
   - Fixed: LT/EQ/GT constructors now in builtinConstructors
   - 163 tests passing, ~245 builtin functions
   - FFI working (foreign import generates wrappers for C functions)
-- [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution), Task support
+- [x] 2026-01-25: Task module for async computations
+  - Task.succeed, Task.fail - create successful/failed tasks
+  - Task.map, Task.andThen - transform and chain tasks
+  - Task.mapError, Task.onError - error handling
+  - Task.map2, Task.map3 - combine multiple tasks
+  - Task.sequence - sequence a list of tasks
+  - Do-notation support with automatic Task monad detection
+  - 175 tests passing
+- [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution)
 
 ---
 
