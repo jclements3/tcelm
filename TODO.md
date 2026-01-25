@@ -92,7 +92,11 @@
   - Infer: pattern binding for constructor arguments
   - Working: `type Shape = Circle Int | Rectangle Int Int` with case matching
   - Working: `area (Rectangle 5 4)` = 20
-- [ ] **NEXT**: Tuple support, do-notation, more tests
+- [x] 2026-01-24: Tuple support:
+  - Tuple pattern matching in case expressions
+  - Tuple module: pair, first, second, mapFirst, mapSecond
+  - Working: `Tuple.first (1, 2)` = 1, tuple pattern `(a, b) -> a`
+- [ ] **NEXT**: do-notation, more comprehensive tests, documentation
 
 ---
 
@@ -139,6 +143,7 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Standard library | ✅ Working | List, Maybe, Result, String, Basics in C runtime |
 | Records | ✅ Working | Creation and field access (`record.field`) |
 | Custom types | ✅ Working | Constructors with args, pattern matching |
+| Tuples | ✅ Working | Creation, pattern matching, Tuple module |
 | Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
 
 ### Known Issues
