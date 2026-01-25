@@ -47,6 +47,8 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 - Case expressions with pattern matching
 - Lambda expressions with closure capture
 - Function application and pipelines (`|>`, `<|`)
+- Function composition (`>>`, `<<`)
+- Partial application and currying
 
 ### Types
 - Basic types: `Int`, `Float`, `String`, `Char`, `Bool`
@@ -130,13 +132,18 @@ main =
 ## Testing
 
 ```bash
-# Run all tests
+# Run all tests (73 tests covering all features)
 ./tests/tcelm2/run_all.sh
 ```
+
+Tests cover: basic arithmetic, let bindings, if expressions, functions,
+case expressions, lambdas, lists, higher-order functions, Maybe, Result,
+do-notation, records, custom types, tuples, composition, and more.
 
 ## Known Limitations
 
 - No type class instances (infrastructure ready)
-- No as-patterns in some contexts
 - Tuples limited to 3 elements
 - No module imports (single-file only)
+- No mutual recursion between top-level functions
+- Float operations have limited support
