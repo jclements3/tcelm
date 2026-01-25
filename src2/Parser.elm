@@ -1454,6 +1454,36 @@ getOperatorPrec op =
         _ -> ( 9, LeftAssoc )
 
 
+{-| Convert operator symbol to internal name for use as a value.
+    (+) -> "_op_add", (*) -> "_op_mul", etc.
+-}
+operatorToName : String -> String
+operatorToName op =
+    case op of
+        "+" -> "_op_add"
+        "-" -> "_op_sub"
+        "*" -> "_op_mul"
+        "/" -> "_op_div"
+        "//" -> "_op_intDiv"
+        "^" -> "_op_pow"
+        "%" -> "_op_mod"
+        "==" -> "_op_eq"
+        "/=" -> "_op_neq"
+        "<" -> "_op_lt"
+        ">" -> "_op_gt"
+        "<=" -> "_op_lte"
+        ">=" -> "_op_gte"
+        "&&" -> "_op_and"
+        "||" -> "_op_or"
+        "++" -> "_op_append"
+        "::" -> "_op_cons"
+        "|>" -> "_op_pipeRight"
+        "<|" -> "_op_pipeLeft"
+        ">>" -> "_op_composeRight"
+        "<<" -> "_op_composeLeft"
+        _ -> op  -- Unknown operator, use as-is
+
+
 parseUnaryExpr : Parser (Located Expr)
 parseUnaryExpr state =
     case currentToken state of
@@ -1625,22 +1655,56 @@ parseTupleOrParenExpr state =
                     Ok ( _, state2 ) ->
                         Ok ( locate tok.region EUnit, state2 )
             else
-                case parseExpr state1 of
-                    Err e -> Err e
-                    Ok ( first, state2 ) ->
-                        if peek Comma state2 then
+                -- Check for operator section: (op)
+                case currentToken state1 of
+                    Just opTok ->
+                        if (opTok.type_ == Operator || opTok.type_ == DoubleColon) && peek RParen (advance state1) then
                             let
-                                ( rest, state3 ) = parseTupleExprRest state2
+                                state2 = advance state1  -- consume operator
                             in
-                            case expect RParen state3 of
-                                Err e -> Err e
-                                Ok ( _, state4 ) ->
-                                    Ok ( locate tok.region (ETuple (first :: rest)), state4 )
-                        else
                             case expect RParen state2 of
                                 Err e -> Err e
                                 Ok ( _, state3 ) ->
-                                    Ok ( locate tok.region (EParens first), state3 )
+                                    -- Convert operator to function reference: (+) -> _op_add
+                                    let
+                                        opSymbol = if opTok.type_ == DoubleColon then "::" else opTok.value
+                                        opName = operatorToName opSymbol
+                                    in
+                                    Ok ( locate tok.region (EVar { module_ = Nothing, name = opName }), state3 )
+                        else
+                            case parseExpr state1 of
+                                Err e -> Err e
+                                Ok ( first, state2 ) ->
+                                    if peek Comma state2 then
+                                        let
+                                            ( rest, state3 ) = parseTupleExprRest state2
+                                        in
+                                        case expect RParen state3 of
+                                            Err e -> Err e
+                                            Ok ( _, state4 ) ->
+                                                Ok ( locate tok.region (ETuple (first :: rest)), state4 )
+                                    else
+                                        case expect RParen state2 of
+                                            Err e -> Err e
+                                            Ok ( _, state3 ) ->
+                                                Ok ( locate tok.region (EParens first), state3 )
+                    Nothing ->
+                        case parseExpr state1 of
+                            Err e -> Err e
+                            Ok ( first, state2 ) ->
+                                if peek Comma state2 then
+                                    let
+                                        ( rest, state3 ) = parseTupleExprRest state2
+                                    in
+                                    case expect RParen state3 of
+                                        Err e -> Err e
+                                        Ok ( _, state4 ) ->
+                                            Ok ( locate tok.region (ETuple (first :: rest)), state4 )
+                                else
+                                    case expect RParen state2 of
+                                        Err e -> Err e
+                                        Ok ( _, state3 ) ->
+                                            Ok ( locate tok.region (EParens first), state3 )
 
 
 {-| Parse a qualified name like Module.func, Module.Constructor, or Module.SubModule.func.
