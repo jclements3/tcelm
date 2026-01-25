@@ -541,7 +541,11 @@ parseTypeAlias startRegion state =
             case expect Equals state2 of
                 Err e -> Err e
                 Ok ( _, state3 ) ->
-                    case parseTypeAnnotation state3 of
+                    let
+                        -- Skip newlines after = to support multi-line type aliases
+                        state3a = skipNewlines state3
+                    in
+                    case parseTypeAnnotation state3a of
                         Err e -> Err e
                         Ok ( body, state4 ) ->
                             Ok
@@ -1045,16 +1049,20 @@ parseRecordType state =
     case expect LBrace state of
         Err e -> Err e
         Ok ( tok, state1 ) ->
-            if peek RBrace state1 then
-                case expect RBrace state1 of
+            let
+                state1a = skipNewlines state1
+            in
+            if peek RBrace state1a then
+                case expect RBrace state1a of
                     Err e -> Err e
                     Ok ( _, state2 ) ->
                         Ok ( locate tok.region (TARecord [] Nothing), state2 )
             else
                 let
-                    ( fields, rowVar, state2 ) = parseRecordTypeFields state1
+                    ( fields, rowVar, state2 ) = parseRecordTypeFields state1a
+                    state2a = skipNewlines state2
                 in
-                case expect RBrace state2 of
+                case expect RBrace state2a of
                     Err e -> Err e
                     Ok ( _, state3 ) ->
                         Ok ( locate tok.region (TARecord fields rowVar), state3 )
@@ -1097,15 +1105,22 @@ parseRecordTypeFields state =
 
 parseRecordTypeFieldsRest : ParseState -> ( List ( Located Name, Located TypeAnnotation ), Maybe (Located Name), ParseState )
 parseRecordTypeFieldsRest state =
-    if peek Comma state then
-        case expect Comma state of
+    let
+        -- Skip newlines to support multi-line record types
+        state0 = skipNewlines state
+    in
+    if peek Comma state0 then
+        case expect Comma state0 of
             Err _ ->
-                ( [], Nothing, state )
+                ( [], Nothing, state0 )
 
             Ok ( _, state1 ) ->
-                parseRecordTypeFields state1
+                let
+                    state1a = skipNewlines state1
+                in
+                parseRecordTypeFields state1a
     else
-        ( [], Nothing, state )
+        ( [], Nothing, state0 )
 
 
 
@@ -1448,9 +1463,13 @@ parseFieldAccessChain expr state =
 parseAppArgs : ParseState -> ( List (Located Expr), ParseState )
 parseAppArgs state =
     -- Stop if we hit a token at column 1 (new top-level declaration)
+    -- Also stop if this looks like a let binding (identifier followed by =)
     case currentToken state of
         Just tok ->
             if tok.region.start.column == 1 then
+                ( [], state )
+            -- Check if this looks like a let binding (will be parsed by parseLetBindings)
+            else if looksLikeLetBinding state then
                 ( [], state )
             else
                 case parseAtomicExpr state of
@@ -1771,15 +1790,76 @@ parseCaseBranches state =
     let
         state1 = skipNewlines state
     in
-    case parseCaseBranch state1 of
-        Err _ ->
+    case currentToken state1 of
+        Just tok ->
+            -- Stop if we see 'in' keyword (end of let block)
+            if tok.type_ == KwIn then
+                ( [], state1 )
+            -- Stop at column 1 (new top-level declaration)
+            else if tok.region.start.column == 1 then
+                ( [], state1 )
+            -- Check if this looks like a let binding: identifier followed by =
+            -- Let bindings have form "name =" or "name arg1 arg2 ="
+            -- Case branches have form "pattern ->"
+            else if looksLikeLetBinding state1 then
+                ( [], state1 )
+            else
+                case parseCaseBranch state1 of
+                    Err _ ->
+                        ( [], state1 )
+
+                    Ok ( branch, state2 ) ->
+                        let
+                            ( rest, state3 ) = parseCaseBranches state2
+                        in
+                        ( branch :: rest, state3 )
+
+        Nothing ->
             ( [], state1 )
 
-        Ok ( branch, state2 ) ->
-            let
-                ( rest, state3 ) = parseCaseBranches state2
-            in
-            ( branch :: rest, state3 )
+
+{-| Check if the current position looks like a let binding (not a case branch).
+    Let bindings: "name = ..." or "name arg1 = ..."
+    Case branches: "pattern -> ..."
+
+    We scan tokens looking for = before -> to distinguish let bindings from case branches.
+-}
+looksLikeLetBinding : ParseState -> Bool
+looksLikeLetBinding state =
+    case currentToken state of
+        Just tok ->
+            if tok.type_ == LowerIdent then
+                scanForEqualsVsArrow (advance state) 0
+            else
+                False
+        Nothing -> False
+
+
+{-| Scan ahead looking for = (let binding) or -> (case branch).
+    Returns True if we find = first, False otherwise.
+    maxDepth prevents infinite loops.
+-}
+scanForEqualsVsArrow : ParseState -> Int -> Bool
+scanForEqualsVsArrow state depth =
+    if depth > 10 then
+        False
+    else
+        case currentToken state of
+            Just t ->
+                case t.type_ of
+                    Equals -> True  -- Found =, this is a let binding
+                    Arrow -> False  -- Found ->, this is a case branch
+                    Colon -> True   -- Type annotation before =
+                    LowerIdent -> scanForEqualsVsArrow (advance state) (depth + 1)
+                    UpperIdent -> scanForEqualsVsArrow (advance state) (depth + 1)  -- Constructor pattern
+                    LParen -> False  -- Complex pattern, not a let binding
+                    LBrace -> False  -- Record pattern, not a let binding
+                    LBracket -> False  -- List pattern, not a let binding
+                    Underscore -> False  -- Wildcard pattern, not a let binding
+                    Newline -> False  -- Hit newline before = or ->, stop
+                    Indent _ -> False
+                    _ -> False
+            Nothing -> False
 
 
 parseCaseBranch : Parser (Located CaseBranch)
