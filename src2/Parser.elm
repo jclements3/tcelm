@@ -1544,10 +1544,13 @@ parseAppArgs state =
                         ( [], state )
 
                     Ok ( arg, state1 ) ->
+                        -- Parse field access chain on the argument (e.g., ledger.accounts)
+                        -- This ensures record.field has higher precedence than function application
                         let
-                            ( rest, state2 ) = parseAppArgs state1
+                            ( argWithFields, state1a ) = parseFieldAccessChain arg state1
+                            ( rest, state2 ) = parseAppArgs state1a
                         in
-                        ( arg :: rest, state2 )
+                        ( argWithFields :: rest, state2 )
 
         Nothing ->
             ( [], state )
