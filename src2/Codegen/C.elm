@@ -540,6 +540,19 @@ generateRuntime _ =
         , "    return elm_float(3.141592653589793);"
         , "}"
         , ""
+        , "/* Angle conversions */"
+        , "static elm_value_t elm_degrees(elm_value_t deg) {"
+        , "    return elm_float(deg.data.f * 3.141592653589793 / 180.0);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_radians(elm_value_t rad) {"
+        , "    return elm_float(rad.data.f);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_turns(elm_value_t t) {"
+        , "    return elm_float(t.data.f * 2.0 * 3.141592653589793);"
+        , "}"
+        , ""
         , "static elm_value_t elm_ceiling(elm_value_t x) {"
         , "    return elm_int((int64_t)ceil(x.data.f));"
         , "}"
@@ -928,6 +941,34 @@ generateRuntime _ =
         , "        while (curr.tag == 101) {"
         , "            elm_value_t currKey = elm_apply1((elm_closure_t *)keyFn.data.p, *curr.data.c);"
         , "            if (currKey.data.i >= elemKey.data.i) break;"
+        , "            prev = elm_cons(*curr.data.c, prev);"
+        , "            curr = *curr.next;"
+        , "        }"
+        , "        elm_value_t result = elm_cons(elem, curr);"
+        , "        while (prev.tag == 101) {"
+        , "            result = elm_cons(*prev.data.c, result);"
+        , "            prev = *prev.next;"
+        , "        }"
+        , "        sorted = result;"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return sorted;"
+        , "}"
+        , ""
+        , "/* List.sortWith - sort using a custom comparator function */"
+        , "static elm_value_t elm_List_sortWith(elm_value_t cmp, elm_value_t xs) {"
+        , "    if (xs.tag == 100) return elm_nil();"
+        , "    elm_value_t sorted = elm_nil();"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t elem = *xs.data.c;"
+        , "        elm_value_t prev = elm_nil();"
+        , "        elm_value_t curr = sorted;"
+        , "        /* Find insertion point by calling comparator */"
+        , "        while (curr.tag == 101) {"
+        , "            elm_value_t cmp1 = elm_apply1((elm_closure_t *)cmp.data.p, elem);"
+        , "            elm_value_t order = elm_apply1((elm_closure_t *)cmp1.data.p, *curr.data.c);"
+        , "            /* LT = 700, EQ = 701, GT = 702 */"
+        , "            if (order.tag <= 701) break; /* elem <= curr, insert here */"
         , "            prev = elm_cons(*curr.data.c, prev);"
         , "            curr = *curr.next;"
         , "        }"
@@ -1456,6 +1497,14 @@ generateRuntime _ =
         , "    return elm_string(buf);"
         , "}"
         , ""
+        , "/* String.fromChar - convert a single Char to String */"
+        , "static elm_value_t elm_String_fromChar(elm_value_t ch) {"
+        , "    char *buf = malloc(2);"
+        , "    buf[0] = (char)ch.data.i;"
+        , "    buf[1] = '\\0';"
+        , "    return elm_string(buf);"
+        , "}"
+        , ""
         , "/* String.uncons - split first char from string */"
         , "static elm_value_t elm_String_uncons(elm_value_t s) {"
         , "    if (s.data.s[0] == '\\0') return elm_nothing();"
@@ -1619,6 +1668,14 @@ generateRuntime _ =
         , "    elm_value_t second = *tuple.next;"
         , "    elm_value_t newSecond = elm_apply1((elm_closure_t *)f.data.p, second);"
         , "    return elm_tuple2(first, newSecond);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Tuple_mapBoth(elm_value_t f, elm_value_t g, elm_value_t tuple) {"
+        , "    elm_value_t first = *tuple.data.c;"
+        , "    elm_value_t second = *tuple.next;"
+        , "    elm_value_t newFirst = elm_apply1((elm_closure_t *)f.data.p, first);"
+        , "    elm_value_t newSecond = elm_apply1((elm_closure_t *)g.data.p, second);"
+        , "    return elm_tuple2(newFirst, newSecond);"
         , "}"
         , ""
         , "/* Dict module - implemented as association list of (key, value) tuples */"
@@ -2000,6 +2057,21 @@ generateRuntime _ =
         , "    return (elm_value_t){ .tag = 3, .data.i = ch, .next = NULL };"
         , "}"
         , ""
+        , "static elm_value_t elm_Char_isHexDigit(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isOctDigit(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool(ch >= '0' && ch <= '7');"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Char_isSpace(elm_value_t c) {"
+        , "    int ch = (int)c.data.i;"
+        , "    return elm_bool(ch == ' ' || ch == '\\t' || ch == '\\n' || ch == '\\r');"
+        , "}"
+        , ""
         , "/* ===== BITWISE MODULE ===== */"
         , ""
         , "static elm_value_t elm_Bitwise_and(elm_value_t a, elm_value_t b) {"
@@ -2040,6 +2112,27 @@ generateRuntime _ =
         , ""
         , "static elm_value_t elm_Array_fromList(elm_value_t list) {"
         , "    return list;  /* Array is just a list for now */"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_initialize(elm_value_t n, elm_value_t f) {"
+        , "    int64_t size = n.data.i;"
+        , "    if (size <= 0) return elm_nil();"
+        , "    elm_value_t result = elm_nil();"
+        , "    for (int64_t i = size - 1; i >= 0; i--) {"
+        , "        elm_value_t elem = elm_apply1((elm_closure_t *)f.data.p, elm_int(i));"
+        , "        result = elm_cons(elem, result);"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_repeat(elm_value_t n, elm_value_t value) {"
+        , "    int64_t size = n.data.i;"
+        , "    if (size <= 0) return elm_nil();"
+        , "    elm_value_t result = elm_nil();"
+        , "    for (int64_t i = 0; i < size; i++) {"
+        , "        result = elm_cons(value, result);"
+        , "    }"
+        , "    return result;"
         , "}"
         , ""
         , "static elm_value_t elm_Array_toList(elm_value_t arr) {"
@@ -3322,6 +3415,9 @@ getFunctionArity ctx name =
         "logBase" -> 2
         "e" -> 0
         "pi" -> 0
+        "degrees" -> 1
+        "radians" -> 1
+        "turns" -> 1
         "ceiling" -> 1
         "floor" -> 1
         "round" -> 1
@@ -3367,6 +3463,7 @@ getFunctionArity ctx name =
         "List.indexedMap" -> 2
         "List.sort" -> 1
         "List.sortBy" -> 2
+        "List.sortWith" -> 2
         "List.partition" -> 2
         "List.unzip" -> 1
         "List.map2" -> 3
@@ -3430,6 +3527,7 @@ getFunctionArity ctx name =
         "String.padRight" -> 3
         "String.cons" -> 2
         "String.uncons" -> 1
+        "String.fromChar" -> 1
         "String.repeat" -> 2
         "String.words" -> 1
         "String.lines" -> 1
@@ -3448,6 +3546,9 @@ getFunctionArity ctx name =
         "Tuple.pair" -> 2
         "Tuple.mapFirst" -> 2
         "Tuple.mapSecond" -> 2
+
+        -- Tuple module (ternary)
+        "Tuple.mapBoth" -> 3
 
         -- Dict module (nullary)
         "Dict.empty" -> 0
@@ -3508,6 +3609,9 @@ getFunctionArity ctx name =
         "Char.isUpper" -> 1
         "Char.isAlpha" -> 1
         "Char.isAlphaNum" -> 1
+        "Char.isHexDigit" -> 1
+        "Char.isOctDigit" -> 1
+        "Char.isSpace" -> 1
         "Char.toUpper" -> 1
         "Char.toLower" -> 1
 
@@ -3543,6 +3647,10 @@ getFunctionArity ctx name =
         "Array.slice" -> 3
         "Array.foldl" -> 3
         "Array.foldr" -> 3
+
+        -- Array module additional
+        "Array.initialize" -> 2
+        "Array.repeat" -> 2
 
         -- User-defined functions - get arity from definition
         _ ->
@@ -3626,7 +3734,8 @@ isBuiltin name =
         , "xor", "isNaN", "isInfinite"
         -- Math functions
         , "sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "atan2"
-        , "logBase", "e", "pi", "ceiling", "floor", "round", "truncate", "toFloat"
+        , "logBase", "e", "pi", "degrees", "radians", "turns"
+        , "ceiling", "floor", "round", "truncate", "toFloat"
         -- Debug module
         , "Debug.log", "Debug.toString"
         -- Order type
@@ -3638,7 +3747,7 @@ isBuiltin name =
         , "List.append", "List.concat", "List.intersperse", "List.range", "List.repeat"
         , "List.map", "List.filter", "List.filterMap", "List.foldl", "List.foldr"
         , "List.any", "List.all", "List.concatMap", "List.indexedMap"
-        , "List.sort", "List.sortBy", "List.partition", "List.singleton"
+        , "List.sort", "List.sortBy", "List.sortWith", "List.partition", "List.singleton"
         , "List.unzip", "List.map2", "List.map3", "List.map4", "List.map5"
         -- Maybe module
         , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5"
@@ -3653,12 +3762,12 @@ isBuiltin name =
         , "String.split", "String.slice", "String.toUpper", "String.toLower"
         , "String.trim", "String.trimLeft", "String.trimRight"
         , "String.toList", "String.fromList", "String.padLeft", "String.padRight"
-        , "String.cons", "String.uncons"
+        , "String.cons", "String.uncons", "String.fromChar"
         , "String.repeat", "String.words", "String.lines"
         , "String.foldl", "String.foldr"
         , "String.any", "String.all", "String.filter", "String.map"
         -- Tuple module
-        , "Tuple.pair", "Tuple.first", "Tuple.second", "Tuple.mapFirst", "Tuple.mapSecond"
+        , "Tuple.pair", "Tuple.first", "Tuple.second", "Tuple.mapFirst", "Tuple.mapSecond", "Tuple.mapBoth"
         -- Dict module
         , "Dict.empty", "Dict.singleton", "Dict.insert", "Dict.get", "Dict.remove"
         , "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values"
@@ -3672,6 +3781,7 @@ isBuiltin name =
         -- Char module
         , "Char.toCode", "Char.fromCode"
         , "Char.isDigit", "Char.isLower", "Char.isUpper", "Char.isAlpha", "Char.isAlphaNum"
+        , "Char.isHexDigit", "Char.isOctDigit", "Char.isSpace"
         , "Char.toUpper", "Char.toLower"
         -- Bitwise module
         , "Bitwise.and", "Bitwise.or", "Bitwise.xor", "Bitwise.complement"
@@ -3681,6 +3791,7 @@ isBuiltin name =
         , "Array.length", "Array.isEmpty", "Array.get", "Array.set"
         , "Array.push", "Array.append", "Array.slice"
         , "Array.map", "Array.indexedMap", "Array.foldl", "Array.foldr", "Array.filter"
+        , "Array.initialize", "Array.repeat"
         ]
 
 

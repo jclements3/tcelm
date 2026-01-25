@@ -202,6 +202,9 @@ builtinTypes =
         , ( "logBase", Scheme [] [] (TArrow (TCon "Float") (TArrow (TCon "Float") (TCon "Float"))) )
         , ( "e", Scheme [] [] (TCon "Float") )
         , ( "pi", Scheme [] [] (TCon "Float") )
+        , ( "degrees", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "radians", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "turns", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
         , ( "ceiling", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
         , ( "floor", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
         , ( "round", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
@@ -282,6 +285,11 @@ builtinTypes =
         , ( "List.sortBy"
           , Scheme [ "a", "b" ] []
                 (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))))
+          )
+        , ( "List.sortWith"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "a") (TCon "Order")))
                     (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))))
           )
         , ( "List.partition"
@@ -450,6 +458,7 @@ builtinTypes =
         , ( "String.padRight", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String")))) )
         , ( "String.cons", Scheme [] [] (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String"))) )
         , ( "String.uncons", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "Maybe") (TTuple [ TCon "Char", TCon "String" ]))) )
+        , ( "String.fromChar", Scheme [] [] (TArrow (TCon "Char") (TCon "String")) )
         , ( "String.repeat", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
         , ( "String.words", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "List") (TCon "String"))) )
         , ( "String.lines", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "List") (TCon "String"))) )
@@ -485,6 +494,7 @@ builtinTypes =
         , ( "Tuple.second", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "b")) )
         , ( "Tuple.mapFirst", Scheme [ "a", "b", "c" ] [] (TArrow (TArrow (TVar "a") (TVar "c")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "c", TVar "b" ]))) )
         , ( "Tuple.mapSecond", Scheme [ "a", "b", "c" ] [] (TArrow (TArrow (TVar "b") (TVar "c")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "a", TVar "c" ]))) )
+        , ( "Tuple.mapBoth", Scheme [ "a", "b", "c", "d" ] [] (TArrow (TArrow (TVar "a") (TVar "c")) (TArrow (TArrow (TVar "b") (TVar "d")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "c", TVar "d" ])))) )
 
         -- Dict module (association list implementation)
         , ( "Dict.empty"
@@ -645,6 +655,9 @@ builtinTypes =
         , ( "Char.isUpper", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
         , ( "Char.isAlpha", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
         , ( "Char.isAlphaNum", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isHexDigit", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isOctDigit", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
+        , ( "Char.isSpace", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
         , ( "Char.toUpper", Scheme [] [] (TArrow (TCon "Char") (TCon "Char")) )
         , ( "Char.toLower", Scheme [] [] (TArrow (TCon "Char") (TCon "Char")) )
 
@@ -728,6 +741,15 @@ builtinTypes =
                 (TArrow (TArrow (TVar "a") (TCon "Bool"))
                     (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "a"))))
           )
+        , ( "Array.initialize"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int")
+                    (TArrow (TArrow (TCon "Int") (TVar "a")) (TApp (TCon "Array") (TVar "a"))))
+          )
+        , ( "Array.repeat"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int") (TArrow (TVar "a") (TApp (TCon "Array") (TVar "a"))))
+          )
         ]
 
 
@@ -742,6 +764,9 @@ builtinConstructors =
         , ( "Err", Scheme [ "e", "a" ] [] (TArrow (TVar "e") (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))) )
         , ( "Nil", Scheme [ "a" ] [] (TApp (TCon "List") (TVar "a")) )
         , ( "Cons", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
+        , ( "LT", Scheme [] [] (TCon "Order") )
+        , ( "EQ", Scheme [] [] (TCon "Order") )
+        , ( "GT", Scheme [] [] (TCon "Order") )
         ]
 
 
