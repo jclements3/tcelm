@@ -425,6 +425,19 @@ builtinTypes =
         , ( "String.padRight", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String")))) )
         , ( "String.cons", Scheme [] [] (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String"))) )
         , ( "String.uncons", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "Maybe") (TTuple [ TCon "Char", TCon "String" ]))) )
+        , ( "String.repeat", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.words", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "List") (TCon "String"))) )
+        , ( "String.lines", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "List") (TCon "String"))) )
+        , ( "String.foldl"
+          , Scheme [ "b" ] []
+                (TArrow (TArrow (TCon "Char") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b") (TArrow (TCon "String") (TVar "b"))))
+          )
+        , ( "String.foldr"
+          , Scheme [ "b" ] []
+                (TArrow (TArrow (TCon "Char") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b") (TArrow (TCon "String") (TVar "b"))))
+          )
           -- Tuple module
         , ( "Tuple.pair", Scheme [ "a", "b" ] [] (TArrow (TVar "a") (TArrow (TVar "b") (TTuple [ TVar "a", TVar "b" ]))) )
         , ( "Tuple.first", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "a")) )
