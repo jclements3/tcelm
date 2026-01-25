@@ -96,7 +96,13 @@
   - Tuple pattern matching in case expressions
   - Tuple module: pair, first, second, mapFirst, mapSecond
   - Working: `Tuple.first (1, 2)` = 1, tuple pattern `(a, b) -> a`
-- [ ] **NEXT**: do-notation, more comprehensive tests, documentation
+- [x] 2026-01-25: **MAJOR** Do-notation for Maybe and Result:
+  - Monad detection based on constructor usage (Just/Nothing -> Maybe, Ok/Err -> Result)
+  - Desugaring to qualified andThen chains (Maybe.andThen, Result.andThen)
+  - Indentation-based parsing to terminate do blocks at column 1
+  - Working: `do { x <- Just 10; y <- Just 20; Just (x + y) }` = Just 30
+  - Working: `do { x <- validate 10; y <- validate (0 - 5); Ok (x + y) }` = Err "negative"
+- [ ] **NEXT**: More comprehensive tests, better error messages, documentation
 
 ---
 
@@ -144,6 +150,7 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Records | ✅ Working | Creation and field access (`record.field`) |
 | Custom types | ✅ Working | Constructors with args, pattern matching |
 | Tuples | ✅ Working | Creation, pattern matching, Tuple module |
+| Do-notation | ✅ Working | Maybe and Result, monad auto-detection |
 | Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
 
 ### Known Issues
@@ -180,7 +187,7 @@ elm make src2/Compiler.elm --output=bin/tcelm2.js
 | Codegen.Lambda | Working | Lambda lifting + capture fixed |
 | Pipeline operators | Working | |> and <| fully implemented |
 | Pattern matching | ~85% | Cons, nested, tuples work; as-patterns partial |
-| do-notation | Not done | Needs parser + desugaring |
+| do-notation | ✅ Working | Maybe and Result monads |
 | Standard library | Partial | Many C implementations missing |
 
 ---
@@ -222,15 +229,15 @@ Current: Not implemented.
 
 ---
 
-## Phase 2: do-notation (HIGH PRIORITY)
+## Phase 2: do-notation ✅ COMPLETE
 
 **Goal**: Clean, readable monadic code for Result/Maybe/Task chains.
 
 ### 2.1 Parser Support
-- [ ] Parse `do` keyword as expression starter
-- [ ] Parse `<-` bind operator
-- [ ] Parse `let` bindings inside do-blocks
-- [ ] Parse `pure` / `return` (alias for identity wrap)
+- [x] Parse `do` keyword as expression starter
+- [x] Parse `<-` bind operator
+- [x] Parse `let` bindings inside do-blocks
+- [ ] Parse `pure` / `return` (alias for identity wrap) - use `Just` / `Ok` directly
 
 ### 2.2 Desugaring
 ```elm
@@ -238,25 +245,23 @@ Current: Not implemented.
 do
     validated <- validate txn
     balanced <- checkBalance validated
-    pure (TransactionPosted balanced)
+    Ok (TransactionPosted balanced)
 
 -- Becomes:
-validate txn
-    |> Result.andThen (\validated ->
-        checkBalance validated
-            |> Result.andThen (\balanced ->
-                Ok (TransactionPosted balanced)
-            )
-    )
+Result.andThen (\validated ->
+    Result.andThen (\balanced ->
+        Ok (TransactionPosted balanced)
+    ) (checkBalance validated)
+) (validate txn)
 ```
-- [ ] Desugar bind (`<-`) to `andThen` calls
-- [ ] Desugar `let` to regular let bindings
-- [ ] Infer which `andThen` to use based on type (Result.andThen, Maybe.andThen, etc.)
-- [ ] Handle `pure` as type-appropriate wrapper
+- [x] Desugar bind (`<-`) to `andThen` calls
+- [x] Desugar `let` to regular let bindings
+- [x] Detect monad from constructor usage (Just/Nothing -> Maybe, Ok/Err -> Result)
+- [x] Generate qualified andThen calls (Maybe.andThen, Result.andThen)
 
 ### 2.3 Integration
-- [ ] Works with Result, Maybe, Task
-- [ ] Works with custom types that have `andThen`
+- [x] Works with Result and Maybe
+- [ ] Works with custom types that have `andThen` (needs type classes)
 - [ ] Good error messages for type mismatches
 
 ---
@@ -452,7 +457,7 @@ The new src2/ architecture was specifically designed to support these features w
 |---------|--------|-------|
 | Type Classes | 🔧 Infrastructure ready | Types.elm has TypeClass, Instance, Constraint |
 | Higher-Kinded Types | 🔧 Infrastructure ready | Kind system in Types.elm (KStar, KArrow) |
-| do-notation | 🔧 AST ready | Desugar.elm has do-notation transformation |
+| do-notation | ✅ Working | Maybe and Result monads, auto-detection |
 | Row Polymorphism | 🔧 Types ready | TRecord has optional row variable |
 | Monad Transformers | ⏳ Future | Can be built on type classes |
 | GADTs | ⏳ Future | Would require extending Core IR |
