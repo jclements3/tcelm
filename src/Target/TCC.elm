@@ -632,9 +632,9 @@ generateCode config ast =
                                         )
                                     |> String.join "\n"
 
-                            -- Type alias for all custom types (use common elm_union_t)
-                            structDef =
-                                "typedef elm_union_t elm_" ++ typeName ++ ";\n"
+                            -- Note: We don't generate typedef for custom types to avoid
+                            -- name collisions when type name equals constructor name
+                            -- (e.g., `type Scheme = Scheme a b c`)
 
                             -- Constructor functions using elm_union_t
                             ctorFuncs =
@@ -671,7 +671,7 @@ generateCode config ast =
                                         )
                                     |> String.join "\n\n"
                         in
-                        tagDefines ++ "\n" ++ structDef ++ ctorFuncs
+                        tagDefines ++ "\n" ++ ctorFuncs
                     )
                 |> String.join "\n\n"
 
