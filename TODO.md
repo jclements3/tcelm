@@ -304,7 +304,12 @@
   - Callback trampolines convert between C and Elm types
   - Example: `foreign import register_callback : (Int -> Int) -> Task ()`
   - 219 tests passing (callback tests require external stubs)
-- [ ] **NEXT**: Continue with deriving, ledger work, or multi-core
+- [x] 2026-01-25: Parser fixes
+  - Qualified type names: `Dict.Dict Int Int` now parsed correctly
+  - Unit constructor: `()` maps to `elm_unit()` not `elm_Unit()`
+  - Record field access precedence: `Dict.get 1 ledger.accounts` parses correctly
+  - 219 tests passing
+- [ ] **NEXT**: Build ledger module to validate compiler features
 
 ---
 
