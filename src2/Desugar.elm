@@ -455,6 +455,26 @@ desugarBinOp ctx left op right =
             -- f <| a  ==>  f a
             Core.EApp leftCore rightCore (TVar "a")
 
+        ">>" ->
+            -- f >> g  ==>  \x -> g (f x)
+            let
+                x = { name = "_compose_x", type_ = TVar "a" }
+                xVar = Core.EVar x
+                fApplied = Core.EApp leftCore xVar (TVar "b")
+                gApplied = Core.EApp rightCore fApplied (TVar "c")
+            in
+            Core.ELam x gApplied (TArrow (TVar "a") (TVar "c"))
+
+        "<<" ->
+            -- f << g  ==>  \x -> f (g x)
+            let
+                x = { name = "_compose_x", type_ = TVar "a" }
+                xVar = Core.EVar x
+                gApplied = Core.EApp rightCore xVar (TVar "b")
+                fApplied = Core.EApp leftCore gApplied (TVar "c")
+            in
+            Core.ELam x fApplied (TArrow (TVar "a") (TVar "c"))
+
         _ ->
             -- Other operators: generate function call
             let
@@ -477,8 +497,6 @@ desugarBinOp ctx left op right =
                         "||" -> ( "or", TCon "Bool" )
                         "++" -> ( "append", TVar "a" )
                         "::" -> ( "cons", TVar "a" )
-                        ">>" -> ( "compose", TVar "a" )
-                        "<<" -> ( "composeLeft", TVar "a" )
                         _ -> ( opName, TVar "a" )
 
                 opVar = Core.EVar { name = opFuncName, type_ = TArrow (TVar "a") (TArrow (TVar "b") resultType) }
