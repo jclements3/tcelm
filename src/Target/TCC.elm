@@ -28,6 +28,7 @@ type alias CodegenConfig =
     , collectLocalFunctionsWithScope : String -> List String -> Src.Expr -> List LiftedFunc
     , generateLiftedFunction : String -> String -> List Src.Pattern -> Src.Expr -> List String -> String
     , generateStandaloneExpr : Src.Expr -> String
+    , generateStandaloneExprWithPrefix : String -> String -> List String -> Src.Expr -> String
     , filterReachableValues : List (Src.Located Src.Value) -> List (Src.Located Src.Value)
     }
 
@@ -233,8 +234,9 @@ generateCode config ast =
                 |> List.map
                     (\( name, body, _ ) ->
                         let
+                            -- Use correct function prefix for closure macro generation
                             cExpr =
-                                config.generateStandaloneExpr body
+                                config.generateStandaloneExprWithPrefix name modulePrefix userFunctionNames body
 
                             -- Check for record list first (special marker format)
                             isRecordList =
@@ -451,7 +453,8 @@ generateCode config ast =
                     )
                 |> String.join "\n\n"
 
-        moduleConstantsCode =
+        -- Early constants code (doesn't depend on lifted functions)
+        earlyConstantsCode =
             let
                 lambdas =
                     if String.isEmpty recordLambdaFunctionsCode then
@@ -466,15 +469,16 @@ generateCode config ast =
 
                     else
                         "/* Simple constants */\n" ++ simpleConstantsCode ++ "\n\n"
-
-                complex =
-                    if String.isEmpty complexConstantsCode then
-                        ""
-
-                    else
-                        "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
             in
-            lambdas ++ simple ++ complex
+            lambdas ++ simple
+
+        -- Complex constants code (depends on lifted functions, output after them)
+        complexConstantsSection =
+            if String.isEmpty complexConstantsCode then
+                ""
+
+            else
+                "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
 
         -- Generate user-defined functions (non-main values with arguments)
         userFunctions =
@@ -723,7 +727,7 @@ generateCode config ast =
     in
     String.join "\n"
         (header
-            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ moduleConstantsCode ++ liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */" ]
+            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ earlyConstantsCode ++ liftedFunctionsCode ++ complexConstantsSection ++ userFunctionsCode ++ "/* Elm main value */" ]
             ++ mainImpl
         )
 
@@ -766,6 +770,10 @@ generateLibCode config ast =
                     )
                 |> List.partition (\( _, _, isSimple ) -> isSimple)
 
+        -- Collect user function names for context (moved before complexConstantsCode)
+        userFunctionNames =
+            collectAllFunctionNames ast.values
+
         simpleConstantsCode =
             simpleConstants
                 |> List.map
@@ -793,8 +801,9 @@ generateLibCode config ast =
                 |> List.map
                     (\( name, body, _ ) ->
                         let
+                            -- Use correct function prefix for closure macro generation
                             cExpr =
-                                config.generateStandaloneExpr body
+                                config.generateStandaloneExprWithPrefix name cModuleName userFunctionNames body
 
                             isString =
                                 String.contains "elm_str_" cExpr || String.contains "\"" cExpr
@@ -809,10 +818,6 @@ generateLibCode config ast =
                         cType ++ " " ++ qualifyName name ++ "(void) {\n    return " ++ cExpr ++ ";\n}"
                     )
                 |> String.join "\n\n"
-
-        -- Collect user function names for context
-        userFunctionNames =
-            collectAllFunctionNames ast.values
 
         -- Generate user-defined functions with qualified names
         userFunctions =
@@ -907,17 +912,17 @@ generateLibCode config ast =
                  else
                     "/* Constants */\n" ++ simpleConstantsCode ++ "\n"
                ]
-            ++ [ if String.isEmpty complexConstantsCode then
-                    ""
-
-                 else
-                    "/* Computed values */\n" ++ complexConstantsCode ++ "\n"
-               ]
             ++ [ if String.isEmpty liftedFunctions then
                     ""
 
                  else
                     "/* Local functions */\n" ++ liftedFunctions ++ "\n"
+               ]
+            ++ [ if String.isEmpty complexConstantsCode then
+                    ""
+
+                 else
+                    "/* Computed values */\n" ++ complexConstantsCode ++ "\n"
                ]
             ++ [ if String.isEmpty userFunctions then
                     ""

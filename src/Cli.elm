@@ -189,6 +189,8 @@ tccCodegenConfig =
     , collectLocalFunctionsWithScope = collectLocalFunctionsWithScope
     , generateLiftedFunction = generateLiftedFunction
     , generateStandaloneExpr = generateStandaloneExpr
+    , generateStandaloneExprWithPrefix = \funcPrefix modulePrefix userFunctions expr ->
+        generateStandaloneExprWithCtx { funcPrefix = funcPrefix, modulePrefix = modulePrefix, userFunctions = userFunctions } expr
     , filterReachableValues = filterReachableValues
     }
 
@@ -1059,7 +1061,9 @@ generateTccCode ast =
                 |> List.map
                     (\( name, body, _ ) ->
                         let
-                            cExpr = generateStandaloneExpr body
+                            -- Use correct function prefix for closure macro generation
+                            ctx = { funcPrefix = name, modulePrefix = modulePrefix, userFunctions = userFunctionNames }
+                            cExpr = generateStandaloneExprWithCtx ctx body
                             -- Check for record list first (special marker format)
                             isRecordList = String.contains "/*RECORD_LIST:" cExpr
                             -- Check for list type (before record, since list of records contains struct)
@@ -1161,13 +1165,17 @@ generateTccCode ast =
                     )
                 |> String.join "\n\n"
 
-        moduleConstantsCode =
+        -- Early constants code (doesn't depend on lifted functions)
+        earlyConstantsCode =
             let
                 lambdas = if String.isEmpty recordLambdaFunctionsCode then "" else "/* Lambda functions lifted from records */\n" ++ recordLambdaFunctionsCode ++ "\n\n"
                 simple = if String.isEmpty simpleConstantsCode then "" else "/* Simple constants */\n" ++ simpleConstantsCode ++ "\n\n"
-                complex = if String.isEmpty complexConstantsCode then "" else "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
             in
-            lambdas ++ simple ++ complex
+            lambdas ++ simple
+
+        -- Complex constants code (depends on lifted functions, output after them)
+        complexConstantsSection =
+            if String.isEmpty complexConstantsCode then "" else "/* Computed constants (as functions) */\n" ++ complexConstantsCode ++ "\n\n"
 
         -- Generate user-defined functions (non-main values with arguments)
         userFunctions =
@@ -1387,7 +1395,7 @@ generateTccCode ast =
     in
     String.join "\n"
         (header
-            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ moduleConstantsCode ++ liftedFunctionsCode ++ userFunctionsCode ++ "/* Elm main value */" ]
+            ++ [ constructorDefinesCode ++ forwardDeclsCode ++ earlyConstantsCode ++ liftedFunctionsCode ++ complexConstantsSection ++ userFunctionsCode ++ "/* Elm main value */" ]
             ++ mainImpl
         )
 
@@ -1428,6 +1436,10 @@ generateTccLibCode ast =
                     )
                 |> List.partition (\( _, _, isSimple ) -> isSimple)
 
+        -- Collect user function names for context (moved before complexConstantsCode)
+        userFunctionNames =
+            collectAllFunctionNames ast.values
+
         simpleConstantsCode =
             simpleConstants
                 |> List.map
@@ -1446,17 +1458,15 @@ generateTccLibCode ast =
                 |> List.map
                     (\( name, body, _ ) ->
                         let
-                            cExpr = generateStandaloneExpr body
+                            -- Use correct function prefix for closure macro generation
+                            ctx = { funcPrefix = name, modulePrefix = cModuleName, userFunctions = userFunctionNames }
+                            cExpr = generateStandaloneExprWithCtx ctx body
                             isString = String.contains "elm_str_" cExpr || String.contains "\"" cExpr
                             cType = if isString then "const char *" else "double"
                         in
                         cType ++ " " ++ qualifyName name ++ "(void) {\n    return " ++ cExpr ++ ";\n}"
                     )
                 |> String.join "\n\n"
-
-        -- Collect user function names for context
-        userFunctionNames =
-            collectAllFunctionNames ast.values
 
         -- Generate user-defined functions with qualified names
         userFunctions =
