@@ -2,6 +2,9 @@
 elm-stuff/
 *.js
 !bin/tcelm-compile.js
+!bin/tcelm-bundle.js
+!bin/tcelm2-bundle.js
+!bin/tcelm2-merge.js
 
 # C build artifacts
 *.o
