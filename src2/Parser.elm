@@ -1946,15 +1946,31 @@ parseDoStatements state =
     let
         state1 = skipNewlines state
     in
-    case parseDoStatement state1 of
-        Err _ ->
+    -- Stop if we hit a token at column 1 (new top-level declaration)
+    -- This is how Elm-style indentation-sensitive parsing works
+    case currentToken state1 of
+        Just tok ->
+            if tok.region.start.column == 1 && not (isOperatorToken tok.type_) then
+                -- Non-operator at column 1 = end of do block
+                ( [], state1 )
+            else
+                case parseDoStatement state1 of
+                    Err _ ->
+                        ( [], state1 )
+
+                    Ok ( stmt, state2 ) ->
+                        let
+                            ( rest, state3 ) = parseDoStatements state2
+                        in
+                        ( stmt :: rest, state3 )
+
+        Nothing ->
             ( [], state1 )
 
-        Ok ( stmt, state2 ) ->
-            let
-                ( rest, state3 ) = parseDoStatements state2
-            in
-            ( stmt :: rest, state3 )
+
+isOperatorToken : TokenType -> Bool
+isOperatorToken tt =
+    tt == Operator || tt == DoubleColon || tt == Pipe || tt == BackArrow
 
 
 parseDoStatement : Parser (Located DoStatement)

@@ -513,60 +513,137 @@ desugarList ctx exprs =
 -- DO-NOTATION DESUGARING
 
 
+{-| Detect which monad is being used in a do block by scanning for constructor usage.
+Returns "Maybe" for Just/Nothing, "Result" for Ok/Err, defaults to "Maybe".
+-}
+detectMonad : List (AST.Located AST.DoStatement) -> String
+detectMonad statements =
+    let
+        checkExpr : AST.Expr -> Maybe String
+        checkExpr expr =
+            case expr of
+                AST.EConstructor qname ->
+                    case qname.name of
+                        "Just" -> Just "Maybe"
+                        "Nothing" -> Just "Maybe"
+                        "Ok" -> Just "Result"
+                        "Err" -> Just "Result"
+                        _ -> Nothing
+
+                AST.EApp func _ ->
+                    checkExpr (AST.getValue func)
+
+                AST.EParens inner ->
+                    checkExpr (AST.getValue inner)
+
+                _ ->
+                    Nothing
+
+        checkStatement : AST.DoStatement -> Maybe String
+        checkStatement stmt =
+            case stmt of
+                AST.DoBind _ expr ->
+                    checkExpr (AST.getValue expr)
+
+                AST.DoExpr expr ->
+                    checkExpr (AST.getValue expr)
+
+                AST.DoLet _ ->
+                    Nothing
+
+        results =
+            statements
+                |> List.map (AST.getValue >> checkStatement)
+                |> List.filterMap identity
+    in
+    case results of
+        monad :: _ -> monad
+        [] -> "Maybe"  -- Default to Maybe
+
+
 desugarDo : DesugarCtx -> List (AST.Located AST.DoStatement) -> Core.Expr
 desugarDo ctx statements =
+    let
+        monad = detectMonad statements
+    in
+    desugarDoWithMonad ctx monad statements
+
+
+desugarDoWithMonad : DesugarCtx -> String -> List (AST.Located AST.DoStatement) -> Core.Expr
+desugarDoWithMonad ctx monad statements =
     case statements of
         [] ->
             -- Empty do block is an error, but return unit for now
             Core.ECon "Unit" [] (TCon "Unit")
 
         [ stmt ] ->
-            -- Last statement must be an expression
-            case AST.getValue stmt of
-                AST.DoExpr expr ->
-                    desugarExpr ctx (AST.getValue expr)
+            -- Last statement must be an expression - just return it unwrapped
+            desugarFinalDoStatement ctx stmt
 
-                AST.DoBind _ expr ->
-                    -- Bind at end is also an expression
-                    desugarExpr ctx (AST.getValue expr)
+        first :: remaining ->
+            -- Process a non-final statement
+            desugarDoStatement ctx monad first remaining
 
-                AST.DoLet bindings ->
-                    -- Let at end is weird but handle it
-                    desugarLet ctx bindings (AST.locate (AST.getRegion stmt) AST.EUnit)
 
-        stmt :: rest ->
-            case AST.getValue stmt of
-                AST.DoExpr expr ->
-                    -- expr; rest  =>  expr >> desugar(rest)
-                    let
-                        exprCore = desugarExpr ctx (AST.getValue expr)
-                        restCore = desugarDo ctx rest
+{-| Desugar the final statement in a do block - no andThen wrapping needed.
+-}
+desugarFinalDoStatement : DesugarCtx -> AST.Located AST.DoStatement -> Core.Expr
+desugarFinalDoStatement ctx stmt =
+    case AST.getValue stmt of
+        AST.DoExpr expr ->
+            desugarExpr ctx (AST.getValue expr)
 
-                        -- andThen_ : m a -> m b -> m b
-                        andThen_ = Core.EVar { name = "andThen_", type_ = TVar "m" }
-                    in
-                    Core.EApp (Core.EApp andThen_ exprCore (TVar "m")) restCore (TVar "m")
+        AST.DoBind _ expr ->
+            -- Bind at end is also an expression
+            desugarExpr ctx (AST.getValue expr)
 
-                AST.DoBind pat expr ->
-                    -- x <- expr; rest  =>  expr >>= \x -> desugar(rest)
-                    let
-                        exprCore = desugarExpr ctx (AST.getValue expr)
-                        restCore = desugarDo ctx rest
+        AST.DoLet bindings ->
+            -- Let at end is weird but handle it
+            desugarLet ctx bindings (AST.locate (AST.getRegion stmt) AST.EUnit)
 
-                        ( typedVar, _ ) = patternToTypedVar ctx (AST.getValue pat)
 
-                        -- Build the lambda: \x -> rest
-                        lambda = Core.ELam typedVar restCore (TArrow typedVar.type_ (Core.exprType restCore))
+{-| Desugar a non-final do statement.
+-}
+desugarDoStatement : DesugarCtx -> String -> AST.Located AST.DoStatement -> List (AST.Located AST.DoStatement) -> Core.Expr
+desugarDoStatement ctx monad stmt rest =
+    let
+        -- Recursively process the rest
+        restCore = desugarDoWithMonad ctx monad rest
 
-                        -- andThen : m a -> (a -> m b) -> m b
-                        andThen = Core.EVar { name = "andThen", type_ = TVar "m" }
-                    in
-                    Core.EApp (Core.EApp andThen exprCore (TVar "m")) lambda (TVar "m")
+        -- andThen function for this monad
+        andThenName = monad ++ ".andThen"
+        andThen = Core.EVar { name = andThenName, type_ = TVar "m" }
+    in
+    case AST.getValue stmt of
+        AST.DoExpr expr ->
+            -- expr; rest  =>  andThen (\_ -> rest) expr
+            let
+                exprCore = desugarExpr ctx (AST.getValue expr)
 
-                AST.DoLet bindings ->
-                    -- let x = expr; rest  =>  let x = expr in desugar(rest)
-                    desugarLet ctx bindings
-                        (AST.locate (AST.getRegion stmt) (AST.EDo rest))
+                -- Create a lambda that ignores its argument
+                ( ignoredVar, _ ) = freshVar "_ignored" ctx
+                ignoreLambda = Core.ELam
+                    { name = ignoredVar, type_ = TVar "a" }
+                    restCore
+                    (TArrow (TVar "a") (Core.exprType restCore))
+            in
+            Core.EApp (Core.EApp andThen ignoreLambda (TVar "m")) exprCore (TVar "m")
+
+        AST.DoBind pat expr ->
+            -- x <- expr; rest  =>  andThen (\x -> rest) expr
+            let
+                exprCore = desugarExpr ctx (AST.getValue expr)
+                ( typedVar, _ ) = patternToTypedVar ctx (AST.getValue pat)
+
+                -- Build the lambda: \x -> rest
+                lambda = Core.ELam typedVar restCore (TArrow typedVar.type_ (Core.exprType restCore))
+            in
+            Core.EApp (Core.EApp andThen lambda (TVar "m")) exprCore (TVar "m")
+
+        AST.DoLet bindings ->
+            -- let x = expr; rest  =>  let x = expr in desugar(rest)
+            desugarLet ctx bindings
+                (AST.locate (AST.getRegion stmt) (AST.EDo rest))
 
 
 
