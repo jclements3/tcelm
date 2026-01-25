@@ -1159,12 +1159,39 @@ patternBindingsWithState env pattern ty state =
         AST.PTuple subPats ->
             case ty of
                 TTuple types ->
+                    -- Bind patterns to their corresponding tuple element types
+                    List.foldl
+                        (\( subPat, subTy ) ( bindsAcc, st ) ->
+                            let
+                                ( newBinds, st1 ) = patternBindingsWithState env (AST.getValue subPat) subTy st
+                            in
+                            ( bindsAcc ++ newBinds, st1 )
+                        )
+                        ( [], state )
+                        (List.map2 Tuple.pair subPats types)
+
+                TVar _ ->
+                    -- Type is a variable, generate fresh type variables for each element
                     let
-                        results =
-                            List.map2 patternBindings (List.map AST.getValue subPats) types
-                                |> List.concat
+                        numElements = List.length subPats
+                        ( elemTypes, state1 ) =
+                            List.foldl
+                                (\_ ( tys, st ) ->
+                                    let ( freshTy, st1 ) = freshTypeVar st
+                                    in ( tys ++ [ freshTy ], st1 )
+                                )
+                                ( [], state )
+                                subPats
                     in
-                    ( results, state )
+                    List.foldl
+                        (\( subPat, subTy ) ( bindsAcc, st ) ->
+                            let
+                                ( newBinds, st1 ) = patternBindingsWithState env (AST.getValue subPat) subTy st
+                            in
+                            ( bindsAcc ++ newBinds, st1 )
+                        )
+                        ( [], state1 )
+                        (List.map2 Tuple.pair subPats elemTypes)
 
                 _ ->
                     ( [], state )

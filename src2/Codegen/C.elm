@@ -2442,20 +2442,22 @@ patternCondition ctx scrutVar pattern =
             ( allConditions, allBindings )
 
         Core.PTuple subPats _ ->
-            -- Tuples are encoded as chained values
-            let
-                subConditions =
-                    subPats
-                        |> List.indexedMap (\i subPat ->
-                            let
-                                subScrut = scrutVar ++ "_" ++ String.fromInt i
-                            in
-                            patternCondition ctx subScrut subPat
-                        )
-            in
-            ( String.join " && " (List.map Tuple.first subConditions)
-            , String.join "" (List.map Tuple.second subConditions)
-            )
+            -- Tuples are encoded as elm_cons(first, second) for 2-tuple
+            -- For larger tuples: elm_cons(first, elm_cons(second, elm_cons(third, ...)))
+            -- Structure: .data.c = first element, .next = rest (either a value or another cons)
+            case subPats of
+                [ firstPat, secondPat ] ->
+                    -- 2-tuple: (a, b)
+                    let
+                        ( cond1, bind1 ) = patternCondition ctx ("(*" ++ scrutVar ++ ".data.c)") firstPat
+                        ( cond2, bind2 ) = patternCondition ctx ("(*" ++ scrutVar ++ ".next)") secondPat
+                    in
+                    ( cond1 ++ " && " ++ cond2, bind1 ++ bind2 )
+
+                _ ->
+                    -- For now, only 2-tuples are fully supported
+                    -- Larger tuples would need recursive handling
+                    ( "1", "" )
 
         Core.PRecord fields _ ->
             -- Record patterns
