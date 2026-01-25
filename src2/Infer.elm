@@ -296,6 +296,13 @@ builtinTypes =
         , ( "String.contains", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
         , ( "String.startsWith", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
         , ( "String.endsWith", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
+        , ( "String.split", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TApp (TCon "List") (TCon "String")))) )
+        , ( "String.slice", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String")))) )
+        , ( "String.toUpper", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
+        , ( "String.toLower", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
+        , ( "String.trim", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
+        , ( "String.trimLeft", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
+        , ( "String.trimRight", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
           -- Tuple module
         , ( "Tuple.pair", Scheme [ "a", "b" ] [] (TArrow (TVar "a") (TArrow (TVar "b") (TTuple [ TVar "a", TVar "b" ]))) )
         , ( "Tuple.first", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "a")) )
