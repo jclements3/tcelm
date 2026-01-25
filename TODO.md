@@ -119,8 +119,21 @@
   - Builtin functions (identity, etc.) wrapped in closures when used as values
   - Function composition operators `>>` and `<<` implemented via inline lambda
   - Record update syntax `{ rec | field = value }` implemented
-  - 59 tests passing
-- [ ] **NEXT**: Type classes, more stdlib functions, FFI
+  - Local variable shadowing of builtins fixed
+- [x] 2026-01-25: Operator naming collision fix:
+  - Operators desugared with `_op_` prefix (_op_gt, _op_add, etc.)
+  - C runtime functions use full prefix (elm__op_gt, elm__op_add)
+  - User variables with operator-like names (gt, lt, eq, and, or) no longer conflict
+- [x] 2026-01-25: More String module functions:
+  - String.split, String.slice, String.toUpper, String.toLower
+  - String.trim, String.trimLeft, String.trimRight
+- [x] 2026-01-25: More List module functions + tuple fix:
+  - List.sort (insertion sort for integers)
+  - List.sortBy (sort by key function)
+  - List.partition (split by predicate into tuple)
+  - Fixed tuple printing: tuples now use dedicated tag 600 and print as (a, b)
+  - 84 tests passing
+- [ ] **NEXT**: Type classes, more stdlib functions (Dict), FFI
 
 ---
 
