@@ -315,10 +315,12 @@
     Foldable, Traversable, Contravariant, Bifunctor, Either, Lens, Reader,
     Writer, State, Kleisli, Validation, Comonad, Profunctor, Arrow, Category,
     Semigroupal, Alternative, MonadPlus, Distributive, Continuation
-  - Known limitations discovered:
-    - Operator sections `(+)`, `(*)` not supported (use lambdas)
-    - `++` for strings requires `String.append` (not `++` operator)
   - 261 tests passing
+- [x] 2026-01-25: Fixed operator limitations
+  - String `++` operator: now works via appendable typeclass (both List and String)
+  - Operator sections: `(+)`, `(*)`, `(::)` etc. now work as values
+  - Example: `List.foldl (+) 0 [1,2,3]` compiles correctly
+  - 265 tests passing
 - [ ] **NEXT**: Build ledger module to validate compiler features
 
 ---
