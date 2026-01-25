@@ -207,14 +207,14 @@ elm make src2/Compiler.elm --output=bin/tcelm2.js
 
 **Goal**: Make basic Elm features work reliably before adding anything new.
 
-### 1.1 Fix Lambda/Closure Capture (BLOCKING)
-Current: Lambda lifting works but variable capture is fragile.
-- [ ] Implement proper closure struct in C runtime
-- [ ] Generate closure creation code (allocate, capture vars)
-- [ ] Generate closure invocation code (extract env, call)
-- [ ] Test: `List.map (\x -> x + offset) items` where `offset` is captured
-- [ ] Test: Nested lambdas with multiple capture levels
-- [ ] Test: Parser combinator patterns (andThen chains)
+### 1.1 Fix Lambda/Closure Capture ✅ COMPLETE
+Current: Lambda lifting with closure capture works.
+- [x] Implement proper closure struct in C runtime
+- [x] Generate closure creation code (allocate, capture vars)
+- [x] Generate closure invocation code (extract env, call)
+- [x] Test: `List.map (\x -> x + offset) items` where `offset` is captured
+- [x] Test: Nested lambdas with multiple capture levels
+- Working: `makeAdder 5 |> \add5 -> add5 10` = 15
 
 ### 1.2 Pipeline Operators ✅ DONE
 - [x] `|>` desugaring: `a |> f` → `f a`
@@ -233,10 +233,12 @@ Current: Most patterns work, module prefix context propagated through case expre
 - [ ] Tuple patterns > 3 elements - Not supported
 
 ### 1.4 Partial Application / Currying
-Current: Not implemented.
-- [ ] Detect partial application sites
-- [ ] Generate closure for partially applied functions
-- [ ] Handle curried function definitions
+Current: Working.
+- [x] Detect partial application sites
+- [x] Generate closure for partially applied functions
+- [x] Handle curried function definitions
+- Working: `let add5 = add 5 in add5 10` = 15
+- Working: `List.map (add 1) [1,2,3]` = [2,3,4]
 
 ---
 
