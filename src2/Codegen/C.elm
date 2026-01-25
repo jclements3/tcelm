@@ -5470,12 +5470,14 @@ generateConAccum ctx renames name args =
                 "BE" -> "elm_Bytes_BE"
                 "Bytes.LE" -> "elm_Bytes_LE"
                 "Bytes.BE" -> "elm_Bytes_BE"
+                "()" -> "elm_unit"
+                "Unit" -> "elm_unit"
                 _ -> mangle name
 
         resultCode =
             if List.isEmpty args && (name == "True" || name == "False") then
                 funcName
-            else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT" || name == "LE" || name == "BE" || name == "Bytes.LE" || name == "Bytes.BE") then
+            else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT" || name == "LE" || name == "BE" || name == "Bytes.LE" || name == "Bytes.BE" || name == "()" || name == "Unit") then
                 funcName ++ "()"
             else
                 funcName ++ "(" ++ String.join ", " argCodes ++ ")"
@@ -6830,11 +6832,13 @@ generateConWithRenames ctx renames name args =
                 "BE" -> "elm_Bytes_BE"
                 "Bytes.LE" -> "elm_Bytes_LE"
                 "Bytes.BE" -> "elm_Bytes_BE"
+                "()" -> "elm_unit"
+                "Unit" -> "elm_unit"
                 _ -> mangle name
     in
     if List.isEmpty args && (name == "True" || name == "False") then
         funcName
-    else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT" || name == "LE" || name == "BE" || name == "Bytes.LE" || name == "Bytes.BE") then
+    else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT" || name == "LE" || name == "BE" || name == "Bytes.LE" || name == "Bytes.BE" || name == "()" || name == "Unit") then
         funcName ++ "()"
     else
         funcName ++ "(" ++ argCodes ++ ")"
@@ -7093,11 +7097,13 @@ generateCon ctx name args =
                 "BE" -> "elm_Bytes_BE"
                 "Bytes.LE" -> "elm_Bytes_LE"
                 "Bytes.BE" -> "elm_Bytes_BE"
+                "()" -> "elm_unit"
+                "Unit" -> "elm_unit"
                 _ -> mangle name
     in
     if List.isEmpty args && (name == "True" || name == "False") then
         funcName
-    else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT" || name == "LE" || name == "BE" || name == "Bytes.LE" || name == "Bytes.BE") then
+    else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT" || name == "LE" || name == "BE" || name == "Bytes.LE" || name == "Bytes.BE" || name == "()" || name == "Unit") then
         funcName ++ "()"
     else
         funcName ++ "(" ++ argCodes ++ ")"

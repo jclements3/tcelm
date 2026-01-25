@@ -11,8 +11,8 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-25
-**Last Session**: Fixed-size integers, Ptr module, and tuple destructuring in let bindings
-**Next Action**: Continue with ledger work or Callbacks (Phase 4.3)
+**Last Session**: FFI callbacks, tuple/record destructuring fixes
+**Next Action**: Build ledger module to validate compiler features
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap

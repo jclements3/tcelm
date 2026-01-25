@@ -984,7 +984,8 @@ parseAtomicType state =
                     Ok ( locate tok.region (TAVar tok.value), advance state )
 
                 UpperIdent ->
-                    Ok ( locate tok.region (TACon { module_ = Nothing, name = tok.value }), advance state )
+                    -- Check for qualified type name (e.g., Dict.Dict, Json.Decode.Decoder)
+                    parseQualifiedTypeName tok.region [ tok.value ] (advance state)
 
                 LParen ->
                     parseTupleOrParenType state
@@ -997,6 +998,51 @@ parseAtomicType state =
 
         Nothing ->
             Err { message = "Expected type", region = currentRegion state }
+
+
+{-| Parse a potentially qualified type name like Dict.Dict or Json.Decode.Decoder.
+    Accumulates module parts until we hit something that isn't Dot.UpperIdent.
+-}
+parseQualifiedTypeName : Region -> List String -> ParseState -> Result ParseError ( Located TypeAnnotation, ParseState )
+parseQualifiedTypeName region nameParts state =
+    case currentToken state of
+        Just dotTok ->
+            if dotTok.type_ == Dot then
+                let
+                    state1 = advance state
+                in
+                case currentToken state1 of
+                    Just nameTok ->
+                        if nameTok.type_ == UpperIdent then
+                            -- More qualification - continue
+                            parseQualifiedTypeName region (nameParts ++ [ nameTok.value ]) (advance state1)
+                        else
+                            -- Not an UpperIdent after dot, return what we have
+                            finishQualifiedTypeName region nameParts state
+
+                    Nothing ->
+                        finishQualifiedTypeName region nameParts state
+            else
+                -- Not a dot, return accumulated name
+                finishQualifiedTypeName region nameParts state
+
+        Nothing ->
+            finishQualifiedTypeName region nameParts state
+
+
+{-| Finish parsing a qualified type name by splitting into module path and type name.
+-}
+finishQualifiedTypeName : Region -> List String -> ParseState -> Result ParseError ( Located TypeAnnotation, ParseState )
+finishQualifiedTypeName region nameParts state =
+    case List.reverse nameParts of
+        name :: rest ->
+            let
+                modulePath = if List.isEmpty rest then Nothing else Just (String.join "." (List.reverse rest))
+            in
+            Ok ( locate region (TACon { module_ = modulePath, name = name }), state )
+
+        [] ->
+            Err { message = "Expected type name", region = region }
 
 
 parseTupleOrParenType : Parser (Located TypeAnnotation)
