@@ -365,6 +365,15 @@ generateRuntime _ =
         , "    return (elm_value_t){ .tag = 600, .data.c = first, .next = second };"
         , "}"
         , ""
+        , "/* Tuple accessors */"
+        , "static elm_value_t elm_tuple2_first(elm_value_t pair) {"
+        , "    return *pair.data.c;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_tuple2_second(elm_value_t pair) {"
+        , "    return *pair.next;"
+        , "}"
+        , ""
         , "/* Closure application */"
         , "static elm_value_t elm_apply1(elm_closure_t *c, elm_value_t arg) {"
         , "    if (c->applied + 1 < c->arity) {"
@@ -1212,6 +1221,211 @@ generateRuntime _ =
         , "    if (maybe.tag == 200) return elm_err(errVal);"
         , "    return elm_ok(*maybe.data.c);"
         , "}"
+        , ""
+        , "/* ===== FP PATTERNS ===== */"
+        , ""
+        , "/* Pattern 7: Traversable */"
+        , "/* List.traverse : (a -> Maybe b) -> List a -> Maybe (List b) */"
+        , "static elm_value_t elm_List_traverse(elm_value_t f, elm_value_t list) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t *tail = &result;"
+        , "    while (list.tag != 7) {"
+        , "        elm_value_t item = *list.data.c;"
+        , "        elm_value_t mapped = elm_apply1((elm_closure_t *)f.data.p, item);"
+        , "        if (mapped.tag == 200) return elm_nothing();"
+        , "        elm_value_t *node = malloc(sizeof(elm_value_t));"
+        , "        node->tag = 6;"
+        , "        node->data.c = malloc(sizeof(elm_value_t));"
+        , "        *node->data.c = *mapped.data.c;"
+        , "        node->next = NULL;"
+        , "        if (result.tag == 7) { result = *node; tail = &result; }"
+        , "        else { tail->next = node; tail = node; }"
+        , "        list = *list.next;"
+        , "    }"
+        , "    return elm_just(result);"
+        , "}"
+        , ""
+        , "/* List.sequence : List (Maybe a) -> Maybe (List a) */"
+        , "static elm_value_t elm_List_sequence(elm_value_t list) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t *tail = &result;"
+        , "    while (list.tag != 7) {"
+        , "        elm_value_t maybe = *list.data.c;"
+        , "        if (maybe.tag == 200) return elm_nothing();"
+        , "        elm_value_t *node = malloc(sizeof(elm_value_t));"
+        , "        node->tag = 6;"
+        , "        node->data.c = malloc(sizeof(elm_value_t));"
+        , "        *node->data.c = *maybe.data.c;"
+        , "        node->next = NULL;"
+        , "        if (result.tag == 7) { result = *node; tail = &result; }"
+        , "        else { tail->next = node; tail = node; }"
+        , "        list = *list.next;"
+        , "    }"
+        , "    return elm_just(result);"
+        , "}"
+        , ""
+        , "/* Pattern 23: Alternative */"
+        , "/* Maybe.orElse : Maybe a -> Maybe a -> Maybe a */"
+        , "static elm_value_t elm_Maybe_orElse(elm_value_t fallback, elm_value_t maybe) {"
+        , "    if (maybe.tag == 201) return maybe;"
+        , "    return fallback;"
+        , "}"
+        , ""
+        , "/* Result.orElse : Result e a -> Result e a -> Result e a */"
+        , "static elm_value_t elm_Result_orElse(elm_value_t fallback, elm_value_t result) {"
+        , "    if (result.tag == 301) return result;"
+        , "    return fallback;"
+        , "}"
+        , ""
+        , "/* Pattern 24: MonadPlus */"
+        , "/* Maybe.mfilter : (a -> Bool) -> Maybe a -> Maybe a */"
+        , "static elm_value_t elm_Maybe_mfilter(elm_value_t pred, elm_value_t maybe) {"
+        , "    if (maybe.tag == 200) return elm_nothing();"
+        , "    elm_value_t result = elm_apply1((elm_closure_t *)pred.data.p, *maybe.data.c);"
+        , "    if (result.tag == 5) return maybe;"
+        , "    return elm_nothing();"
+        , "}"
+        , ""
+        , "/* Maybe.msum : List (Maybe a) -> Maybe a */"
+        , "static elm_value_t elm_Maybe_msum(elm_value_t list) {"
+        , "    while (list.tag != 7) {"
+        , "        elm_value_t maybe = *list.data.c;"
+        , "        if (maybe.tag == 201) return maybe;"
+        , "        list = *list.next;"
+        , "    }"
+        , "    return elm_nothing();"
+        , "}"
+        , ""
+        , "/* Maybe.guard : Bool -> Maybe () */"
+        , "static elm_value_t elm_Maybe_guard(elm_value_t cond) {"
+        , "    if (cond.tag == 5) return elm_just(elm_unit());"
+        , "    return elm_nothing();"
+        , "}"
+        , ""
+        , "/* Pattern 22: Semigroupal */"
+        , "/* Maybe.product : Maybe a -> Maybe b -> Maybe (a, b) */"
+        , "static elm_value_t elm_Maybe_product(elm_value_t m1, elm_value_t m2) {"
+        , "    if (m1.tag == 200 || m2.tag == 200) return elm_nothing();"
+        , "    return elm_just(elm_tuple2(*m1.data.c, *m2.data.c));"
+        , "}"
+        , ""
+        , "/* Result.product : Result e a -> Result e b -> Result e (a, b) */"
+        , "static elm_value_t elm_Result_product(elm_value_t r1, elm_value_t r2) {"
+        , "    if (r1.tag == 300) return r1;"
+        , "    if (r2.tag == 300) return r2;"
+        , "    return elm_ok(elm_tuple2(*r1.data.c, *r2.data.c));"
+        , "}"
+        , ""
+        , "/* Pattern 8: Contravariant */"
+        , "/* Function.contramap : (b -> a) -> (a -> c) -> (b -> c) */"
+        , "/* Note: Returns closure that composes f before g */"
+        , ""
+        , "/* Pattern 19: Profunctor */"
+        , "/* Function.dimap : (a -> b) -> (c -> d) -> (b -> c) -> (a -> d) */"
+        , "/* Note: Returns closure that composes pre on input, post on output */"
+        , ""
+        , "/* Pattern 20: Arrow */"
+        , "/* Arrow.first : (a -> b) -> (a, c) -> (b, c) */"
+        , "static elm_value_t elm_Arrow_first(elm_value_t f, elm_value_t pair) {"
+        , "    elm_value_t a = elm_tuple2_first(pair);"
+        , "    elm_value_t c = elm_tuple2_second(pair);"
+        , "    elm_value_t b = elm_apply1((elm_closure_t *)f.data.p, a);"
+        , "    return elm_tuple2(b, c);"
+        , "}"
+        , ""
+        , "/* Arrow.second : (b -> c) -> (a, b) -> (a, c) */"
+        , "static elm_value_t elm_Arrow_second(elm_value_t f, elm_value_t pair) {"
+        , "    elm_value_t a = elm_tuple2_first(pair);"
+        , "    elm_value_t b = elm_tuple2_second(pair);"
+        , "    elm_value_t c = elm_apply1((elm_closure_t *)f.data.p, b);"
+        , "    return elm_tuple2(a, c);"
+        , "}"
+        , ""
+        , "/* Arrow.split (***) : (a -> b) -> (c -> d) -> (a, c) -> (b, d) */"
+        , "static elm_value_t elm_Arrow_split(elm_value_t f, elm_value_t g, elm_value_t pair) {"
+        , "    elm_value_t a = elm_tuple2_first(pair);"
+        , "    elm_value_t c = elm_tuple2_second(pair);"
+        , "    elm_value_t b = elm_apply1((elm_closure_t *)f.data.p, a);"
+        , "    elm_value_t d = elm_apply1((elm_closure_t *)g.data.p, c);"
+        , "    return elm_tuple2(b, d);"
+        , "}"
+        , ""
+        , "/* Arrow.fanout (&&&) : (a -> b) -> (a -> c) -> a -> (b, c) */"
+        , "static elm_value_t elm_Arrow_fanout(elm_value_t f, elm_value_t g, elm_value_t a) {"
+        , "    elm_value_t b = elm_apply1((elm_closure_t *)f.data.p, a);"
+        , "    elm_value_t c = elm_apply1((elm_closure_t *)g.data.p, a);"
+        , "    return elm_tuple2(b, c);"
+        , "}"
+        , ""
+        , "/* Pattern 16: Validation (accumulates errors instead of short-circuit) */"
+        , "/* Tags: 850 = Valid, 851 = Invalid */"
+        , "static elm_value_t elm_valid(elm_value_t val) {"
+        , "    elm_value_t result;"
+        , "    result.tag = 850;"
+        , "    result.data.c = malloc(sizeof(elm_value_t));"
+        , "    *result.data.c = val;"
+        , "    result.next = NULL;"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_invalid(elm_value_t errors) {"
+        , "    elm_value_t result;"
+        , "    result.tag = 851;"
+        , "    result.data.c = malloc(sizeof(elm_value_t));"
+        , "    *result.data.c = errors;"
+        , "    result.next = NULL;"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Validation_pure(elm_value_t val) {"
+        , "    return elm_valid(val);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Validation_map(elm_value_t f, elm_value_t validation) {"
+        , "    if (validation.tag == 851) return validation;"
+        , "    return elm_valid(elm_apply1((elm_closure_t *)f.data.p, *validation.data.c));"
+        , "}"
+        , ""
+        , "/* Validation.apply : Validation e a -> Validation e (a -> b) -> Validation e b */"
+        , "/* Accumulates errors from both sides */"
+        , "static elm_value_t elm_Validation_apply(elm_value_t valA, elm_value_t valF) {"
+        , "    if (valF.tag == 850 && valA.tag == 850) {"
+        , "        elm_value_t f = *valF.data.c;"
+        , "        elm_value_t a = *valA.data.c;"
+        , "        return elm_valid(elm_apply1((elm_closure_t *)f.data.p, a));"
+        , "    }"
+        , "    if (valF.tag == 851 && valA.tag == 851) {"
+        , "        /* Concatenate error lists */"
+        , "        elm_value_t errs1 = *valF.data.c;"
+        , "        elm_value_t errs2 = *valA.data.c;"
+        , "        return elm_invalid(elm_List_append(errs1, errs2));"
+        , "    }"
+        , "    if (valF.tag == 851) return valF;"
+        , "    return valA;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Validation_andThen(elm_value_t f, elm_value_t validation) {"
+        , "    if (validation.tag == 851) return validation;"
+        , "    return elm_apply1((elm_closure_t *)f.data.p, *validation.data.c);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Validation_mapError(elm_value_t f, elm_value_t validation) {"
+        , "    if (validation.tag == 850) return validation;"
+        , "    elm_value_t newErrs = elm_List_map(f, *validation.data.c);"
+        , "    return elm_invalid(newErrs);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Validation_toResult(elm_value_t validation) {"
+        , "    if (validation.tag == 850) return elm_ok(*validation.data.c);"
+        , "    return elm_err(*validation.data.c);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Validation_fromResult(elm_value_t result) {"
+        , "    if (result.tag == 301) return elm_valid(*result.data.c);"
+        , "    return elm_invalid(elm_cons(*result.data.c, elm_nil()));"
+        , "}"
+        , ""
+        , "/* ===== END FP PATTERNS ===== */"
         , ""
         , "/* Task module (synchronous execution) */"
         , "/* Tags: 800 = Task_Fail, 801 = Task_Succeed */"
@@ -5465,6 +5679,8 @@ generateConAccum ctx renames name args =
                 "Just" -> "elm_just"
                 "Ok" -> "elm_ok"
                 "Err" -> "elm_err"
+                "Valid" -> "elm_valid"
+                "Invalid" -> "elm_invalid"
                 "True" -> "elm_bool(true)"
                 "False" -> "elm_bool(false)"
                 "LT" -> "elm_lt"
@@ -5786,6 +6002,9 @@ getFunctionArity ctx name =
         "List.map5" -> 6
         "List.getAt" -> 2
         "List.zip" -> 2
+        -- FP Pattern: Traversable
+        "List.traverse" -> 2
+        "List.sequence" -> 1
 
         -- List module (ternary)
         "List.foldl" -> 3
@@ -5800,6 +6019,14 @@ getFunctionArity ctx name =
         "Maybe.map4" -> 5
         "Maybe.map5" -> 6
         "Maybe.filter" -> 2
+        -- FP Pattern: Alternative
+        "Maybe.orElse" -> 2
+        -- FP Pattern: MonadPlus
+        "Maybe.mfilter" -> 2
+        "Maybe.msum" -> 1
+        "Maybe.guard" -> 1
+        -- FP Pattern: Semigroupal
+        "Maybe.product" -> 2
 
         -- Result module
         "Result.withDefault" -> 2
@@ -5810,6 +6037,10 @@ getFunctionArity ctx name =
         "Result.map2" -> 3
         "Result.map3" -> 4
         "Result.fromMaybe" -> 2
+        -- FP Pattern: Alternative
+        "Result.orElse" -> 2
+        -- FP Pattern: Semigroupal
+        "Result.product" -> 2
 
         -- Task module
         "Task.succeed" -> 1
@@ -6194,6 +6425,27 @@ getFunctionArity ctx name =
         "Ptr.isNull" -> 1
         "Ptr.toMaybe" -> 1
 
+        -- FP Pattern: Arrow
+        "Arrow.first" -> 2
+        "Arrow.second" -> 2
+        "Arrow.split" -> 3
+        "Arrow.fanout" -> 3
+
+        -- FP Pattern: Contravariant / Profunctor
+        "Function.contramap" -> 2
+        "Function.dimap" -> 3
+
+        -- FP Pattern: Validation
+        "Valid" -> 1
+        "Invalid" -> 1
+        "Validation.pure" -> 1
+        "Validation.map" -> 2
+        "Validation.apply" -> 2
+        "Validation.andThen" -> 2
+        "Validation.mapError" -> 2
+        "Validation.toResult" -> 1
+        "Validation.fromResult" -> 1
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -6395,6 +6647,24 @@ isBuiltin name =
         , "UInt64.and", "UInt64.or", "UInt64.xor", "UInt64.complement", "UInt64.shiftLeftBy", "UInt64.shiftRightBy"
         -- Ptr module (safe pointer handling)
         , "Ptr.null", "Ptr.isNull", "Ptr.toMaybe"
+        -- FP Patterns: Traversable
+        , "List.traverse", "List.sequence"
+        -- FP Patterns: Alternative
+        , "Maybe.orElse", "Result.orElse"
+        -- FP Patterns: MonadPlus
+        , "Maybe.mfilter", "Maybe.msum", "Maybe.guard"
+        -- FP Patterns: Contravariant
+        , "Function.contramap"
+        -- FP Patterns: Profunctor
+        , "Function.dimap"
+        -- FP Patterns: Arrow
+        , "Arrow.first", "Arrow.second", "Arrow.split", "Arrow.fanout"
+        -- FP Patterns: Semigroupal
+        , "Maybe.product", "Result.product"
+        -- FP Patterns: Validation (error accumulation)
+        , "Valid", "Invalid"
+        , "Validation.pure", "Validation.map", "Validation.apply", "Validation.andThen"
+        , "Validation.mapError", "Validation.toResult", "Validation.fromResult"
         ]
 
 
@@ -6833,6 +7103,8 @@ generateConWithRenames ctx renames name args =
                 "Just" -> "elm_just"
                 "Ok" -> "elm_ok"
                 "Err" -> "elm_err"
+                "Valid" -> "elm_valid"
+                "Invalid" -> "elm_invalid"
                 "True" -> "elm_bool(true)"
                 "False" -> "elm_bool(false)"
                 "LT" -> "elm_lt"
@@ -7098,6 +7370,8 @@ generateCon ctx name args =
                 "Just" -> "elm_just"
                 "Ok" -> "elm_ok"
                 "Err" -> "elm_err"
+                "Valid" -> "elm_valid"
+                "Invalid" -> "elm_invalid"
                 "True" -> "elm_bool(true)"
                 "False" -> "elm_bool(false)"
                 "LT" -> "elm_lt"
