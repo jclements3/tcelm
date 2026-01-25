@@ -334,6 +334,10 @@ builtinTypes =
                                 (TArrow (TApp (TCon "List") (TVar "d"))
                                     (TArrow (TApp (TCon "List") (TVar "e")) (TApp (TCon "List") (TVar "f"))))))))
           )
+        , ( "List.getAt"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))))
+          )
 
         -- Maybe module
         , ( "Maybe.withDefault", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "Maybe") (TVar "a")) (TVar "a"))) )
@@ -376,6 +380,11 @@ builtinTypes =
                             (TArrow (TApp (TCon "Maybe") (TVar "c"))
                                 (TArrow (TApp (TCon "Maybe") (TVar "d"))
                                     (TArrow (TApp (TCon "Maybe") (TVar "e")) (TApp (TCon "Maybe") (TVar "f"))))))))
+          )
+        , ( "Maybe.filter"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))))
           )
 
         -- Result module (simplified - using type var for error)

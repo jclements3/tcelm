@@ -1077,6 +1077,18 @@ generateRuntime _ =
         , "    return elm_List_reverse(acc);"
         , "}"
         , ""
+        , "/* List.getAt - get element at index (0-based) */"
+        , "static elm_value_t elm_List_getAt(elm_value_t idx, elm_value_t xs) {"
+        , "    int64_t i = idx.data.i;"
+        , "    if (i < 0) return elm_nothing();"
+        , "    while (xs.tag == 101 && i > 0) {"
+        , "        xs = *xs.next;"
+        , "        i--;"
+        , "    }"
+        , "    if (xs.tag == 100) return elm_nothing();"
+        , "    return elm_just(*xs.data.c);"
+        , "}"
+        , ""
         , "/* Maybe module */"
         , "static elm_value_t elm_Maybe_withDefault(elm_value_t def, elm_value_t maybe) {"
         , "    if (maybe.tag == 200) return def;"
@@ -1121,6 +1133,14 @@ generateRuntime _ =
         , "    elm_value_t f3 = elm_apply1((elm_closure_t *)f2.data.p, *m3.data.c);"
         , "    elm_value_t f4 = elm_apply1((elm_closure_t *)f3.data.p, *m4.data.c);"
         , "    return elm_just(elm_apply1((elm_closure_t *)f4.data.p, *m5.data.c));"
+        , "}"
+        , ""
+        , "/* Maybe.filter - filter a Maybe with a predicate */"
+        , "static elm_value_t elm_Maybe_filter(elm_value_t pred, elm_value_t maybe) {"
+        , "    if (maybe.tag == 200) return elm_nothing();"
+        , "    elm_value_t result = elm_apply1((elm_closure_t *)pred.data.p, *maybe.data.c);"
+        , "    if (result.tag == 5) return maybe;"
+        , "    return elm_nothing();"
         , "}"
         , ""
         , "/* Result module */"
@@ -3659,6 +3679,7 @@ getFunctionArity ctx name =
         "List.map3" -> 4
         "List.map4" -> 5
         "List.map5" -> 6
+        "List.getAt" -> 2
 
         -- List module (ternary)
         "List.foldl" -> 3
@@ -3672,6 +3693,7 @@ getFunctionArity ctx name =
         "Maybe.map3" -> 4
         "Maybe.map4" -> 5
         "Maybe.map5" -> 6
+        "Maybe.filter" -> 2
 
         -- Result module
         "Result.withDefault" -> 2
@@ -3955,9 +3977,9 @@ isBuiltin name =
         , "List.map", "List.filter", "List.filterMap", "List.foldl", "List.foldr"
         , "List.any", "List.all", "List.concatMap", "List.indexedMap"
         , "List.sort", "List.sortBy", "List.sortWith", "List.partition", "List.singleton"
-        , "List.unzip", "List.map2", "List.map3", "List.map4", "List.map5"
+        , "List.unzip", "List.map2", "List.map3", "List.map4", "List.map5", "List.getAt"
         -- Maybe module
-        , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5"
+        , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5", "Maybe.filter"
         -- Result module
         , "Result.withDefault", "Result.map", "Result.mapError", "Result.andThen", "Result.toMaybe"
         , "Result.map2", "Result.map3", "Result.fromMaybe"
