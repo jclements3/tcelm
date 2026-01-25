@@ -1261,39 +1261,517 @@ main = 0
 
 ## Advanced Patterns (18-30)
 
-### 18-30: Advanced Patterns ❌
+### 18. Comonad → `extract + extend` ⚠️
 
-The following patterns are intentionally **not supported** in tcelm:
+**Action:** Extract value, extend with context
 
-| Pattern | Reason Not Supported |
-|---------|---------------------|
-| **18. Comonad** | Requires HKT, adds complexity |
-| **19. Profunctor** | Requires HKT |
-| **20. Arrow** | Type classes required |
-| **21. Category** | Type classes required |
-| **22. Semigroupal** | Type classes required |
-| **23. Alternative** | Type classes required |
-| **24. MonadPlus** | Type classes required |
-| **25. Distributive** | Requires HKT |
-| **26. Representable** | Requires HKT, type families |
-| **27. Cofree** | Requires HKT, complex recursion |
-| **28. Yoneda** | Requires HKT, rank-2 types |
-| **29. Coyoneda** | Requires HKT, existentials |
-| **30. Continuation** | Complex control flow |
+```python
+class Stream:
+    """Infinite stream - a comonad example"""
+    def __init__(self, head, tail_fn):
+        self.head = head
+        self.tail_fn = tail_fn
 
-**tcelm Design Philosophy** (from TODO.md):
+    def extract(self):
+        return self.head
 
-> Keep it simple. Elm's existing type system + do-notation + good FFI is sufficient.
-> Avoid exotic Haskell features that add complexity without proportional benefit.
+    def extend(self, f):
+        """Apply f to every position"""
+        return Stream(f(self), lambda: self.tail().extend(f))
 
-For the target use case (embedded accounting ledger on RTEMS), the simpler patterns (1-16) provide all necessary abstractions:
+    def tail(self):
+        return self.tail_fn()
+```
 
-- **Functor/Monad/Applicative**: `Maybe.map`, `Result.andThen`, `Maybe.map2`
-- **Error Handling**: `Result` type (Either)
-- **Validation**: Custom `Validation` type as shown above
-- **State Threading**: Explicit parameter passing
-- **Configuration**: Record types passed explicitly
-- **Logging**: Writer pattern with tuples
+```elm
+-- tcelm: Comonad via explicit extract/extend for specific types
+module Main exposing (main)
+
+-- Zipper (focused list) - a common comonad
+type alias Zipper a =
+    { left : List a
+    , focus : a
+    , right : List a
+    }
+
+-- Extract: get focused value
+extract : Zipper a -> a
+extract z = z.focus
+
+-- Duplicate: nest zippers at each position
+duplicate : Zipper a -> Zipper (Zipper a)
+duplicate z =
+    { left = lefts z
+    , focus = z
+    , right = rights z
+    }
+
+-- Extend: apply function at every position
+extend : (Zipper a -> b) -> Zipper a -> Zipper b
+extend f z =
+    let
+        dup = duplicate z
+    in
+    { left = List.map f dup.left
+    , focus = f dup.focus
+    , right = List.map f dup.right
+    }
+
+-- Helper: get all left-shifted versions
+lefts : Zipper a -> List (Zipper a)
+lefts z =
+    case z.left of
+        [] -> []
+        l :: ls ->
+            let newZ = { left = ls, focus = l, right = z.focus :: z.right }
+            in newZ :: lefts newZ
+
+-- Helper: get all right-shifted versions
+rights : Zipper a -> List (Zipper a)
+rights z =
+    case z.right of
+        [] -> []
+        r :: rs ->
+            let newZ = { left = z.focus :: z.left, focus = r, right = rs }
+            in newZ :: rights newZ
+
+-- Example: moving average using comonad
+movingAvg : Zipper Int -> Int
+movingAvg z =
+    let
+        vals = (List.take 1 z.left) ++ [z.focus] ++ (List.take 1 z.right)
+        sum = List.foldl (+) 0 vals
+    in
+    sum // List.length vals
+
+main = 0
+```
+
+---
+
+### 19. Profunctor → `dimap` ⚠️
+
+**Action:** Map both inputs and outputs
+
+```python
+class Profunctor:
+    def __init__(self, run):
+        self.run = run
+
+    def dimap(self, f, g):
+        """Map input with f, output with g"""
+        return Profunctor(lambda a: g(self.run(f(a))))
+```
+
+```elm
+-- tcelm: Profunctor via function composition on both ends
+module Main exposing (main)
+
+-- Functions are profunctors: contravariant in input, covariant in output
+-- dimap : (a -> b) -> (c -> d) -> (b -> c) -> (a -> d)
+dimap : (a -> b) -> (c -> d) -> (b -> c) -> (a -> d)
+dimap f g h =
+    g << h << f
+
+-- Example: transform a string processor
+processString : String -> Int
+processString s = String.length s
+
+-- Prepend "hello " to input, double the output
+transformed : String -> Int
+transformed = dimap (\s -> "hello " ++ s) (\n -> n * 2) processString
+
+result : Int
+result = transformed "world"  -- length("hello world") * 2 = 22
+
+main = result
+```
+
+---
+
+### 20. Arrow → `compose with structure` ⚠️
+
+**Action:** Compose computations preserving structure
+
+```python
+# Arrows generalize functions with extra structure
+def first(f):
+    """Apply f to first element of tuple"""
+    return lambda pair: (f(pair[0]), pair[1])
+
+def both(f, g):
+    """Apply f and g to tuple elements"""
+    return lambda pair: (f(pair[0]), g(pair[1]))
+```
+
+```elm
+-- tcelm: Arrow patterns via tuple manipulation
+module Main exposing (main)
+
+-- arr: lift function to arrow (identity for functions)
+arr : (a -> b) -> (a -> b)
+arr f = f
+
+-- first: apply to first element of tuple
+first : (a -> b) -> (a, c) -> (b, c)
+first f ( a, c ) = ( f a, c )
+
+-- second: apply to second element of tuple
+second : (b -> c) -> (a, b) -> (a, c)
+second f ( a, b ) = ( a, f b )
+
+-- (***): apply two arrows in parallel
+parallel : (a -> b) -> (c -> d) -> (a, c) -> (b, d)
+parallel f g ( a, c ) = ( f a, g c )
+
+-- (&&&): fanout - apply two arrows to same input
+fanout : (a -> b) -> (a -> c) -> a -> (b, c)
+fanout f g a = ( f a, g a )
+
+-- Example
+double : Int -> Int
+double x = x * 2
+
+toString : Int -> String
+toString = String.fromInt
+
+result : (Int, String)
+result = fanout double toString 5  -- (10, "5")
+
+main = Tuple.first result
+```
+
+---
+
+### 21. Category → `identity + compose` ✅
+
+**Action:** Objects and morphisms with composition
+
+```elm
+-- tcelm: Functions form a category
+module Main exposing (main)
+
+-- Category laws are built into function composition:
+-- identity: id << f = f = f << id
+-- associativity: (f << g) << h = f << (g << h)
+
+identity : a -> a
+identity x = x
+
+-- Compose (already built-in as <<)
+compose : (b -> c) -> (a -> b) -> (a -> c)
+compose f g = f << g
+
+-- Example
+double : Int -> Int
+double x = x * 2
+
+addOne : Int -> Int
+addOne x = x + 1
+
+-- Category composition
+combined : Int -> Int
+combined = compose double addOne  -- same as: double << addOne
+
+result : Int
+result = combined 5  -- (5 + 1) * 2 = 12
+
+main = result
+```
+
+---
+
+### 22. Semigroupal → `product` ⚠️
+
+**Action:** Combine independent contexts into tuple
+
+```elm
+-- tcelm: Semigroupal via map2 with Tuple.pair
+module Main exposing (main)
+
+-- product : F a -> F b -> F (a, b)
+-- This is just map2 with Tuple.pair
+
+productMaybe : Maybe a -> Maybe b -> Maybe (a, b)
+productMaybe = Maybe.map2 Tuple.pair
+
+productResult : Result e a -> Result e b -> Result e (a, b)
+productResult = Result.map2 Tuple.pair
+
+-- Example
+result : Maybe (Int, String)
+result = productMaybe (Just 1) (Just "hello")  -- Just (1, "hello")
+
+main =
+    case result of
+        Just (n, _) -> n
+        Nothing -> 0
+```
+
+---
+
+### 23. Alternative → `choice` ⚠️
+
+**Action:** Choose between alternatives
+
+```elm
+-- tcelm: Alternative via orElse pattern
+module Main exposing (main)
+
+-- (<|>) : f a -> f a -> f a
+orElse : Maybe a -> Maybe a -> Maybe a
+orElse ma mb =
+    case ma of
+        Just _ -> ma
+        Nothing -> mb
+
+-- empty : f a
+empty : Maybe a
+empty = Nothing
+
+-- guard : Bool -> f ()
+guard : Bool -> Maybe ()
+guard cond = if cond then Just () else Nothing
+
+-- Example: try multiple parsers
+parseInt : String -> Maybe Int
+parseInt = String.toInt
+
+parseDefault : String -> Maybe Int
+parseDefault _ = Just 0
+
+parse : String -> Maybe Int
+parse s = parseInt s |> orElse (parseDefault s)
+
+result : Maybe Int
+result = parse "abc"  -- Just 0 (fallback)
+
+main = Maybe.withDefault -1 result
+```
+
+---
+
+### 24. MonadPlus → `monad + choice` ⚠️
+
+**Action:** Monad with Alternative operations
+
+```elm
+-- tcelm: MonadPlus via andThen + orElse
+module Main exposing (main)
+
+-- Combines Monad (andThen) with Alternative (orElse)
+
+-- mfilter : (a -> Bool) -> m a -> m a
+mfilter : (a -> Bool) -> Maybe a -> Maybe a
+mfilter pred ma =
+    ma |> Maybe.andThen (\a -> if pred a then Just a else Nothing)
+
+-- msum : List (m a) -> m a
+msum : List (Maybe a) -> Maybe a
+msum maybes =
+    List.foldl (\ma acc ->
+        case acc of
+            Just _ -> acc
+            Nothing -> ma
+    ) Nothing maybes
+
+-- Example
+result : Maybe Int
+result = msum [ Nothing, Just 1, Just 2 ]  -- Just 1
+
+filtered : Maybe Int
+filtered = mfilter (\x -> x > 5) (Just 3)  -- Nothing
+
+main = Maybe.withDefault 0 result
+```
+
+---
+
+### 25. Distributive → `distribute` ⚠️
+
+**Action:** Distribute outer functor over inner (dual of Traversable)
+
+```elm
+-- tcelm: Distributive for specific types
+module Main exposing (main)
+
+-- distribute : f (g a) -> g (f a)
+-- For functions (the canonical distributive):
+-- distribute : f (a -> b) -> (a -> f b)
+
+distributeList : List (a -> b) -> (a -> List b)
+distributeList funcs a =
+    List.map (\f -> f a) funcs
+
+-- Example
+funcs : List (Int -> Int)
+funcs = [ \x -> x + 1, \x -> x * 2, \x -> x * x ]
+
+-- Apply all functions to same input
+results : List Int
+results = distributeList funcs 5  -- [6, 10, 25]
+
+main = List.sum results
+```
+
+---
+
+### 26. Representable → N/A ❌
+
+**Reason:** Requires higher-kinded types to express the isomorphism `f a ≅ (Rep f -> a)`.
+
+```elm
+-- Cannot be expressed in tcelm/Elm
+-- The abstraction requires: type family Rep (f :: * -> *) :: *
+-- which needs HKT
+```
+
+---
+
+### 27. Cofree → N/A ❌
+
+**Reason:** `Cofree f a` requires abstracting over any functor `f`.
+
+```elm
+-- The general Cofree requires HKT:
+-- type Cofree f a = Cofree a (f (Cofree f a))
+
+-- Specific instances CAN be written manually:
+type Stream a = Stream a (() -> Stream a)
+
+extractStream : Stream a -> a
+extractStream (Stream a _) = a
+
+-- But you can't write generic Cofree operations
+```
+
+---
+
+### 28. Yoneda → N/A ❌
+
+**Reason:** Requires rank-2 types: `forall b. (a -> b) -> f b`.
+
+```elm
+-- Cannot express in tcelm:
+-- type Yoneda f a = Yoneda (forall b. (a -> b) -> f b)
+-- The "forall b" inside a type is rank-2 polymorphism
+```
+
+---
+
+### 29. Coyoneda → N/A ❌
+
+**Reason:** Requires existential types and HKT.
+
+```elm
+-- Cannot express in tcelm:
+-- data Coyoneda f a = forall b. Coyoneda (b -> a) (f b)
+-- The "forall b" (existential) cannot be expressed
+```
+
+---
+
+### 30. Continuation → `callbacks` ⚠️
+
+**Action:** Control flow as first-class values
+
+```python
+def call_cc(f):
+    """Call with current continuation"""
+    class Escape(Exception):
+        def __init__(self, value):
+            self.value = value
+
+    try:
+        return f(lambda x: (_ for _ in ()).throw(Escape(x)))
+    except Escape as e:
+        return e.value
+```
+
+```elm
+-- tcelm: Continuation via callback-style or CPS
+module Main exposing (main)
+
+-- Continuation: (a -> r) -> r
+type alias Cont r a = (a -> r) -> r
+
+-- pure/return for Cont
+pure : a -> Cont r a
+pure a = \k -> k a
+
+-- bind/andThen for Cont
+andThen : (a -> Cont r b) -> Cont r a -> Cont r b
+andThen f cont =
+    \k -> cont (\a -> f a k)
+
+-- run continuation
+runCont : Cont a a -> a
+runCont cont = cont identity
+
+-- Example: CPS-style computation
+addCont : Int -> Int -> Cont r Int
+addCont x y = pure (x + y)
+
+mulCont : Int -> Int -> Cont r Int
+mulCont x y = pure (x * y)
+
+computation : Cont Int Int
+computation =
+    addCont 2 3
+        |> andThen (\sum -> mulCont sum 4)
+
+result : Int
+result = runCont computation  -- (2 + 3) * 4 = 20
+
+-- Alternative: Task is continuation-based under the hood
+-- Task.andThen works like continuation binding
+
+main = result
+```
+
+---
+
+## Summary: tcelm Pattern Support
+
+| # | Pattern | Status | tcelm Approach |
+|---|---------|--------|----------------|
+| 1 | Functor | ✅ | `Maybe.map`, `List.map`, `Result.map` |
+| 2 | Applicative | ✅ | `Maybe.map2/3/4/5`, `Result.map2/3` |
+| 3 | Monad | ✅ | `andThen` + **do-notation** |
+| 4 | Monoid | ✅ | `++`, `String.concat`, `List.concat` |
+| 5 | Semigroup | ✅ | `++`, explicit combine functions |
+| 6 | Foldable | ✅ | `List.foldl/foldr`, `Dict.foldl` |
+| 7 | Traversable | ⚠️ | `Task.sequence`, custom traverse |
+| 8 | Contravariant | ⚠️ | `contramap f g = g << f` |
+| 9 | Bifunctor | ⚠️ | `Tuple.mapBoth`, `Result.map` + `mapError` |
+| 10 | Either | ✅ | `Result Ok Err` |
+| 11 | Lens | ⚠️ | Record update `{ r \| field = x }` |
+| 12 | Reader | ⚠️ | Explicit config parameter |
+| 13 | Writer | ⚠️ | Return `( value, log )` tuples |
+| 14 | State | ⚠️ | Functions `s -> ( a, s )` |
+| 15 | Kleisli | ⚠️ | Chain with `andThen` |
+| 16 | Validation | ⚠️ | Custom type with error accumulation |
+| 17 | Free Monad | ❌ | Requires HKT |
+| 18 | Comonad | ⚠️ | Manual for specific types (Zipper, Stream) |
+| 19 | Profunctor | ⚠️ | `dimap f g h = g << h << f` |
+| 20 | Arrow | ⚠️ | Tuple functions: `first`, `fanout` |
+| 21 | Category | ✅ | Functions with `<<` and `identity` |
+| 22 | Semigroupal | ⚠️ | `map2 Tuple.pair` |
+| 23 | Alternative | ⚠️ | `orElse` pattern |
+| 24 | MonadPlus | ⚠️ | `andThen` + `orElse` |
+| 25 | Distributive | ⚠️ | Manual for specific cases |
+| 26 | Representable | ❌ | Requires HKT |
+| 27 | Cofree | ❌ | Requires HKT |
+| 28 | Yoneda | ❌ | Requires rank-2 types |
+| 29 | Coyoneda | ❌ | Requires existential types |
+| 30 | Continuation | ⚠️ | CPS style, Task |
+
+**Legend:**
+- ✅ = Built-in or direct support
+- ⚠️ = Manual implementation / workaround
+- ❌ = Not possible (requires HKT or advanced type features)
+
+**Bottom line:** 25 of 30 patterns are usable in tcelm (10 direct, 15 manual). Only 5 require type system features that Elm/tcelm don't have
 
 ---
 
