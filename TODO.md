@@ -54,7 +54,13 @@
   - Added `intDiv`, `pow`, `mod` operators
   - Added list printing to runtime
   - Working: `[1,2,3,4,5,6] |> filter isEven |> map double |> sum` = 24
-- [ ] **NEXT**: Add more standard library functions, test let expressions with closures
+- [x] 2026-01-24: Let-bound functions and inline lambdas:
+  - Parser: function definitions in let blocks (`f x = x` -> `f = \x -> x`)
+  - Code generation: local variables treated as closures when applied
+  - Lambda lifting via GCC nested functions (captures work within scope)
+  - Working: `let f = \x -> x + 10 in f 5` = 15
+  - Working: `map (\x -> x * 2) [1,2,3]` = [2,4,6]
+- [ ] **NEXT**: Proper closure capture for cross-scope variables, standard library
 
 ---
 
@@ -86,10 +92,10 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Functions with args | ✅ Working | Type inference handles function parameters |
-| Let expressions | ✅ Working | Multi-line let/in supported |
+| Let expressions | ✅ Working | Multi-line let/in, function definitions |
 | If expressions | ✅ Working | Multi-line if/then/else supported |
 | Case expressions | ✅ Working | Pattern matching compiles |
-| Lambdas | ✅ Working | Lambda lifting with closures |
+| Lambdas | ✅ Working | GCC nested functions for captures |
 | Binary operators | ✅ Working | +, -, *, /, //, etc. in scope |
 | Type inference | ✅ Working | Hindley-Milner with proper scoping |
 | Partial application | ✅ Working | Closures generated with correct arity |
@@ -106,6 +112,7 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 3. ~~**Parser boundary**: Fixed - stops at column 1 for new declarations~~
 4. ~~**Higher-order functions**: Fixed - closures generated and applied correctly~~
 5. **Multi-line expressions**: Pipeline on new line not continuing expression (single-line works)
+6. **Cross-scope closure capture**: Variables captured across function boundaries don't persist
 
 ### Usage
 ```bash
