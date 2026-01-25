@@ -80,7 +80,10 @@
   - Infer: look up full qualified names in type environment
   - Infer: type signatures for all stdlib functions
   - Working: `List.length [1,2,3]` = 3, `List.map double [1,2,3]` = [2,4,6]
-- [ ] **NEXT**: Multi-line pipelines, records, more stdlib
+- [x] 2026-01-24: **MILESTONE 1 COMPLETE** - Multi-line pipelines:
+  - Parser: skipNewlinesUnlessAtColumn1 allows operators on new lines
+  - Working: `[1,2,3] |> List.map (\x -> x * 2) |> List.filter (\x -> x > 2) |> List.sum` = 10
+- [ ] **NEXT**: Records, custom types, do-notation
 
 ---
 
@@ -133,7 +136,7 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 2. ~~**Module prefixes**: Fixed - `elm_Test_double` generated correctly~~
 3. ~~**Parser boundary**: Fixed - stops at column 1 for new declarations~~
 4. ~~**Higher-order functions**: Fixed - closures generated and applied correctly~~
-5. **Multi-line expressions**: Pipeline on new line not continuing expression (single-line works)
+5. ~~**Multi-line expressions**: Fixed - operators on new lines now continue the expression~~
 6. ~~**Cross-scope closure capture**: Fixed - lambdas lifted to top-level static functions with explicit capture~~
 
 ### Usage
@@ -472,7 +475,7 @@ The new architecture avoids "boxing in" - advanced features can be added increme
 
 ## Success Criteria
 
-**Milestone 1**: Can compile and run:
+**Milestone 1** ✅ COMPLETE: Can compile and run:
 ```elm
 main =
     [ 1, 2, 3 ]
@@ -480,6 +483,7 @@ main =
         |> List.filter (\x -> x > 2)
         |> List.sum
 ```
+Result: 10 (correct!)
 
 **Milestone 2**: Can compile and run:
 ```elm
