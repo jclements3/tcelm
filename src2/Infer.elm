@@ -423,6 +423,8 @@ builtinTypes =
         , ( "String.fromList", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Char")) (TCon "String")) )
         , ( "String.padLeft", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String")))) )
         , ( "String.padRight", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String")))) )
+        , ( "String.cons", Scheme [] [] (TArrow (TCon "Char") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.uncons", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "Maybe") (TTuple [ TCon "Char", TCon "String" ]))) )
           -- Tuple module
         , ( "Tuple.pair", Scheme [ "a", "b" ] [] (TArrow (TVar "a") (TArrow (TVar "b") (TTuple [ TVar "a", TVar "b" ]))) )
         , ( "Tuple.first", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "a")) )

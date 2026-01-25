@@ -1369,6 +1369,23 @@ generateRuntime _ =
         , "    return elm_string(buf);"
         , "}"
         , ""
+        , "/* String.cons - prepend a char to a string */"
+        , "static elm_value_t elm_String_cons(elm_value_t ch, elm_value_t s) {"
+        , "    size_t len = strlen(s.data.s);"
+        , "    char *buf = malloc(len + 2);"
+        , "    buf[0] = (char)ch.data.i;"
+        , "    memcpy(buf + 1, s.data.s, len + 1);"
+        , "    return elm_string(buf);"
+        , "}"
+        , ""
+        , "/* String.uncons - split first char from string */"
+        , "static elm_value_t elm_String_uncons(elm_value_t s) {"
+        , "    if (s.data.s[0] == '\\0') return elm_nothing();"
+        , "    elm_value_t ch = elm_char(s.data.s[0]);"
+        , "    char *rest = strdup(s.data.s + 1);"
+        , "    return elm_just(elm_tuple2(ch, elm_string(rest)));"
+        , "}"
+        , ""
         , "/* Tuple module */"
         , "static elm_value_t elm_Tuple_pair(elm_value_t a, elm_value_t b) {"
         , "    return elm_tuple2(a, b);"
@@ -3096,6 +3113,8 @@ getFunctionArity ctx name =
         "String.fromList" -> 1
         "String.padLeft" -> 3
         "String.padRight" -> 3
+        "String.cons" -> 2
+        "String.uncons" -> 1
 
         -- Tuple module (unary)
         "Tuple.first" -> 1
@@ -3304,6 +3323,7 @@ isBuiltin name =
         , "String.split", "String.slice", "String.toUpper", "String.toLower"
         , "String.trim", "String.trimLeft", "String.trimRight"
         , "String.toList", "String.fromList", "String.padLeft", "String.padRight"
+        , "String.cons", "String.uncons"
         -- Tuple module
         , "Tuple.pair", "Tuple.first", "Tuple.second", "Tuple.mapFirst", "Tuple.mapSecond"
         -- Dict module
