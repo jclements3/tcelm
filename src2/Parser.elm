@@ -1394,19 +1394,53 @@ parseAppExpr state =
     case parseAtomicExpr state of
         Err e -> Err e
         Ok ( first, state1 ) ->
+            -- Handle field access chains first (e.g., person.name.length)
             let
-                ( args, state2 ) = parseAppArgs state1
+                ( exprWithFields, state1a ) = parseFieldAccessChain first state1
+            in
+            let
+                ( args, state2 ) = parseAppArgs state1a
             in
             if List.isEmpty args then
-                Ok ( first, state2 )
+                Ok ( exprWithFields, state2 )
             else
                 Ok
                     ( List.foldl
                         (\arg acc -> locate (getRegion acc) (EApp acc arg))
-                        first
+                        exprWithFields
                         args
                     , state2
                     )
+
+
+-- Parse field access chain like .name.age.whatever
+parseFieldAccessChain : Located Expr -> ParseState -> ( Located Expr, ParseState )
+parseFieldAccessChain expr state =
+    case currentToken state of
+        Just tok ->
+            if tok.type_ == Dot then
+                let
+                    state1 = advance state
+                in
+                case currentToken state1 of
+                    Just fieldTok ->
+                        if fieldTok.type_ == LowerIdent then
+                            -- It's a field access: expr.field
+                            let
+                                newExpr = locate (getRegion expr) (ERecordAccess expr (locate fieldTok.region fieldTok.value))
+                                state2 = advance state1
+                            in
+                            -- Continue parsing more field accesses
+                            parseFieldAccessChain newExpr state2
+                        else
+                            -- Not a valid field name, stop
+                            ( expr, state )
+                    Nothing ->
+                        ( expr, state )
+            else
+                ( expr, state )
+        Nothing ->
+            ( expr, state )
 
 
 parseAppArgs : ParseState -> ( List (Located Expr), ParseState )

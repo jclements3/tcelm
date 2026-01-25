@@ -305,6 +305,37 @@ generateRuntime _ =
         , "    return (elm_value_t){ .tag = 301, .data.c = v, .next = NULL };"
         , "}"
         , ""
+        , "/* Record field node for linked list representation */"
+        , "typedef struct elm_record_field_s {"
+        , "    const char *name;"
+        , "    elm_value_t value;"
+        , "    struct elm_record_field_s *next;"
+        , "} elm_record_field_t;"
+        , ""
+        , "/* Record operations - records are linked lists of (field_name, value) pairs */"
+        , "static elm_value_t elm_record_end(void) {"
+        , "    return (elm_value_t){ .tag = 500, .data.p = NULL, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_record_field(const char *name, elm_value_t value, elm_value_t rest) {"
+        , "    elm_record_field_t *f = (elm_record_field_t *)malloc(sizeof(elm_record_field_t));"
+        , "    f->name = name;"
+        , "    f->value = value;"
+        , "    f->next = (elm_record_field_t *)rest.data.p;"
+        , "    return (elm_value_t){ .tag = 500, .data.p = f, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_record_get(const char *name, elm_value_t record) {"
+        , "    elm_record_field_t *f = (elm_record_field_t *)record.data.p;"
+        , "    while (f != NULL) {"
+        , "        if (strcmp(f->name, name) == 0) {"
+        , "            return f->value;"
+        , "        }"
+        , "        f = f->next;"
+        , "    }"
+        , "    return elm_unit(); /* field not found */"
+        , "}"
+        , ""
         , "/* Closure application */"
         , "static elm_value_t elm_apply1(elm_closure_t *c, elm_value_t arg) {"
         , "    if (c->applied + 1 < c->arity) {"
@@ -1146,7 +1177,8 @@ generateExprAccum ctx renames expr =
             let
                 ( recordCode, ctx1 ) = generateExprAccum ctx renames record
             in
-            ( "((" ++ recordCode ++ ").data.p->" ++ field ++ ")", ctx1 )
+            -- Use elm_record_get to lookup field by name in linked list representation
+            ( "elm_record_get(\"" ++ field ++ "\", " ++ recordCode ++ ")", ctx1 )
 
         Core.ERecordUpdate record _ _ ->
             generateExprAccum ctx renames record
@@ -1505,21 +1537,27 @@ generateTupleAccum ctx renames exprs =
 
 generateRecordAccum : GenCtx -> Dict String String -> List ( String, Core.Expr ) -> ( String, GenCtx )
 generateRecordAccum ctx renames fields =
+    -- Records are represented as a linked list of (field name, value) pairs
+    -- using the elm_value_t structure where:
+    -- - tag = 500 (record node)
+    -- - data.s = field name (string)
+    -- - data.c = field value
+    -- - next = next field (or NULL for last)
+    --
+    -- We build this as: elm_record_field(name1, value1, elm_record_field(name2, value2, elm_record_end()))
     let
-        ( fieldCodes, finalCtx ) =
-            List.foldl
-                (\( name, e ) ( codes, accCtx ) ->
+        ( codes, finalCtx ) =
+            List.foldr
+                (\( name, e ) ( accCode, accCtx ) ->
                     let
-                        ( code, newCtx ) = generateExprAccum accCtx renames e
+                        ( valueCode, newCtx ) = generateExprAccum accCtx renames e
                     in
-                    ( codes ++ [ "." ++ name ++ " = " ++ code ], newCtx )
+                    ( "elm_record_field(\"" ++ name ++ "\", " ++ valueCode ++ ", " ++ accCode ++ ")", newCtx )
                 )
-                ( [], ctx )
+                ( "elm_record_end()", ctx )
                 fields
-
-        fieldDecls = List.map (\( n, _ ) -> "elm_value_t " ++ n) fields
     in
-    ( "((elm_value_t){ .tag = 500, .data.p = &(struct { " ++ String.join "; " fieldDecls ++ "; }){ " ++ String.join ", " fieldCodes ++ " }, .next = NULL })", finalCtx )
+    ( codes, finalCtx )
 
 
 -- Old non-accumulating versions (kept for compatibility)
