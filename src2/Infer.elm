@@ -325,6 +325,55 @@ builtinTypes =
         , ( "Tuple.second", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "b")) )
         , ( "Tuple.mapFirst", Scheme [ "a", "b", "c" ] [] (TArrow (TArrow (TVar "a") (TVar "c")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "c", TVar "b" ]))) )
         , ( "Tuple.mapSecond", Scheme [ "a", "b", "c" ] [] (TArrow (TArrow (TVar "b") (TVar "c")) (TArrow (TTuple [ TVar "a", TVar "b" ]) (TTuple [ TVar "a", TVar "c" ]))) )
+
+        -- Dict module (association list implementation)
+        , ( "Dict.empty"
+          , Scheme [ "k", "v" ] [] (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))
+          )
+        , ( "Dict.singleton"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TVar "k") (TArrow (TVar "v") (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
+          )
+        , ( "Dict.insert"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TVar "k") (TArrow (TVar "v") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))))
+          )
+        , ( "Dict.get"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TVar "k") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "Maybe") (TVar "v"))))
+          )
+        , ( "Dict.remove"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TVar "k") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v"))))
+          )
+        , ( "Dict.member"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TVar "k") (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TCon "Bool")))
+          )
+        , ( "Dict.size"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TCon "Int"))
+          )
+        , ( "Dict.isEmpty"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TCon "Bool"))
+          )
+        , ( "Dict.keys"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "List") (TVar "k")))
+          )
+        , ( "Dict.values"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "List") (TVar "v")))
+          )
+        , ( "Dict.toList"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TApp (TCon "List") (TTuple [ TVar "k", TVar "v" ])))
+          )
+        , ( "Dict.fromList"
+          , Scheme [ "k", "v" ] []
+                (TArrow (TApp (TCon "List") (TTuple [ TVar "k", TVar "v" ])) (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")))
+          )
         ]
 
 

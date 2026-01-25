@@ -1148,6 +1148,133 @@ generateRuntime _ =
         , "    elm_value_t newSecond = elm_apply1((elm_closure_t *)f.data.p, second);"
         , "    return elm_tuple2(first, newSecond);"
         , "}"
+        , ""
+        , "/* Dict module - implemented as association list of (key, value) tuples */"
+        , "/* Dict is a list where each element is a tuple2 of (key, value) */"
+        , "static elm_value_t elm_Dict_empty(void) {"
+        , "    return elm_nil();"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_singleton(elm_value_t key, elm_value_t value) {"
+        , "    return elm_cons(elm_tuple2(key, value), elm_nil());"
+        , "}"
+        , ""
+        , "/* Helper to compare keys (handles Int and String) */"
+        , "static int elm_dict_key_eq(elm_value_t k1, elm_value_t k2) {"
+        , "    if (k1.tag != k2.tag) return 0;"
+        , "    switch (k1.tag) {"
+        , "        case 0: return k1.data.i == k2.data.i; /* Int */"
+        , "        case 2: return strcmp(k1.data.s, k2.data.s) == 0; /* String */"
+        , "        default: return k1.data.i == k2.data.i; /* fallback to int comparison */"
+        , "    }"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_insert(elm_value_t key, elm_value_t value, elm_value_t dict) {"
+        , "    /* Insert or update: keeps insertion order, removes old key if present */"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        if (!elm_dict_key_eq(k, key)) {"
+        , "            result = elm_cons(entry, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    /* Append new entry at end to maintain insertion order */"
+        , "    result = elm_List_append(elm_List_reverse(result), elm_cons(elm_tuple2(key, value), elm_nil()));"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_get(elm_value_t key, elm_value_t dict) {"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        elm_value_t v = *entry.next;"
+        , "        if (elm_dict_key_eq(k, key)) {"
+        , "            return elm_just(v);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_nothing();"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_remove(elm_value_t key, elm_value_t dict) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        if (!elm_dict_key_eq(k, key)) {"
+        , "            result = elm_cons(entry, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_member(elm_value_t key, elm_value_t dict) {"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        if (elm_dict_key_eq(k, key)) {"
+        , "            return elm_bool(true);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_bool(false);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_size(elm_value_t dict) {"
+        , "    return elm_List_length(dict);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_isEmpty(elm_value_t dict) {"
+        , "    return elm_bool(dict.tag == 100);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_keys(elm_value_t dict) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t k = *entry.data.c;"
+        , "        result = elm_cons(k, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_values(elm_value_t dict) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = dict;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t v = *entry.next;"
+        , "        result = elm_cons(v, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_toList(elm_value_t dict) {"
+        , "    return dict;  /* Dict is already a list of tuples */"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Dict_fromList(elm_value_t list) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = list;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t entry = *xs.data.c;"
+        , "        elm_value_t key = *entry.data.c;"
+        , "        elm_value_t value = *entry.next;"
+        , "        result = elm_Dict_insert(key, value, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return result;"
+        , "}"
         ]
 
 
@@ -1409,6 +1536,9 @@ generateExprAccum ctx renames expr =
                     else if isBuiltin name && arity > 0 then
                         -- Builtin function used as a value - wrap in closure
                         ( generateFunctionClosure ctx mangledName arity, ctx )
+                    else if isBuiltin name && arity == 0 then
+                        -- Zero-arity builtin, call it
+                        ( mangledName ++ "()", ctx )
                     else
                         ( mangledName, ctx )
 
@@ -2113,6 +2243,26 @@ getFunctionArity ctx name =
         "Tuple.mapFirst" -> 2
         "Tuple.mapSecond" -> 2
 
+        -- Dict module (nullary)
+        "Dict.empty" -> 0
+
+        -- Dict module (unary)
+        "Dict.size" -> 1
+        "Dict.isEmpty" -> 1
+        "Dict.keys" -> 1
+        "Dict.values" -> 1
+        "Dict.toList" -> 1
+        "Dict.fromList" -> 1
+
+        -- Dict module (binary)
+        "Dict.singleton" -> 2
+        "Dict.get" -> 2
+        "Dict.remove" -> 2
+        "Dict.member" -> 2
+
+        -- Dict module (ternary)
+        "Dict.insert" -> 3
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -2211,6 +2361,10 @@ isBuiltin name =
         , "String.trim", "String.trimLeft", "String.trimRight"
         -- Tuple module
         , "Tuple.pair", "Tuple.first", "Tuple.second", "Tuple.mapFirst", "Tuple.mapSecond"
+        -- Dict module
+        , "Dict.empty", "Dict.singleton", "Dict.insert", "Dict.get", "Dict.remove"
+        , "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values"
+        , "Dict.toList", "Dict.fromList"
         ]
 
 
@@ -2318,6 +2472,9 @@ generateExprWithRenames ctx renames expr =
                     else if isBuiltin name && arity > 0 then
                         -- Builtin function used as a value - wrap in closure
                         generateFunctionClosure ctx mangledName arity
+                    else if isBuiltin name && arity == 0 then
+                        -- Zero-arity builtin, call it
+                        mangledName ++ "()"
                     else
                         mangledName
 
