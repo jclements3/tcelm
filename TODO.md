@@ -102,6 +102,11 @@
   - Indentation-based parsing to terminate do blocks at column 1
   - Working: `do { x <- Just 10; y <- Just 20; Just (x + y) }` = Just 30
   - Working: `do { x <- validate 10; y <- validate (0 - 5); Ok (x + y) }` = Err "negative"
+- [x] 2026-01-25: Parser fixes for case expressions in let bindings:
+  - Fixed: case expression in let followed by another binding no longer consumes the binding
+  - `parseAppArgs` now detects let bindings via `looksLikeLetBinding` check
+  - Multi-line type aliases and record types now parse correctly
+  - Working: `let result = case x of ... ; y = 5 in result + y`
 - [ ] **NEXT**: More comprehensive tests, better error messages, documentation
 
 ---
