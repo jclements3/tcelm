@@ -11,8 +11,8 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-25
-**Last Session**: FFI callbacks, tuple/record destructuring fixes
-**Next Action**: Build ledger module to validate compiler features
+**Status**: Milestones 1-3 COMPLETE, 265 unit tests + 57 integration tests passing
+**Next Action**: Milestone 4 - Deploy to NUC with RTEMS (requires hardware)
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
@@ -835,7 +835,7 @@ main =
 ```
 Result: 10 (correct!)
 
-**Milestone 2**: Can compile and run:
+**Milestone 2** ✅ COMPLETE: Can compile and run:
 ```elm
 processTransaction : Transaction -> Result Error TransactionId
 processTransaction txn = do
@@ -844,14 +844,16 @@ processTransaction txn = do
     eventId <- recordEvent (TransactionPosted balanced)
     pure eventId
 ```
+Result: Transaction processing with do-notation works correctly.
 
-**Milestone 3**: Can compile a basic ledger module with:
-- Account CRUD
-- Transaction posting
-- Balance queries
-- Event sourcing
+**Milestone 3** ✅ COMPLETE: Can compile a basic ledger module with:
+- Account CRUD (via event sourcing)
+- Transaction posting (via Transferred events)
+- Balance queries (getBalance function)
+- Event sourcing (List.foldl applyEvent)
 
 **Milestone 4**: Ledger runs on NUC with RTEMS, communicates via serial/network.
+(Requires hardware - RTEMS bindings complete in lib/Rtems/)
 
 ---
 
