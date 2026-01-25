@@ -60,7 +60,27 @@
   - Lambda lifting via GCC nested functions (captures work within scope)
   - Working: `let f = \x -> x + 10 in f 5` = 15
   - Working: `map (\x -> x * 2) [1,2,3]` = [2,4,6]
-- [ ] **NEXT**: Proper closure capture for cross-scope variables, standard library
+- [x] 2026-01-24: **MAJOR** Proper closure capture with lifted lambdas:
+  - Lambdas lifted to top-level static functions (TCC compatible)
+  - Free variables computed and captured explicitly in closure args[]
+  - Uses existing partial application mechanism for dispatch
+  - Working: `makeAdder 5` correctly captures and returns closure
+  - Working: Higher-order functions (map, filter) with captured closures
+- [x] 2026-01-24: Standard library in C runtime:
+  - Basics: identity, always, flip, min, max, clamp, abs
+  - List: isEmpty, length, reverse, member, head, tail, take, drop, sum, product,
+          maximum, minimum, append, concat, intersperse, range, repeat,
+          map, filter, filterMap, foldl, foldr, any, all, concatMap, indexedMap
+  - Maybe: withDefault, map, andThen, map2
+  - Result: withDefault, map, mapError, andThen, toMaybe
+  - String: length, isEmpty, reverse, concat, append, join, left, right,
+            dropLeft, dropRight, contains, startsWith, endsWith, fromInt, toInt
+- [x] 2026-01-24: Qualified function names (List.map, Maybe.withDefault, etc.):
+  - Parser: handle Module.function and Module.Constructor syntax
+  - Infer: look up full qualified names in type environment
+  - Infer: type signatures for all stdlib functions
+  - Working: `List.length [1,2,3]` = 3, `List.map double [1,2,3]` = [2,4,6]
+- [ ] **NEXT**: Multi-line pipelines, records, more stdlib
 
 ---
 
@@ -103,6 +123,8 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Recursive functions | ✅ Working | Self-references resolve in type inference |
 | Higher-order functions | ✅ Working | map, filter with closures work |
 | Pipeline operators | ✅ Working | `|>` and `<|` desugar to function application |
+| Qualified names | ✅ Working | `List.map`, `Maybe.withDefault`, etc. |
+| Standard library | ✅ Working | List, Maybe, Result, String, Basics in C runtime |
 | Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
 
 ### Known Issues
@@ -112,7 +134,7 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 3. ~~**Parser boundary**: Fixed - stops at column 1 for new declarations~~
 4. ~~**Higher-order functions**: Fixed - closures generated and applied correctly~~
 5. **Multi-line expressions**: Pipeline on new line not continuing expression (single-line works)
-6. **Cross-scope closure capture**: Variables captured across function boundaries don't persist
+6. ~~**Cross-scope closure capture**: Fixed - lambdas lifted to top-level static functions with explicit capture~~
 
 ### Usage
 ```bash
