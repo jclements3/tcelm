@@ -943,6 +943,19 @@ generateRuntime _ =
         , "    return elm_just(elm_int(val));"
         , "}"
         , ""
+        , "static elm_value_t elm_String_fromFloat(elm_value_t f) {"
+        , "    char *buf = malloc(64);"
+        , "    snprintf(buf, 64, \"%g\", f.data.f);"
+        , "    return elm_string(buf);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_String_toFloat(elm_value_t s) {"
+        , "    char *end;"
+        , "    double val = strtod(s.data.s, &end);"
+        , "    if (*end != '\\0' || end == s.data.s) return elm_nothing();"
+        , "    return elm_just(elm_float(val));"
+        , "}"
+        , ""
         , "static elm_value_t elm_String_left(elm_value_t n, elm_value_t s) {"
         , "    size_t len = strlen(s.data.s);"
         , "    size_t take = n.data.i < 0 ? 0 : (size_t)n.data.i;"
@@ -2070,6 +2083,8 @@ getFunctionArity ctx name =
         "String.concat" -> 1
         "String.fromInt" -> 1
         "String.toInt" -> 1
+        "String.fromFloat" -> 1
+        "String.toFloat" -> 1
 
         -- String module (binary)
         "String.append" -> 2
@@ -2189,7 +2204,7 @@ isBuiltin name =
         , "Result.withDefault", "Result.map", "Result.mapError", "Result.andThen", "Result.toMaybe"
         -- String module
         , "String.length", "String.isEmpty", "String.reverse", "String.concat"
-        , "String.append", "String.join", "String.fromInt", "String.toInt"
+        , "String.append", "String.join", "String.fromInt", "String.toInt", "String.fromFloat", "String.toFloat"
         , "String.left", "String.right", "String.dropLeft", "String.dropRight"
         , "String.contains", "String.startsWith", "String.endsWith"
         , "String.split", "String.slice", "String.toUpper", "String.toLower"

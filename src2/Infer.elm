@@ -303,6 +303,8 @@ builtinTypes =
         , ( "String.join", Scheme [] [] (TArrow (TCon "String") (TArrow (TApp (TCon "List") (TCon "String")) (TCon "String"))) )
         , ( "String.fromInt", Scheme [] [] (TArrow (TCon "Int") (TCon "String")) )
         , ( "String.toInt", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "Maybe") (TCon "Int"))) )
+        , ( "String.fromFloat", Scheme [] [] (TArrow (TCon "Float") (TCon "String")) )
+        , ( "String.toFloat", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "Maybe") (TCon "Float"))) )
         , ( "String.left", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
         , ( "String.right", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
         , ( "String.dropLeft", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
