@@ -207,6 +207,11 @@ rtems_status_code rtems_clock_get_uptime(struct timespec *uptime) {
     return RTEMS_SUCCESSFUL;
 }
 
+/* Get uptime in ticks - used by libc time functions */
+uint32_t rtems_clock_get_uptime_ticks(void) {
+    return system_ticks;
+}
+
 /* Called by timer interrupt or main loop */
 static void scheduler_tick(void) {
     system_ticks++;

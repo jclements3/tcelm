@@ -5,14 +5,16 @@
 #
 
 TOOLCHAIN_DIR := $(shell pwd)
-TCC := $(TOOLCHAIN_DIR)/../tcc/tcc
+# Use GCC for cross-compiling (TCC doesn't support -m32 on x86_64)
+CC := gcc
 RUNTIME_DIR := $(TOOLCHAIN_DIR)/../runtime
 
 # Compiler flags
-CFLAGS := -m32 -nostdlib -nostdinc \
+CFLAGS := -m32 -ffreestanding -nostdlib \
           -I$(TOOLCHAIN_DIR)/include \
           -I$(RUNTIME_DIR) \
-          -D__rtems__ -DTCELM_BARE_METAL
+          -D__rtems__ -DTCELM_BARE_METAL \
+          -fno-stack-protector -fno-pic -w
 
 # Assembler
 AS := as
@@ -21,6 +23,8 @@ ASFLAGS := --32
 # Linker
 LD := ld
 LDFLAGS := -m elf_i386 -T $(TOOLCHAIN_DIR)/scripts/nuc.ld
+# GCC library for 64-bit arithmetic
+LIBGCC := $(shell gcc -m32 -print-libgcc-file-name)
 
 # Archiver
 AR := ar
@@ -59,15 +63,15 @@ $(BUILD_DIR):
 
 # Compile libc
 $(LIBC_OBJ): $(LIBC_SRC) | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile RTEMS implementation
 $(RTEMS_OBJ): $(RTEMS_SRC) | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile SMP implementation
 $(SMP_OBJ): $(SMP_SRC) | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Assemble CRT
 $(CRT_OBJ): $(CRT_SRC) | $(BUILD_DIR)
@@ -109,14 +113,14 @@ TCELM_RUNTIME_OBJS := $(BUILD_DIR)/tcelm_arena.o \
 
 # Compile tcelm runtime
 $(BUILD_DIR)/tcelm_arena.o: $(RUNTIME_DIR)/tcelm_arena.c | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/tcelm_types.o: $(RUNTIME_DIR)/tcelm_types.c | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Test sources
 $(BUILD_DIR)/tcelm_runtime_test.o: examples/tcelm_runtime_test.c | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Link runtime test
 $(BUILD_DIR)/tcelm_runtime_test.elf: $(CRT_OBJ) $(BUILD_DIR)/tcelm_runtime_test.o $(TCELM_RUNTIME_OBJS) $(LIBTCELM)
@@ -143,7 +147,7 @@ build-runtime-test: $(BUILD_DIR)/tcelm_runtime_test.elf
 
 # SMP test sources
 $(BUILD_DIR)/smp_test.o: examples/smp_test.c | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Link SMP test
 $(BUILD_DIR)/smp_test.elf: $(CRT_OBJ) $(BUILD_DIR)/smp_test.o $(LIBTCELM)
@@ -171,7 +175,7 @@ test-runtime-smp: $(BUILD_DIR)/tcelm_runtime_test.elf
 
 # Multi-core test
 $(BUILD_DIR)/multicore_test.o: examples/multicore_test.c | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/multicore_test.elf: $(CRT_OBJ) $(BUILD_DIR)/multicore_test.o $(LIBTCELM)
 	$(LD) $(LDFLAGS) $^ -o $@
@@ -187,7 +191,7 @@ test-multicore: $(BUILD_DIR)/multicore_test.elf
 
 # IPI (Inter-Processor Interrupt) test
 $(BUILD_DIR)/ipi_test.o: examples/ipi_test.c | $(BUILD_DIR)
-	$(TCC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/ipi_test.elf: $(CRT_OBJ) $(BUILD_DIR)/ipi_test.o $(LIBTCELM)
 	$(LD) $(LDFLAGS) $^ -o $@
@@ -223,3 +227,25 @@ help:
 	@echo "Usage:"
 	@echo "  ./bin/tcelm-cc -c source.c -o output.o"
 	@echo "  ./bin/tcelm-ld lib/crt0.o output.o lib/libtcelm.a -o program.elf"
+
+# =============================================================================
+# tcelm Elm Program Tests
+# =============================================================================
+
+# Compile tcelm-generated C code for QEMU
+$(BUILD_DIR)/elm_program.o: /tmp/rtems_test.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -Wno-builtin-declaration-mismatch -c $< -o $@
+
+# Link Elm program
+$(BUILD_DIR)/elm_program.elf: $(CRT_OBJ) $(BUILD_DIR)/elm_program.o $(LIBTCELM)
+	$(LD) $(LDFLAGS) $^ -o $@
+
+# Run Elm program in QEMU
+.PHONY: test-elm
+test-elm: $(BUILD_DIR)/elm_program.elf
+	@echo ""
+	@echo "Running tcelm Elm program in QEMU..."
+	@echo ""
+	@timeout $(QEMU_TIMEOUT) $(QEMU) -kernel $< $(QEMU_FLAGS) || \
+		if [ $$? -eq 124 ]; then echo "QEMU timeout (expected)"; fi
+	@echo ""

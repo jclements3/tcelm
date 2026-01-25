@@ -7,6 +7,61 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/*
+ * 64-bit arithmetic for 32-bit platforms
+ * These are called by GCC for 64-bit division/modulo on i386
+ */
+
+int64_t __divdi3(int64_t a, int64_t b) {
+    int neg = 0;
+    if (a < 0) { neg = !neg; a = -a; }
+    if (b < 0) { neg = !neg; b = -b; }
+
+    uint64_t ua = a, ub = b;
+    uint64_t quot = 0;
+    for (int i = 63; i >= 0; i--) {
+        if ((ua >> i) >= ub) {
+            ua -= ub << i;
+            quot |= (1ULL << i);
+        }
+    }
+    return neg ? -(int64_t)quot : (int64_t)quot;
+}
+
+int64_t __moddi3(int64_t a, int64_t b) {
+    int neg = (a < 0);
+    if (a < 0) a = -a;
+    if (b < 0) b = -b;
+
+    uint64_t ua = a, ub = b;
+    for (int i = 63; i >= 0; i--) {
+        if ((ua >> i) >= ub) {
+            ua -= ub << i;
+        }
+    }
+    return neg ? -(int64_t)ua : (int64_t)ua;
+}
+
+uint64_t __udivdi3(uint64_t a, uint64_t b) {
+    uint64_t quot = 0;
+    for (int i = 63; i >= 0; i--) {
+        if ((a >> i) >= b) {
+            a -= b << i;
+            quot |= (1ULL << i);
+        }
+    }
+    return quot;
+}
+
+uint64_t __umoddi3(uint64_t a, uint64_t b) {
+    for (int i = 63; i >= 0; i--) {
+        if ((a >> i) >= b) {
+            a -= b << i;
+        }
+    }
+    return a;
+}
+
 /* Forward declarations */
 void *malloc(size_t size);
 void free(void *ptr);
@@ -476,4 +531,433 @@ char *strdup(const char *s) {
     char *dup = malloc(len);
     if (dup) memcpy(dup, s, len);
     return dup;
+}
+
+/*
+ * Serial output (for printf)
+ */
+
+/* Serial port I/O */
+#define SERIAL_PORT 0x3F8
+
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline uint8_t inb(uint16_t port) {
+    uint8_t ret;
+    __asm__ volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
+void serial_putchar(char c) {
+    /* Wait for transmit buffer empty */
+    while ((inb(SERIAL_PORT + 5) & 0x20) == 0);
+    outb(SERIAL_PORT, c);
+    if (c == '\n') {
+        while ((inb(SERIAL_PORT + 5) & 0x20) == 0);
+        outb(SERIAL_PORT, '\r');
+    }
+}
+
+void serial_puts(const char *s) {
+    while (*s) serial_putchar(*s++);
+}
+
+void serial_print_int(long long n) {
+    char buf[32];
+    int i = 0;
+    int neg = 0;
+
+    if (n < 0) {
+        neg = 1;
+        n = -n;
+    }
+
+    if (n == 0) {
+        serial_putchar('0');
+        return;
+    }
+
+    while (n > 0) {
+        buf[i++] = '0' + (n % 10);
+        n /= 10;
+    }
+
+    if (neg) serial_putchar('-');
+    while (i > 0) serial_putchar(buf[--i]);
+}
+
+/*
+ * printf - minimal implementation
+ */
+
+#include <stdarg.h>
+
+/* putchar */
+int putchar(int c) {
+    serial_putchar((char)c);
+    return c;
+}
+
+/* FILE stub */
+typedef void FILE;
+FILE *stderr = (FILE *)2;
+FILE *stdout = (FILE *)1;
+
+int fprintf(FILE *stream, const char *fmt, ...) {
+    (void)stream;
+    va_list args;
+    va_start(args, fmt);
+    /* Just use serial output for now */
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            if (*fmt == 's') {
+                const char *s = va_arg(args, const char *);
+                if (s) serial_puts(s);
+            } else if (*fmt == 'd' || *fmt == 'i') {
+                int val = va_arg(args, int);
+                serial_print_int(val);
+            }
+        } else {
+            serial_putchar(*fmt);
+        }
+        fmt++;
+    }
+    va_end(args);
+    return 0;
+}
+
+int sprintf(char *str, const char *fmt, ...) {
+    /* Minimal implementation */
+    va_list args;
+    va_start(args, fmt);
+    char *p = str;
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            if (*fmt == 's') {
+                const char *s = va_arg(args, const char *);
+                if (s) {
+                    while (*s) *p++ = *s++;
+                }
+            } else if (*fmt == 'd' || *fmt == 'i') {
+                int val = va_arg(args, int);
+                char buf[32];
+                int i = 0;
+                int neg = 0;
+                if (val < 0) { neg = 1; val = -val; }
+                if (val == 0) buf[i++] = '0';
+                while (val > 0) { buf[i++] = '0' + (val % 10); val /= 10; }
+                if (neg) *p++ = '-';
+                while (i > 0) *p++ = buf[--i];
+            } else if (*fmt == 'l') {
+                fmt++;
+                if (*fmt == 'l') {
+                    fmt++;
+                    if (*fmt == 'd' || *fmt == 'i') {
+                        long long val = va_arg(args, long long);
+                        char buf[32];
+                        int i = 0;
+                        int neg = 0;
+                        if (val < 0) { neg = 1; val = -val; }
+                        if (val == 0) buf[i++] = '0';
+                        while (val > 0) { buf[i++] = '0' + (val % 10); val /= 10; }
+                        if (neg) *p++ = '-';
+                        while (i > 0) *p++ = buf[--i];
+                    }
+                }
+            }
+        } else {
+            *p++ = *fmt;
+        }
+        fmt++;
+    }
+    *p = '\0';
+    va_end(args);
+    return p - str;
+}
+
+int snprintf(char *str, size_t size, const char *fmt, ...) {
+    /* Use sprintf and truncate */
+    va_list args;
+    va_start(args, fmt);
+    char buf[1024];
+    int len = sprintf(buf, fmt, args);
+    va_end(args);
+    if ((size_t)len >= size) len = size - 1;
+    memcpy(str, buf, len);
+    str[len] = '\0';
+    return len;
+}
+
+long long strtoll(const char *nptr, char **endptr, int base) {
+    return (long long)strtol(nptr, endptr, base);
+}
+
+/* Math stubs */
+int isnan(double x) {
+    return x != x;
+}
+
+int isinf(double x) {
+    return x > 1e308 || x < -1e308;
+}
+
+double asin(double x) {
+    /* Approximation using Taylor series */
+    if (x < -1 || x > 1) return 0;
+    double x2 = x * x;
+    return x + x*x2/6 + 3*x*x2*x2/40;
+}
+
+double acos(double x) {
+    return 1.5707963267948966 - asin(x);
+}
+
+double atan(double x) {
+    /* Taylor series approximation */
+    if (x > 1) return 1.5707963267948966 - atan(1/x);
+    if (x < -1) return -1.5707963267948966 - atan(1/x);
+    double x2 = x * x;
+    double result = x;
+    double term = x;
+    for (int i = 1; i < 10; i++) {
+        term *= -x2;
+        result += term / (2*i + 1);
+    }
+    return result;
+}
+
+double atan2(double y, double x) {
+    if (x > 0) return atan(y/x);
+    if (x < 0 && y >= 0) return atan(y/x) + 3.14159265358979323846;
+    if (x < 0 && y < 0) return atan(y/x) - 3.14159265358979323846;
+    if (x == 0 && y > 0) return 1.5707963267948966;
+    if (x == 0 && y < 0) return -1.5707963267948966;
+    return 0;
+}
+
+/* Forward declare floor for round */
+double floor(double x);
+
+double round(double x) {
+    return floor(x + 0.5);
+}
+
+double trunc(double x) {
+    return (double)(long long)x;
+}
+
+int printf(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+
+    int count = 0;
+    while (*fmt) {
+        if (*fmt == '%') {
+            fmt++;
+            switch (*fmt) {
+                case 'd':
+                case 'i': {
+                    int val = va_arg(args, int);
+                    serial_print_int(val);
+                    break;
+                }
+                case 'l': {
+                    fmt++;
+                    if (*fmt == 'd' || *fmt == 'i') {
+                        long val = va_arg(args, long);
+                        serial_print_int(val);
+                    } else if (*fmt == 'l') {
+                        fmt++;
+                        if (*fmt == 'd' || *fmt == 'i') {
+                            long long val = va_arg(args, long long);
+                            serial_print_int(val);
+                        }
+                    }
+                    break;
+                }
+                case 's': {
+                    const char *s = va_arg(args, const char *);
+                    if (s) serial_puts(s);
+                    else serial_puts("(null)");
+                    break;
+                }
+                case 'c': {
+                    char c = (char)va_arg(args, int);
+                    serial_putchar(c);
+                    break;
+                }
+                case 'p': {
+                    void *p = va_arg(args, void *);
+                    serial_puts("0x");
+                    unsigned long v = (unsigned long)p;
+                    char hex[17];
+                    int j = 0;
+                    do {
+                        int digit = v & 0xF;
+                        hex[j++] = digit < 10 ? '0' + digit : 'a' + digit - 10;
+                        v >>= 4;
+                    } while (v);
+                    while (j > 0) serial_putchar(hex[--j]);
+                    break;
+                }
+                case '%':
+                    serial_putchar('%');
+                    break;
+                default:
+                    serial_putchar('%');
+                    serial_putchar(*fmt);
+                    break;
+            }
+        } else {
+            serial_putchar(*fmt);
+        }
+        fmt++;
+        count++;
+    }
+
+    va_end(args);
+    return count;
+}
+
+/*
+ * Time functions
+ */
+
+#include <time.h>
+
+/* Get uptime in ticks from RTEMS */
+extern uint32_t rtems_clock_get_uptime_ticks(void);
+
+time_t time(time_t *t) {
+    /* Return uptime in seconds (approximate) */
+    time_t now = rtems_clock_get_uptime_ticks() / 1000;
+    if (t) *t = now;
+    return now;
+}
+
+int clock_gettime(int clk_id, struct timespec *tp) {
+    (void)clk_id;
+    uint32_t ticks = rtems_clock_get_uptime_ticks();
+    tp->tv_sec = ticks / 1000;
+    tp->tv_nsec = (ticks % 1000) * 1000000;
+    return 0;
+}
+
+int nanosleep(const struct timespec *req, struct timespec *rem) {
+    (void)req;
+    (void)rem;
+    /* No-op for now */
+    return 0;
+}
+
+/*
+ * Math functions (software implementations)
+ */
+
+double fabs(double x) {
+    return x < 0 ? -x : x;
+}
+
+double floor(double x) {
+    long long i = (long long)x;
+    return (double)(x < 0 && x != i ? i - 1 : i);
+}
+
+double ceil(double x) {
+    long long i = (long long)x;
+    return (double)(x > 0 && x != i ? i + 1 : i);
+}
+
+/* Taylor series approximations */
+double sin(double x) {
+    /* Reduce to [-pi, pi] */
+    while (x > 3.14159265358979323846) x -= 2 * 3.14159265358979323846;
+    while (x < -3.14159265358979323846) x += 2 * 3.14159265358979323846;
+
+    double x2 = x * x;
+    double result = x;
+    double term = x;
+    for (int i = 1; i < 10; i++) {
+        term *= -x2 / ((2*i) * (2*i + 1));
+        result += term;
+    }
+    return result;
+}
+
+double cos(double x) {
+    return sin(x + 1.5707963267948966);
+}
+
+double tan(double x) {
+    double c = cos(x);
+    if (c == 0) return 0;  /* Avoid division by zero */
+    return sin(x) / c;
+}
+
+double sqrt(double x) {
+    if (x < 0) return 0;
+    if (x == 0) return 0;
+    double guess = x / 2;
+    for (int i = 0; i < 20; i++) {
+        guess = (guess + x / guess) / 2;
+    }
+    return guess;
+}
+
+double pow(double x, double y) {
+    /* Integer power only for now */
+    if (y == 0) return 1;
+    if (x == 0) return 0;
+
+    int neg = y < 0;
+    if (neg) y = -y;
+
+    double result = 1;
+    int iy = (int)y;
+    for (int i = 0; i < iy; i++) {
+        result *= x;
+    }
+
+    return neg ? 1 / result : result;
+}
+
+double log(double x) {
+    /* Natural log approximation */
+    if (x <= 0) return 0;
+
+    double result = 0;
+    while (x > 2) {
+        x /= 2.71828182845904523536;
+        result += 1;
+    }
+    while (x < 0.5) {
+        x *= 2.71828182845904523536;
+        result -= 1;
+    }
+
+    /* Taylor series around x=1 */
+    double y = (x - 1) / (x + 1);
+    double y2 = y * y;
+    double term = y;
+    for (int i = 1; i < 20; i += 2) {
+        result += 2 * term / i;
+        term *= y2;
+    }
+    return result;
+}
+
+double exp(double x) {
+    /* e^x Taylor series */
+    double result = 1;
+    double term = 1;
+    for (int i = 1; i < 30; i++) {
+        term *= x / i;
+        result += term;
+        if (fabs(term) < 1e-15) break;
+    }
+    return result;
 }
