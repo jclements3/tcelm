@@ -186,6 +186,9 @@ builtinTypes =
                 (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
                     (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "c")))
           )
+        , ( "xor", Scheme [] [] (TArrow (TCon "Bool") (TArrow (TCon "Bool") (TCon "Bool"))) )
+        , ( "isNaN", Scheme [] [] (TArrow (TCon "Float") (TCon "Bool")) )
+        , ( "isInfinite", Scheme [] [] (TArrow (TCon "Float") (TCon "Bool")) )
 
         -- List module
         , ( "List.isEmpty", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")) )

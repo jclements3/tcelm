@@ -482,6 +482,18 @@ generateRuntime _ =
         , "    return elm_int(-a.data.i);"
         , "}"
         , ""
+        , "static elm_value_t elm_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_bool((a.data.i && !b.data.i) || (!a.data.i && b.data.i));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_isNaN(elm_value_t f) {"
+        , "    return elm_bool(isnan(f.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_isInfinite(elm_value_t f) {"
+        , "    return elm_bool(isinf(f.data.f));"
+        , "}"
+        , ""
         , "/* List operators */"
         , "static elm_value_t elm__op_cons(elm_value_t head, elm_value_t tail) {"
         , "    return elm_cons(head, tail);"
@@ -2916,7 +2928,9 @@ generateConAccum ctx renames name args =
                 _ -> "elm_" ++ name
 
         resultCode =
-            if List.isEmpty args && (name == "True" || name == "False" || name == "LT" || name == "EQ" || name == "GT") then
+            if List.isEmpty args && (name == "True" || name == "False") then
+                funcName
+            else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT") then
                 funcName ++ "()"
             else
                 funcName ++ "(" ++ String.join ", " argCodes ++ ")"
@@ -3146,6 +3160,9 @@ getFunctionArity ctx name =
         "compare" -> 2
         "curry" -> 3
         "uncurry" -> 2
+        "xor" -> 2
+        "isNaN" -> 1
+        "isInfinite" -> 1
 
         -- Order type (nullary)
         "LT" -> 0
@@ -3438,6 +3455,7 @@ isBuiltin name =
         -- Basics module
         , "identity", "always", "flip", "min", "max", "clamp", "abs"
         , "modBy", "remainderBy", "compare", "curry", "uncurry"
+        , "xor", "isNaN", "isInfinite"
         -- Order type
         , "LT", "EQ", "GT"
         -- List module
@@ -3929,7 +3947,9 @@ generateConWithRenames ctx renames name args =
                 "GT" -> "elm_gt"
                 _ -> "elm_" ++ name
     in
-    if List.isEmpty args && (name == "True" || name == "False" || name == "LT" || name == "EQ" || name == "GT") then
+    if List.isEmpty args && (name == "True" || name == "False") then
+        funcName
+    else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT") then
         funcName ++ "()"
     else
         funcName ++ "(" ++ argCodes ++ ")"
@@ -4186,7 +4206,9 @@ generateCon ctx name args =
                 "GT" -> "elm_gt"
                 _ -> "elm_" ++ name
     in
-    if List.isEmpty args && (name == "True" || name == "False" || name == "LT" || name == "EQ" || name == "GT") then
+    if List.isEmpty args && (name == "True" || name == "False") then
+        funcName
+    else if List.isEmpty args && (name == "LT" || name == "EQ" || name == "GT") then
         funcName ++ "()"
     else
         funcName ++ "(" ++ argCodes ++ ")"
