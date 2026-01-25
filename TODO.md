@@ -196,7 +196,9 @@
   - String.cons, String.uncons, String.repeat, String.words, String.lines
   - String.foldl, String.foldr, String.any, String.all, String.filter, String.map
   - Basics: xor, isNaN, isInfinite
-  - 146 tests passing
+  - Math: sqrt, sin, cos, tan, asin, acos, atan, atan2, logBase, e, pi
+  - Rounding: ceiling, floor, round, truncate, toFloat
+  - 149 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
