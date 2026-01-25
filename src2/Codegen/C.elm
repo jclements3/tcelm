@@ -2857,6 +2857,25 @@ generateRuntime _ =
         , "    return elm_uint64v((uint64_t)value.data.i >> (int)bits.data.i);"
         , "}"
         , ""
+        , "/* ===== POINTER MODULE ===== */"
+        , "/* Safe pointer handling functions */"
+        , ""
+        , "static elm_value_t elm_Ptr_null(void) {"
+        , "    return elm_ptr(NULL);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Ptr_isNull(elm_value_t p) {"
+        , "    return elm_bool(p.data.p == NULL);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Ptr_toMaybe(elm_value_t p) {"
+        , "    if (p.data.p == NULL) {"
+        , "        return elm_nothing();"
+        , "    } else {"
+        , "        return elm_just(p);"
+        , "    }"
+        , "}"
+        , ""
         , "/* ===== ARRAY MODULE ===== */"
         , "/* Array implemented as a list for simplicity - can optimize to true arrays later */"
         , ""
@@ -5936,6 +5955,11 @@ getFunctionArity ctx name =
         "UInt64.shiftLeftBy" -> 2
         "UInt64.shiftRightBy" -> 2
 
+        -- Ptr module (safe pointer handling)
+        "Ptr.null" -> 0
+        "Ptr.isNull" -> 1
+        "Ptr.toMaybe" -> 1
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -6135,6 +6159,8 @@ isBuiltin name =
         -- UInt64 module
         , "UInt64.fromInt", "UInt64.toInt", "UInt64.add", "UInt64.sub", "UInt64.mul", "UInt64.div", "UInt64.mod"
         , "UInt64.and", "UInt64.or", "UInt64.xor", "UInt64.complement", "UInt64.shiftLeftBy", "UInt64.shiftRightBy"
+        -- Ptr module (safe pointer handling)
+        , "Ptr.null", "Ptr.isNull", "Ptr.toMaybe"
         ]
 
 

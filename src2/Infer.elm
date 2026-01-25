@@ -1334,6 +1334,19 @@ builtinTypes =
         , ( "UInt64.complement", Scheme [] [] (TArrow (TCon "UInt64") (TCon "UInt64")) )
         , ( "UInt64.shiftLeftBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "UInt64") (TCon "UInt64"))) )
         , ( "UInt64.shiftRightBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "UInt64") (TCon "UInt64"))) )
+
+        -- Ptr module (safe pointer handling)
+        , ( "Ptr.null"
+          , Scheme [ "a" ] [] (TApp (TCon "Ptr") (TVar "a"))
+          )
+        , ( "Ptr.isNull"
+          , Scheme [ "a" ] [] (TArrow (TApp (TCon "Ptr") (TVar "a")) (TCon "Bool"))
+          )
+        , ( "Ptr.toMaybe"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Ptr") (TVar "a"))
+                    (TApp (TCon "Maybe") (TApp (TCon "Ptr") (TVar "a"))))
+          )
         ]
 
 

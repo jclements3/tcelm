@@ -286,6 +286,11 @@
   - Bitwise operations: and, or, xor, complement, shiftLeftBy, shiftRightBy
   - Proper wrap-around behavior (e.g., Int8.fromInt 128 = -128)
   - 214 tests passing
+- [x] 2026-01-25: Safe pointer handling (Phase 4.2)
+  - Ptr.null: null pointer constant
+  - Ptr.isNull: check if pointer is null
+  - Ptr.toMaybe: convert null to Nothing, non-null to Just
+  - 216 tests passing
 - [ ] **NEXT**: Continue with more advanced features or ledger work
 
 ---
@@ -563,15 +568,15 @@ foreign import gpio_read : Int -> Task Int
 - [x] Handle return type conversion (Int, Float, Bool, String, Char, ())
 - [ ] Handle Task wrapping for async operations
 
-### 4.2 Pointer Types ⚠️ PARTIAL
+### 4.2 Pointer Types ✅ COMPLETE
 ```elm
 type alias FileHandle = Ptr
 foreign import fopen : String -> String -> Task FileHandle
 foreign import fclose : FileHandle -> Task ()
 ```
 - [x] Opaque `Ptr` type (void* as elm_value_t with tag 7)
-- [ ] Safe handle patterns
-- [ ] Null pointer handling
+- [x] Safe handle patterns (Ptr.toMaybe for optional access)
+- [x] Null pointer handling (Ptr.null, Ptr.isNull)
 
 ### 4.3 Callbacks
 ```elm

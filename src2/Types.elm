@@ -308,6 +308,8 @@ kindOf ty =
                 "UInt16" -> KStar
                 "UInt32" -> KStar
                 "UInt64" -> KStar
+                -- Pointer type
+                "Ptr" -> KArrow KStar KStar
                 _ -> KStar  -- default
 
         TApp t1 _ ->
