@@ -1465,6 +1465,57 @@ generateRuntime _ =
         , "    return acc;"
         , "}"
         , ""
+        , "/* String.any - check if any character satisfies predicate */"
+        , "static elm_value_t elm_String_any(elm_value_t pred, elm_value_t s) {"
+        , "    const char *str = s.data.s;"
+        , "    for (size_t i = 0; str[i] != '\\0'; i++) {"
+        , "        elm_value_t ch = elm_char(str[i]);"
+        , "        elm_value_t result = elm_apply1((elm_closure_t *)pred.data.p, ch);"
+        , "        if (result.data.i) return elm_bool(true);"
+        , "    }"
+        , "    return elm_bool(false);"
+        , "}"
+        , ""
+        , "/* String.all - check if all characters satisfy predicate */"
+        , "static elm_value_t elm_String_all(elm_value_t pred, elm_value_t s) {"
+        , "    const char *str = s.data.s;"
+        , "    for (size_t i = 0; str[i] != '\\0'; i++) {"
+        , "        elm_value_t ch = elm_char(str[i]);"
+        , "        elm_value_t result = elm_apply1((elm_closure_t *)pred.data.p, ch);"
+        , "        if (!result.data.i) return elm_bool(false);"
+        , "    }"
+        , "    return elm_bool(true);"
+        , "}"
+        , ""
+        , "/* String.filter - keep only characters satisfying predicate */"
+        , "static elm_value_t elm_String_filter(elm_value_t pred, elm_value_t s) {"
+        , "    const char *str = s.data.s;"
+        , "    size_t len = strlen(str);"
+        , "    char *buf = malloc(len + 1);"
+        , "    size_t j = 0;"
+        , "    for (size_t i = 0; i < len; i++) {"
+        , "        elm_value_t ch = elm_char(str[i]);"
+        , "        elm_value_t keep = elm_apply1((elm_closure_t *)pred.data.p, ch);"
+        , "        if (keep.data.i) buf[j++] = str[i];"
+        , "    }"
+        , "    buf[j] = '\\0';"
+        , "    return elm_string(buf);"
+        , "}"
+        , ""
+        , "/* String.map - transform each character */"
+        , "static elm_value_t elm_String_map(elm_value_t f, elm_value_t s) {"
+        , "    const char *str = s.data.s;"
+        , "    size_t len = strlen(str);"
+        , "    char *buf = malloc(len + 1);"
+        , "    for (size_t i = 0; i < len; i++) {"
+        , "        elm_value_t ch = elm_char(str[i]);"
+        , "        elm_value_t newCh = elm_apply1((elm_closure_t *)f.data.p, ch);"
+        , "        buf[i] = (char)newCh.data.i;"
+        , "    }"
+        , "    buf[len] = '\\0';"
+        , "    return elm_string(buf);"
+        , "}"
+        , ""
         , "/* Tuple module */"
         , "static elm_value_t elm_Tuple_pair(elm_value_t a, elm_value_t b) {"
         , "    return elm_tuple2(a, b);"
@@ -3199,6 +3250,10 @@ getFunctionArity ctx name =
         "String.lines" -> 1
         "String.foldl" -> 3
         "String.foldr" -> 3
+        "String.any" -> 2
+        "String.all" -> 2
+        "String.filter" -> 2
+        "String.map" -> 2
 
         -- Tuple module (unary)
         "Tuple.first" -> 1
@@ -3410,6 +3465,7 @@ isBuiltin name =
         , "String.cons", "String.uncons"
         , "String.repeat", "String.words", "String.lines"
         , "String.foldl", "String.foldr"
+        , "String.any", "String.all", "String.filter", "String.map"
         -- Tuple module
         , "Tuple.pair", "Tuple.first", "Tuple.second", "Tuple.mapFirst", "Tuple.mapSecond"
         -- Dict module

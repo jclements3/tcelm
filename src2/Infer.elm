@@ -438,6 +438,22 @@ builtinTypes =
                 (TArrow (TArrow (TCon "Char") (TArrow (TVar "b") (TVar "b")))
                     (TArrow (TVar "b") (TArrow (TCon "String") (TVar "b"))))
           )
+        , ( "String.any"
+          , Scheme [] []
+                (TArrow (TArrow (TCon "Char") (TCon "Bool")) (TArrow (TCon "String") (TCon "Bool")))
+          )
+        , ( "String.all"
+          , Scheme [] []
+                (TArrow (TArrow (TCon "Char") (TCon "Bool")) (TArrow (TCon "String") (TCon "Bool")))
+          )
+        , ( "String.filter"
+          , Scheme [] []
+                (TArrow (TArrow (TCon "Char") (TCon "Bool")) (TArrow (TCon "String") (TCon "String")))
+          )
+        , ( "String.map"
+          , Scheme [] []
+                (TArrow (TArrow (TCon "Char") (TCon "Char")) (TArrow (TCon "String") (TCon "String")))
+          )
           -- Tuple module
         , ( "Tuple.pair", Scheme [ "a", "b" ] [] (TArrow (TVar "a") (TArrow (TVar "b") (TTuple [ TVar "a", TVar "b" ]))) )
         , ( "Tuple.first", Scheme [ "a", "b" ] [] (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "a")) )
