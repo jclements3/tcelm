@@ -45,7 +45,16 @@
   - Type inference: handle cons pattern bindings when scrutinee type is TVar
   - Case expression bodies now correctly return values
   - List cons pattern matching works (h :: t -> h)
-- [ ] **NEXT**: Implement List.map with closures, test more complex patterns
+- [x] 2026-01-24: **MAJOR** Higher-order functions and closures working:
+  - Parser: handle `::` (DoubleColon) as binary operator in expressions
+  - Type inference: support recursive function definitions
+  - Code generation: functions wrapped in closures when passed as values
+  - Code generation: closure parameters called via elm_apply1
+  - Pipeline operators (`|>`, `<|`) desugar to direct function application
+  - Added `intDiv`, `pow`, `mod` operators
+  - Added list printing to runtime
+  - Working: `[1,2,3,4,5,6] |> filter isEven |> map double |> sum` = 24
+- [ ] **NEXT**: Add more standard library functions, test let expressions with closures
 
 ---
 
@@ -81,10 +90,13 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | If expressions | ✅ Working | Multi-line if/then/else supported |
 | Case expressions | ✅ Working | Pattern matching compiles |
 | Lambdas | ✅ Working | Lambda lifting with closures |
-| Binary operators | ✅ Working | +, -, *, /, etc. in scope |
+| Binary operators | ✅ Working | +, -, *, /, //, etc. in scope |
 | Type inference | ✅ Working | Hindley-Milner with proper scoping |
 | Partial application | ✅ Working | Closures generated with correct arity |
 | List patterns | ✅ Working | h :: t pattern matching works |
+| Recursive functions | ✅ Working | Self-references resolve in type inference |
+| Higher-order functions | ✅ Working | map, filter with closures work |
+| Pipeline operators | ✅ Working | `|>` and `<|` desugar to function application |
 | Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
 
 ### Known Issues
@@ -92,7 +104,8 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 1. ~~**Curried function calls**: Fixed - generates `elm_add(x, y)` directly~~
 2. ~~**Module prefixes**: Fixed - `elm_Test_double` generated correctly~~
 3. ~~**Parser boundary**: Fixed - stops at column 1 for new declarations~~
-4. **Lambda lifting**: Function pointer not set correctly (inline lambdas only)
+4. ~~**Higher-order functions**: Fixed - closures generated and applied correctly~~
+5. **Multi-line expressions**: Pipeline on new line not continuing expression (single-line works)
 
 ### Usage
 ```bash

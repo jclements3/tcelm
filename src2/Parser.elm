@@ -1278,23 +1278,29 @@ parseBinOpRest : Int -> Located Expr -> Parser (Located Expr)
 parseBinOpRest minPrec left state =
     case currentToken state of
         Just tok ->
-            if tok.type_ == Operator then
+            -- Handle both Operator tokens and DoubleColon (::) specially
+            let
+                isOp = tok.type_ == Operator || tok.type_ == DoubleColon
+                opValue = if tok.type_ == DoubleColon then "::" else tok.value
+            in
+            if isOp then
                 let
-                    ( prec, _ ) = getOperatorPrec tok.value
+                    ( prec, _ ) = getOperatorPrec opValue
                 in
                 if prec >= minPrec then
-                    case expect Operator state of
+                    let
+                        -- Advance past the operator token
+                        state1 = advance state
+                    in
+                    case parseBinOpExpr (prec + 1) state1 of
                         Err e -> Err e
-                        Ok ( opTok, state1 ) ->
-                            case parseBinOpExpr (prec + 1) state1 of
-                                Err e -> Err e
-                                Ok ( right, state2 ) ->
-                                    let
-                                        newLeft =
-                                            locate (getRegion left)
-                                                (EBinOp left (locate opTok.region opTok.value) right)
-                                    in
-                                    parseBinOpRest minPrec newLeft state2
+                        Ok ( right, state2 ) ->
+                            let
+                                newLeft =
+                                    locate (getRegion left)
+                                        (EBinOp left (locate tok.region opValue) right)
+                            in
+                            parseBinOpRest minPrec newLeft state2
                 else
                     Ok ( left, state )
             else

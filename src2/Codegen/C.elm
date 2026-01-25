@@ -23,7 +23,7 @@ Key design decisions:
 import Core
 import Types exposing (Type(..), Scheme(..), Constraint(..))
 import Dict exposing (Dict)
-import Set exposing (Set)
+import Set
 
 
 -- OPTIONS
@@ -61,6 +61,7 @@ type alias GenCtx =
     , functions : Dict String Core.FuncDef
     , classes : Dict String Core.ClassDef
     , instances : List Core.InstDef
+    , closureParams : Set.Set String  -- Function parameters that are closures
     }
 
 
@@ -74,6 +75,7 @@ emptyCtx opts =
     , functions = Dict.empty
     , classes = Dict.empty
     , instances = []
+    , closureParams = Set.empty
     }
 
 
@@ -325,6 +327,18 @@ generateRuntime _ =
         , "    return elm_int(a.data.i % b.data.i);"
         , "}"
         , ""
+        , "static elm_value_t elm_intDiv(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int(a.data.i / b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_pow(elm_value_t a, elm_value_t b) {"
+        , "    int64_t result = 1;"
+        , "    int64_t base = a.data.i;"
+        , "    int64_t exp = b.data.i;"
+        , "    while (exp > 0) { if (exp & 1) result *= base; base *= base; exp >>= 1; }"
+        , "    return elm_int(result);"
+        , "}"
+        , ""
         , "/* Comparison */"
         , "static elm_value_t elm_eq(elm_value_t a, elm_value_t b) {"
         , "    return elm_bool(a.data.i == b.data.i);"
@@ -543,7 +557,13 @@ generateFunction ctx funcDef =
                     |> List.map (\tv -> "elm_value_t " ++ mangle tv.name)
                     |> String.join ", "
 
-        bodyCtx = withIndent ctx
+        -- Track function parameters as potential closures
+        paramNames = List.map .name funcDef.args
+        bodyCtx =
+            { ctx
+            | indent = ctx.indent + 1
+            , closureParams = Set.union ctx.closureParams (Set.fromList paramNames)
+            }
         bodyCode = generateExpr bodyCtx funcDef.body
     in
     "static elm_value_t " ++ fullName ++ "(" ++ params ++ ") {\n"
@@ -564,8 +584,14 @@ generateExpr ctx expr =
                 mangledName = mangleWithModule ctx name
                 arity = getFunctionArity ctx name
             in
+            -- Check if this is a closure parameter - just use the variable
+            if Set.member name ctx.closureParams then
+                mangledName
+            -- If it's a known function with arity > 0, wrap in closure
+            else if Dict.member name ctx.functions && arity > 0 then
+                generateFunctionClosure ctx mangledName arity
             -- Zero-arity functions need to be called to get their value
-            if arity == 0 && Dict.member name ctx.functions then
+            else if arity == 0 && Dict.member name ctx.functions then
                 mangledName ++ "()"
             else
                 mangledName
@@ -649,26 +675,34 @@ generateApp ctx func arg =
         Core.EVar tv ->
             let
                 funcName = tv.name
-                arity = getFunctionArity ctx funcName
                 mangledName = mangleWithModule ctx funcName
-                argCount = List.length allArgs
             in
-            if arity == 0 then
-                -- Zero-arity function returns a closure - call it and apply args
-                generateClosureApply ctx (mangledName ++ "()") allArgs
-            else if argCount == arity then
-                -- Full application - generate direct call
-                mangledName ++ "(" ++ String.join ", " (List.map (generateExpr ctx) allArgs) ++ ")"
-            else if argCount < arity then
-                -- Partial application - generate closure
-                generatePartialApp ctx mangledName allArgs arity
+            -- Check if this is a closure parameter (function passed as argument)
+            if Set.member funcName ctx.closureParams then
+                -- Function parameter - use closure application
+                generateClosureApply ctx mangledName allArgs
             else
-                -- Over-application - call function, then apply extra args to result
+                -- Known function or builtin
                 let
-                    ( directArgs, extraArgs ) = splitAt arity allArgs
-                    baseCall = mangledName ++ "(" ++ String.join ", " (List.map (generateExpr ctx) directArgs) ++ ")"
+                    arity = getFunctionArity ctx funcName
+                    argCount = List.length allArgs
                 in
-                generateClosureApply ctx baseCall extraArgs
+                if arity == 0 then
+                    -- Zero-arity function returns a closure - call it and apply args
+                    generateClosureApply ctx (mangledName ++ "()") allArgs
+                else if argCount == arity then
+                    -- Full application - generate direct call
+                    mangledName ++ "(" ++ String.join ", " (List.map (generateExpr ctx) allArgs) ++ ")"
+                else if argCount < arity then
+                    -- Partial application - generate closure
+                    generatePartialApp ctx mangledName allArgs arity
+                else
+                    -- Over-application - call function, then apply extra args to result
+                    let
+                        ( directArgs, extraArgs ) = splitAt arity allArgs
+                        baseCall = mangledName ++ "(" ++ String.join ", " (List.map (generateExpr ctx) directArgs) ++ ")"
+                    in
+                    generateClosureApply ctx baseCall extraArgs
 
         _ ->
             -- Dynamic application (closure)
@@ -741,6 +775,9 @@ getFunctionArity ctx name =
         "sub" -> 2
         "mul" -> 2
         "div" -> 2
+        "intDiv" -> 2
+        "pow" -> 2
+        "mod" -> 2
         "eq" -> 2
         "neq" -> 2
         "lt" -> 2
@@ -769,6 +806,19 @@ getFunctionArity ctx name =
                 Nothing ->
                     -- Unknown function, assume unary
                     1
+
+
+{-| Generate a closure wrapping a known function (for passing as value).
+-}
+generateFunctionClosure : GenCtx -> String -> Int -> String
+generateFunctionClosure _ funcName arity =
+    "({"
+        ++ " elm_closure_t *_c = elm_alloc_closure();"
+        ++ " _c->func = (void *)" ++ funcName ++ ";"
+        ++ " _c->arity = " ++ String.fromInt arity ++ ";"
+        ++ " _c->applied = 0;"
+        ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
+        ++ " })"
 
 
 {-| Generate partial application as a closure.
@@ -810,14 +860,14 @@ isBuiltin : String -> Bool
 isBuiltin name =
     List.member name
         -- Symbolic operators
-        [ "+", "-", "*", "/", "//", "^"
+        [ "+", "-", "*", "/", "//", "^", "%"
         , "==", "/=", "<", ">", "<=", ">="
         , "&&", "||", "not", "negate"
         , "++", "::"
         , "|>", "<|", ">>", "<<"
         , "True", "False"
         -- Desugared operator names (from Desugar.elm desugarBinOp)
-        , "add", "sub", "mul", "div"
+        , "add", "sub", "mul", "div", "intDiv", "pow", "mod"
         , "eq", "neq", "lt", "gt", "lte", "gte"
         , "and", "or"
         , "append", "cons"
@@ -1118,16 +1168,37 @@ generateMain ctx =
         String.join "\n"
             [ "/* ===== MAIN ===== */"
             , ""
+            , "static void print_value(elm_value_t v) {"
+            , "    switch (v.tag) {"
+            , "        case 0: printf(\"%ld\", (long)v.data.i); break;"
+            , "        case 1: printf(\"%g\", v.data.f); break;"
+            , "        case 2: printf(\"\\\"%s\\\"\", v.data.s); break;"
+            , "        case 3: printf(\"'%c'\", (char)v.data.i); break;"
+            , "        case 4: printf(\"False\"); break;"
+            , "        case 5: printf(\"True\"); break;"
+            , "        case 6: printf(\"()\"); break;"
+            , "        case 100: printf(\"[]\"); break;"
+            , "        case 101: {"
+            , "            printf(\"[\");"
+            , "            elm_value_t curr = v;"
+            , "            int first = 1;"
+            , "            while (curr.tag == 101) {"
+            , "                if (!first) printf(\", \");"
+            , "                first = 0;"
+            , "                print_value(*curr.data.c);"
+            , "                curr = *curr.next;"
+            , "            }"
+            , "            printf(\"]\");"
+            , "            break;"
+            , "        }"
+            , "        default: printf(\"<value:%d>\", v.tag); break;"
+            , "    }"
+            , "}"
+            , ""
             , "int main(void) {"
             , "    elm_value_t result = " ++ mainFunc ++ "();"
-            , "    switch (result.tag) {"
-            , "        case 0: printf(\"%lld\\n\", result.data.i); break;"
-            , "        case 1: printf(\"%g\\n\", result.data.f); break;"
-            , "        case 2: printf(\"%s\\n\", result.data.s); break;"
-            , "        case 4: printf(\"False\\n\"); break;"
-            , "        case 5: printf(\"True\\n\"); break;"
-            , "        default: printf(\"<value>\\n\"); break;"
-            , "    }"
+            , "    print_value(result);"
+            , "    printf(\"\\n\");"
             , "    return 0;"
             , "}"
             ]

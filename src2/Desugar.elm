@@ -444,36 +444,49 @@ desugarBinOp ctx left op right =
         opName = AST.getValue op
         leftCore = desugarExpr ctx (AST.getValue left)
         rightCore = desugarExpr ctx (AST.getValue right)
-
-        -- Special handling for common operators
-        ( opFuncName, resultType ) =
-            case opName of
-                "+" -> ( "add", TCon "Int" )
-                "-" -> ( "sub", TCon "Int" )
-                "*" -> ( "mul", TCon "Int" )
-                "/" -> ( "div", TCon "Int" )
-                "==" -> ( "eq", TCon "Bool" )
-                "/=" -> ( "neq", TCon "Bool" )
-                "<" -> ( "lt", TCon "Bool" )
-                ">" -> ( "gt", TCon "Bool" )
-                "<=" -> ( "lte", TCon "Bool" )
-                ">=" -> ( "gte", TCon "Bool" )
-                "&&" -> ( "and", TCon "Bool" )
-                "||" -> ( "or", TCon "Bool" )
-                "++" -> ( "append", TVar "a" )
-                "::" -> ( "cons", TVar "a" )
-                "|>" -> ( "pipe", TVar "a" )
-                "<|" -> ( "pipeLeft", TVar "a" )
-                ">>" -> ( "compose", TVar "a" )
-                "<<" -> ( "composeLeft", TVar "a" )
-                _ -> ( opName, TVar "a" )
-
-        opVar = Core.EVar { name = opFuncName, type_ = TArrow (TVar "a") (TArrow (TVar "b") resultType) }
-
-        -- f x y = (f x) y
-        app1 = Core.EApp opVar leftCore (TArrow (TVar "b") resultType)
     in
-    Core.EApp app1 rightCore resultType
+    case opName of
+        -- Pipeline operators desugar directly to function application
+        "|>" ->
+            -- a |> f  ==>  f a
+            Core.EApp rightCore leftCore (TVar "a")
+
+        "<|" ->
+            -- f <| a  ==>  f a
+            Core.EApp leftCore rightCore (TVar "a")
+
+        _ ->
+            -- Other operators: generate function call
+            let
+                ( opFuncName, resultType ) =
+                    case opName of
+                        "+" -> ( "add", TCon "Int" )
+                        "-" -> ( "sub", TCon "Int" )
+                        "*" -> ( "mul", TCon "Int" )
+                        "/" -> ( "div", TCon "Int" )
+                        "//" -> ( "intDiv", TCon "Int" )
+                        "^" -> ( "pow", TCon "Int" )
+                        "%" -> ( "mod", TCon "Int" )
+                        "==" -> ( "eq", TCon "Bool" )
+                        "/=" -> ( "neq", TCon "Bool" )
+                        "<" -> ( "lt", TCon "Bool" )
+                        ">" -> ( "gt", TCon "Bool" )
+                        "<=" -> ( "lte", TCon "Bool" )
+                        ">=" -> ( "gte", TCon "Bool" )
+                        "&&" -> ( "and", TCon "Bool" )
+                        "||" -> ( "or", TCon "Bool" )
+                        "++" -> ( "append", TVar "a" )
+                        "::" -> ( "cons", TVar "a" )
+                        ">>" -> ( "compose", TVar "a" )
+                        "<<" -> ( "composeLeft", TVar "a" )
+                        _ -> ( opName, TVar "a" )
+
+                opVar = Core.EVar { name = opFuncName, type_ = TArrow (TVar "a") (TArrow (TVar "b") resultType) }
+
+                -- f x y = (f x) y
+                app1 = Core.EApp opVar leftCore (TArrow (TVar "b") resultType)
+            in
+            Core.EApp app1 rightCore resultType
 
 
 

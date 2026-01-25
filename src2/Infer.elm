@@ -1072,17 +1072,32 @@ inferDecl env decl =
         AST.ValueDecl valueDef ->
             let
                 name = AST.getValue valueDef.name
+
+                -- For recursive functions, we need to add a preliminary type binding
+                -- Create a fresh type variable for the function's type
+                ( prelimTy, state0 ) = freshTypeVar initialState
+
+                -- Add the function name to the environment with a preliminary type
+                -- This allows recursive calls within the body to find the function
+                envWithSelf = extendEnv name (Scheme [] [] prelimTy) env
             in
-            case inferValueDef env valueDef initialState of
+            case inferValueDef envWithSelf valueDef state0 of
                 Err e ->
                     Err e
 
                 Ok ( ty, state ) ->
-                    let
-                        finalTy = applySubst state.substitution ty
-                        scheme = generalize env state.constraints finalTy
-                    in
-                    Ok (extendEnv name scheme env)
+                    -- Unify the inferred type with the preliminary type
+                    case unify prelimTy ty of
+                        Err e ->
+                            Err e
+
+                        Ok subst ->
+                            let
+                                state1 = { state | substitution = composeSubst subst state.substitution }
+                                finalTy = applySubst state1.substitution ty
+                                scheme = generalize env state1.constraints finalTy
+                            in
+                            Ok (extendEnv name scheme env)
 
         AST.TypeAliasDecl _ ->
             -- Type aliases are handled during kind checking
