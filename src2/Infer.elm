@@ -487,6 +487,15 @@ builtinTypes =
         , ( "Char.isAlphaNum", Scheme [] [] (TArrow (TCon "Char") (TCon "Bool")) )
         , ( "Char.toUpper", Scheme [] [] (TArrow (TCon "Char") (TCon "Char")) )
         , ( "Char.toLower", Scheme [] [] (TArrow (TCon "Char") (TCon "Char")) )
+
+        -- Bitwise module
+        , ( "Bitwise.and", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
+        , ( "Bitwise.or", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
+        , ( "Bitwise.xor", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
+        , ( "Bitwise.complement", Scheme [] [] (TArrow (TCon "Int") (TCon "Int")) )
+        , ( "Bitwise.shiftLeftBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
+        , ( "Bitwise.shiftRightBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
+        , ( "Bitwise.shiftRightZfBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
         ]
 
 

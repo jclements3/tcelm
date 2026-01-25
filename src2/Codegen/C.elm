@@ -1527,6 +1527,37 @@ generateRuntime _ =
         , "    if (ch >= 'A' && ch <= 'Z') ch = ch - 'A' + 'a';"
         , "    return (elm_value_t){ .tag = 3, .data.i = ch, .next = NULL };"
         , "}"
+        , ""
+        , "/* ===== BITWISE MODULE ===== */"
+        , ""
+        , "static elm_value_t elm_Bitwise_and(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int(a.data.i & b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Bitwise_or(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int(a.data.i | b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Bitwise_xor(elm_value_t a, elm_value_t b) {"
+        , "    return elm_int(a.data.i ^ b.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Bitwise_complement(elm_value_t a) {"
+        , "    return elm_int(~a.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Bitwise_shiftLeftBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int(value.data.i << bits.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Bitwise_shiftRightBy(elm_value_t bits, elm_value_t value) {"
+        , "    return elm_int(value.data.i >> bits.data.i);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Bitwise_shiftRightZfBy(elm_value_t bits, elm_value_t value) {"
+        , "    /* Unsigned right shift - need to cast to unsigned first */"
+        , "    return elm_int((int64_t)((uint64_t)value.data.i >> bits.data.i));"
+        , "}"
         ]
 
 
@@ -2557,6 +2588,15 @@ getFunctionArity ctx name =
         "Char.toUpper" -> 1
         "Char.toLower" -> 1
 
+        -- Bitwise module
+        "Bitwise.complement" -> 1
+        "Bitwise.and" -> 2
+        "Bitwise.or" -> 2
+        "Bitwise.xor" -> 2
+        "Bitwise.shiftLeftBy" -> 2
+        "Bitwise.shiftRightBy" -> 2
+        "Bitwise.shiftRightZfBy" -> 2
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -2669,6 +2709,9 @@ isBuiltin name =
         , "Char.toCode", "Char.fromCode"
         , "Char.isDigit", "Char.isLower", "Char.isUpper", "Char.isAlpha", "Char.isAlphaNum"
         , "Char.toUpper", "Char.toLower"
+        -- Bitwise module
+        , "Bitwise.and", "Bitwise.or", "Bitwise.xor", "Bitwise.complement"
+        , "Bitwise.shiftLeftBy", "Bitwise.shiftRightBy", "Bitwise.shiftRightZfBy"
         ]
 
 
