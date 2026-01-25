@@ -1338,6 +1338,148 @@ generateRuntime _ =
         , "    elm_value_t reversed = elm_List_reverse(dict);"
         , "    return elm_Dict_foldl(f, acc, reversed);"
         , "}"
+        , ""
+        , "/* ===== SET MODULE ===== */"
+        , "/* Set implemented as a list of unique elements */"
+        , ""
+        , "/* Helper to check if element is in set (uses same comparison as Dict) */"
+        , "static int elm_set_member_helper(elm_value_t elem, elm_value_t set) {"
+        , "    elm_value_t xs = set;"
+        , "    while (xs.tag == 101) {"
+        , "        if (elm_dict_key_eq(*xs.data.c, elem)) {"
+        , "            return 1;"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return 0;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_empty(void) {"
+        , "    return elm_nil();"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_singleton(elm_value_t elem) {"
+        , "    return elm_cons(elem, elm_nil());"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_insert(elm_value_t elem, elm_value_t set) {"
+        , "    if (elm_set_member_helper(elem, set)) {"
+        , "        return set;"
+        , "    }"
+        , "    return elm_cons(elem, set);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_remove(elm_value_t elem, elm_value_t set) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = set;"
+        , "    while (xs.tag == 101) {"
+        , "        if (!elm_dict_key_eq(*xs.data.c, elem)) {"
+        , "            result = elm_cons(*xs.data.c, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_member(elm_value_t elem, elm_value_t set) {"
+        , "    return elm_bool(elm_set_member_helper(elem, set));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_size(elm_value_t set) {"
+        , "    return elm_List_length(set);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_isEmpty(elm_value_t set) {"
+        , "    return elm_bool(set.tag == 100);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_toList(elm_value_t set) {"
+        , "    return set;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_fromList(elm_value_t list) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = list;"
+        , "    while (xs.tag == 101) {"
+        , "        result = elm_Set_insert(*xs.data.c, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_union(elm_value_t set1, elm_value_t set2) {"
+        , "    elm_value_t result = set2;"
+        , "    elm_value_t xs = set1;"
+        , "    while (xs.tag == 101) {"
+        , "        result = elm_Set_insert(*xs.data.c, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_intersect(elm_value_t set1, elm_value_t set2) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = set1;"
+        , "    while (xs.tag == 101) {"
+        , "        if (elm_set_member_helper(*xs.data.c, set2)) {"
+        , "            result = elm_cons(*xs.data.c, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_diff(elm_value_t set1, elm_value_t set2) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = set1;"
+        , "    while (xs.tag == 101) {"
+        , "        if (!elm_set_member_helper(*xs.data.c, set2)) {"
+        , "            result = elm_cons(*xs.data.c, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_map(elm_value_t f, elm_value_t set) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = set;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t mapped = elm_apply1((elm_closure_t *)f.data.p, *xs.data.c);"
+        , "        result = elm_Set_insert(mapped, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_filter(elm_value_t pred, elm_value_t set) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = set;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t keep = elm_apply1((elm_closure_t *)pred.data.p, *xs.data.c);"
+        , "        if (keep.tag == 5) {"
+        , "            result = elm_cons(*xs.data.c, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_foldl(elm_value_t f, elm_value_t acc, elm_value_t set) {"
+        , "    elm_value_t result = acc;"
+        , "    elm_value_t xs = set;"
+        , "    while (xs.tag == 101) {"
+        , "        elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, *xs.data.c);"
+        , "        result = elm_apply1((elm_closure_t *)f1.data.p, result);"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return result;"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Set_foldr(elm_value_t f, elm_value_t acc, elm_value_t set) {"
+        , "    elm_value_t reversed = elm_List_reverse(set);"
+        , "    return elm_Set_foldl(f, acc, reversed);"
+        , "}"
         ]
 
 
@@ -2333,6 +2475,30 @@ getFunctionArity ctx name =
         "Dict.foldl" -> 3
         "Dict.foldr" -> 3
 
+        -- Set module (zero-arity)
+        "Set.empty" -> 0
+
+        -- Set module (unary)
+        "Set.singleton" -> 1
+        "Set.size" -> 1
+        "Set.isEmpty" -> 1
+        "Set.toList" -> 1
+        "Set.fromList" -> 1
+
+        -- Set module (binary)
+        "Set.insert" -> 2
+        "Set.remove" -> 2
+        "Set.member" -> 2
+        "Set.union" -> 2
+        "Set.intersect" -> 2
+        "Set.diff" -> 2
+        "Set.map" -> 2
+        "Set.filter" -> 2
+
+        -- Set module (ternary)
+        "Set.foldl" -> 3
+        "Set.foldr" -> 3
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -2436,6 +2602,11 @@ isBuiltin name =
         , "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values"
         , "Dict.toList", "Dict.fromList", "Dict.update", "Dict.map", "Dict.filter"
         , "Dict.foldl", "Dict.foldr"
+        -- Set module
+        , "Set.empty", "Set.singleton", "Set.insert", "Set.remove", "Set.member"
+        , "Set.size", "Set.isEmpty", "Set.toList", "Set.fromList"
+        , "Set.union", "Set.intersect", "Set.diff"
+        , "Set.map", "Set.filter", "Set.foldl", "Set.foldr"
         ]
 
 

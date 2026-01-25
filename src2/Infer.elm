@@ -405,6 +405,77 @@ builtinTypes =
                     (TArrow (TVar "b")
                         (TArrow (TApp (TApp (TCon "Dict") (TVar "k")) (TVar "v")) (TVar "b"))))
           )
+
+        -- Set module
+        , ( "Set.empty"
+          , Scheme [ "a" ] [] (TApp (TCon "Set") (TVar "a"))
+          )
+        , ( "Set.singleton"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TApp (TCon "Set") (TVar "a")))
+          )
+        , ( "Set.insert"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
+          )
+        , ( "Set.remove"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
+          )
+        , ( "Set.member"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TArrow (TApp (TCon "Set") (TVar "a")) (TCon "Bool")))
+          )
+        , ( "Set.size"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Set") (TVar "a")) (TCon "Int"))
+          )
+        , ( "Set.isEmpty"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Set") (TVar "a")) (TCon "Bool"))
+          )
+        , ( "Set.toList"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "List") (TVar "a")))
+          )
+        , ( "Set.fromList"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Set") (TVar "a")))
+          )
+        , ( "Set.union"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Set") (TVar "a")) (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
+          )
+        , ( "Set.intersect"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Set") (TVar "a")) (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
+          )
+        , ( "Set.diff"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Set") (TVar "a")) (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
+          )
+        , ( "Set.map"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "b"))))
+          )
+        , ( "Set.filter"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "Set") (TVar "a")) (TApp (TCon "Set") (TVar "a"))))
+          )
+        , ( "Set.foldl"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b")
+                        (TArrow (TApp (TCon "Set") (TVar "a")) (TVar "b"))))
+          )
+        , ( "Set.foldr"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b")
+                        (TArrow (TApp (TCon "Set") (TVar "a")) (TVar "b"))))
+          )
         ]
 
 
