@@ -339,6 +339,12 @@ builtinTypes =
           , Scheme [ "a" ] []
                 (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))))
           )
+        , ( "List.zip"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TApp (TCon "List") (TVar "a"))
+                    (TArrow (TApp (TCon "List") (TVar "b"))
+                        (TApp (TCon "List") (TTuple [ TVar "a", TVar "b" ]))))
+          )
 
         -- Maybe module
         , ( "Maybe.withDefault", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "Maybe") (TVar "a")) (TVar "a"))) )

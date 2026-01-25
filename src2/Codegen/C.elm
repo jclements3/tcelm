@@ -1098,6 +1098,18 @@ generateRuntime _ =
         , "    return elm_just(*xs.data.c);"
         , "}"
         , ""
+        , "/* List.zip - combine two lists into list of tuples */"
+        , "static elm_value_t elm_List_zip(elm_value_t xs, elm_value_t ys) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    while (xs.tag == 101 && ys.tag == 101) {"
+        , "        elm_value_t tuple = elm_tuple2(*xs.data.c, *ys.data.c);"
+        , "        result = elm_cons(tuple, result);"
+        , "        xs = *xs.next;"
+        , "        ys = *ys.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
         , "/* Maybe module */"
         , "static elm_value_t elm_Maybe_withDefault(elm_value_t def, elm_value_t maybe) {"
         , "    if (maybe.tag == 200) return def;"
@@ -3771,6 +3783,7 @@ getFunctionArity ctx name =
         "List.map4" -> 5
         "List.map5" -> 6
         "List.getAt" -> 2
+        "List.zip" -> 2
 
         -- List module (ternary)
         "List.foldl" -> 3
@@ -4079,7 +4092,7 @@ isBuiltin name =
         , "List.map", "List.filter", "List.filterMap", "List.foldl", "List.foldr"
         , "List.any", "List.all", "List.concatMap", "List.indexedMap"
         , "List.sort", "List.sortBy", "List.sortWith", "List.partition", "List.singleton"
-        , "List.unzip", "List.map2", "List.map3", "List.map4", "List.map5", "List.getAt"
+        , "List.unzip", "List.map2", "List.map3", "List.map4", "List.map5", "List.getAt", "List.zip"
         -- Maybe module
         , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5", "Maybe.filter"
         -- Result module
