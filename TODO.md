@@ -191,6 +191,12 @@
   - compare function for comparable types
   - curry / uncurry for tuple conversion
   - 132 tests passing
+- [x] 2026-01-25: Extended List and String modules
+  - List.unzip, List.map2/map3/map4/map5
+  - String.cons, String.uncons
+  - String.repeat, String.words, String.lines
+  - String.foldl, String.foldr
+  - 140 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
