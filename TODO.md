@@ -325,12 +325,15 @@
   - Added skipNewlines before checking for `|` in record expressions
   - `{ r \n | a = 1 }` now parses correctly
   - 265 tests passing
-- [ ] **NEXT**: Fix local function capture in anonymous lambdas
-  - Local functions used inside anonymous lambdas aren't captured
-  - Example: `let f x = x + 1 in List.foldl (\e a -> f e + a) 0 xs`
-  - Workaround: name the lambda first: `let f x = x + 1; g e a = f e + a in List.foldl g 0 xs`
-  - Ledger module needs this fix to compile
-- [ ] Build ledger module to validate compiler features (blocked by above)
+- [x] Local function capture in anonymous lambdas: WORKS in tcelm2
+  - Example: `let f x = x + 1 in List.foldl (\e a -> f e + a) 0 xs` compiles correctly
+  - The old tcelm has this bug but tcelm2 handles it properly
+  - 265 tests passing
+- [ ] **BLOCKED**: Code generation incomplete for Dict.update with inline lambda
+  - Functions like `Dict.update key (\maybeVal -> case maybeVal of ...) dict` stop generating after the first argument
+  - The inline lambda with case expression is not being generated
+  - Ledger module uses this pattern and is blocked until fixed
+- [ ] **NEXT**: Fix code generation for Dict.update with inline lambdas
 
 ---
 
