@@ -996,6 +996,80 @@ builtinTypes =
         , ( "Json.Encode.encode"
           , Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Value") (TCon "String")))
           )
+
+        -- Json.Decode module
+        -- Decoder is represented as tag 910 with a function pointer
+        , ( "Json.Decode.decodeString"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                    (TArrow (TCon "String")
+                        (TApp (TApp (TCon "Result") (TCon "String")) (TVar "a"))))
+          )
+        , ( "Json.Decode.decodeValue"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                    (TArrow (TCon "Value")
+                        (TApp (TApp (TCon "Result") (TCon "String")) (TVar "a"))))
+          )
+        , ( "Json.Decode.string"
+          , Scheme [] [] (TApp (TCon "Decoder") (TCon "String"))
+          )
+        , ( "Json.Decode.int"
+          , Scheme [] [] (TApp (TCon "Decoder") (TCon "Int"))
+          )
+        , ( "Json.Decode.float"
+          , Scheme [] [] (TApp (TCon "Decoder") (TCon "Float"))
+          )
+        , ( "Json.Decode.bool"
+          , Scheme [] [] (TApp (TCon "Decoder") (TCon "Bool"))
+          )
+        , ( "Json.Decode.null"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TApp (TCon "Decoder") (TVar "a")))
+          )
+        , ( "Json.Decode.nullable"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                    (TApp (TCon "Decoder") (TApp (TCon "Maybe") (TVar "a"))))
+          )
+        , ( "Json.Decode.list"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                    (TApp (TCon "Decoder") (TApp (TCon "List") (TVar "a"))))
+          )
+        , ( "Json.Decode.field"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "String")
+                    (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                        (TApp (TCon "Decoder") (TVar "a"))))
+          )
+        , ( "Json.Decode.map"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                        (TApp (TCon "Decoder") (TVar "b"))))
+          )
+        , ( "Json.Decode.map2"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                        (TArrow (TApp (TCon "Decoder") (TVar "b"))
+                            (TApp (TCon "Decoder") (TVar "c")))))
+          )
+        , ( "Json.Decode.andThen"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TCon "Decoder") (TVar "b")))
+                    (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                        (TApp (TCon "Decoder") (TVar "b"))))
+          )
+        , ( "Json.Decode.succeed"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TApp (TCon "Decoder") (TVar "a")))
+          )
+        , ( "Json.Decode.fail"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "String") (TApp (TCon "Decoder") (TVar "a")))
+          )
         ]
 
 

@@ -251,7 +251,19 @@
   - Json.Encode.encode (convert Value to JSON string with optional indentation)
   - Fixed parser to handle nested module paths (Json.Encode.func)
   - 194 tests passing
-- [ ] **NEXT**: Json.Decode module
+- [x] 2026-01-25: Json.Decode module
+  - Json.Decode.string, int, float, bool (primitive decoders)
+  - Json.Decode.null (null decoder with fallback value)
+  - Json.Decode.field (object field access)
+  - Json.Decode.list, nullable (collection decoders)
+  - Json.Decode.map, map2, andThen (decoder combinators)
+  - Json.Decode.succeed, fail (create successful/failed decoders)
+  - Json.Decode.decodeString, decodeValue (run decoders)
+  - Full JSON parser in C runtime with string escape handling
+  - Fixed Debug.toString to properly display Result, Maybe, List, Tuple, Order
+  - Fixed print_value to escape quotes in string output
+  - 198 tests passing
+- [ ] **NEXT**: Binary Serialization (Phase 5.3)
 
 ---
 
@@ -556,11 +568,13 @@ For embedded/protocol work:
 - [ ] Bit operations: and, or, xor, shiftLeft, shiftRight
 - [ ] Overflow behavior (wrap vs error)
 
-### 5.2 JSON Serialization
+### 5.2 JSON Serialization ✅ COMPLETE
 For debugging, config, API communication:
 - [x] Json.Encode basics (string, int, float, bool, null, list, object, encode)
-- [ ] Json.Decode basics
-- [ ] Decode.field, Decode.map, Decode.andThen
+- [x] Json.Decode basics (string, int, float, bool, null)
+- [x] Decode.field, Decode.map, Decode.map2, Decode.andThen
+- [x] Decode.list, Decode.nullable, Decode.succeed, Decode.fail
+- [x] decodeString, decodeValue (run decoders)
 - [ ] Auto-derive for simple records (optional)
 
 ### 5.3 Binary Serialization

@@ -1,4 +1,4 @@
--- expect: "{"name":"test","value":42}"
+-- expect: "{\"name\":\"test\",\"value\":42}"
 module Test exposing (main)
 
 main =
