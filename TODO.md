@@ -203,12 +203,14 @@
 - [x] 2026-01-25: More standard library functions
   - Tuple.mapBoth - apply functions to both tuple elements
   - String.fromChar - convert single Char to String
+  - String.replace - replace all occurrences of a substring
   - List.sortWith - sort with custom comparator (a -> a -> Order)
   - Char.isHexDigit, Char.isOctDigit, Char.isSpace - more character classifiers
   - Basics: degrees, radians, turns - angle conversion functions
   - Array.initialize, Array.repeat - array creation functions
+  - Dict.partition, Set.partition - split by predicate
   - Fixed: LT/EQ/GT constructors now in builtinConstructors
-  - 159 tests passing
+  - 162 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
