@@ -707,6 +707,14 @@ generateRuntime _ =
         , "    return elm_just(*xs.data.c);"
         , "}"
         , ""
+        , "static elm_value_t elm_List_last(elm_value_t xs) {"
+        , "    if (xs.tag == 100) return elm_nothing();"
+        , "    while (xs.next && xs.next->tag == 101) {"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_just(*xs.data.c);"
+        , "}"
+        , ""
         , "static elm_value_t elm_List_tail(elm_value_t xs) {"
         , "    if (xs.tag == 100) return elm_nothing();"
         , "    return elm_just(*xs.next);"
@@ -3647,6 +3655,7 @@ getFunctionArity ctx name =
         "List.length" -> 1
         "List.reverse" -> 1
         "List.head" -> 1
+        "List.last" -> 1
         "List.tail" -> 1
         "List.sum" -> 1
         "List.product" -> 1
@@ -3971,7 +3980,7 @@ isBuiltin name =
         , "LT", "EQ", "GT"
         -- List module
         , "List.isEmpty", "List.length", "List.reverse", "List.member"
-        , "List.head", "List.tail", "List.take", "List.drop"
+        , "List.head", "List.last", "List.tail", "List.take", "List.drop"
         , "List.sum", "List.product", "List.maximum", "List.minimum"
         , "List.append", "List.concat", "List.intersperse", "List.range", "List.repeat"
         , "List.map", "List.filter", "List.filterMap", "List.foldl", "List.foldr"

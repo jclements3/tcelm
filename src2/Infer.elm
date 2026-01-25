@@ -222,6 +222,7 @@ builtinTypes =
         , ( "List.reverse", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))) )
         , ( "List.member", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool"))) )
         , ( "List.head", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))) )
+        , ( "List.last", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))) )
         , ( "List.tail", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TApp (TCon "List") (TVar "a")))) )
         , ( "List.take", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
         , ( "List.drop", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
