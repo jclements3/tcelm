@@ -329,11 +329,18 @@
   - Example: `let f x = x + 1 in List.foldl (\e a -> f e + a) 0 xs` compiles correctly
   - The old tcelm has this bug but tcelm2 handles it properly
   - 265 tests passing
-- [ ] **BLOCKED**: Code generation incomplete for Dict.update with inline lambda
-  - Functions like `Dict.update key (\maybeVal -> case maybeVal of ...) dict` stop generating after the first argument
-  - The inline lambda with case expression is not being generated
-  - Ledger module uses this pattern and is blocked until fixed
-- [ ] **NEXT**: Fix code generation for Dict.update with inline lambdas
+- [x] 2026-01-25: Fixed multiline function application arguments
+  - Parser now skips newlines between function arguments
+  - Added looksLikeCaseBranch to detect and stop at case branch patterns
+  - `Dict.update key (\maybeVal -> case ...) dict` now parses correctly
+  - 256 tests passing
+- [ ] **ISSUE**: Do-notation parsing not working correctly
+  - `do { x <- Ok 10; Ok x }` produces incorrect Core IR
+  - Pre-existing issue, not related to recent parser changes
+- [ ] **ISSUE**: Type inference for cons patterns (x :: xs)
+  - Type error: "Unbound variable: x" for pattern `x :: xs`
+  - Affects: pattern05_semigroup_min, pattern05_semigroup_max
+- [ ] **NEXT**: Fix do-notation parsing/desugaring
 
 ---
 
