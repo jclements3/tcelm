@@ -186,6 +186,11 @@
   - 126 tests passing
 - [x] 2026-01-25: List.singleton
   - 127 tests passing
+- [x] 2026-01-25: Order type, compare, curry, uncurry
+  - Order type with LT, EQ, GT constructors
+  - compare function for comparable types
+  - curry / uncurry for tuple conversion
+  - 132 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
@@ -438,8 +443,8 @@ Result.andThen (\validated ->
 - [x] identity
 - [x] always
 - [x] flip
-- [ ] curry / uncurry - needs implementation
-- [ ] compare - needs implementation
+- [x] curry / uncurry
+- [x] compare
 - [x] min / max
 - [x] clamp
 - [x] abs
