@@ -107,6 +107,12 @@
   - `parseAppArgs` now detects let bindings via `looksLikeLetBinding` check
   - Multi-line type aliases and record types now parse correctly
   - Working: `let result = case x of ... ; y = 5 in result + y`
+- [x] 2026-01-25: As-patterns (PAlias) support:
+  - Parser: parse `pattern as name` syntax via KwAs token
+  - Core IR: add PAlias pattern type with inner pattern and alias name
+  - Desugar: convert AST.PAlias to Core.PAlias
+  - Codegen: generate bindings for both alias and inner pattern
+  - Working: `(x :: xs) as all -> List.length all`
 - [ ] **NEXT**: More comprehensive tests, better error messages, documentation
 
 ---
@@ -223,7 +229,7 @@ Current: Most patterns work, module prefix context propagated through case expre
 - [x] Nested constructor patterns: `Just (Ok value)` - Working
 - [x] Tuple patterns in case: `(a, b, c) ->` - Working (up to 3 elements)
 - [x] Record patterns: `{ name, balance } ->` - Working
-- [ ] As-patterns: `(x :: xs) as list` - Parse issues in some cases
+- [x] As-patterns: `(x :: xs) as list` - Working
 - [ ] Tuple patterns > 3 elements - Not supported
 
 ### 1.4 Partial Application / Currying

@@ -2492,9 +2492,18 @@ patternCondition ctx scrutVar pattern =
                     in
                     ( cond1 ++ " && " ++ cond2, bind1 ++ bind2 )
 
+                [ firstPat, secondPat, thirdPat ] ->
+                    -- 3-tuple: (a, b, c)
+                    -- Structure: elm_cons(first, elm_cons(second, third))
+                    let
+                        ( cond1, bind1 ) = patternCondition ctx ("(*" ++ scrutVar ++ ".data.c)") firstPat
+                        ( cond2, bind2 ) = patternCondition ctx ("(*" ++ scrutVar ++ ".next->data.c)") secondPat
+                        ( cond3, bind3 ) = patternCondition ctx ("(*" ++ scrutVar ++ ".next->next)") thirdPat
+                    in
+                    ( cond1 ++ " && " ++ cond2 ++ " && " ++ cond3, bind1 ++ bind2 ++ bind3 )
+
                 _ ->
-                    -- For now, only 2-tuples are fully supported
-                    -- Larger tuples would need recursive handling
+                    -- 4+ tuples not supported
                     ( "1", "" )
 
         Core.PRecord fields _ ->
