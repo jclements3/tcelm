@@ -2802,10 +2802,11 @@ inferDecl env decl =
                     let
                         ctor = AST.getValue locCtor
                         ctorName = AST.getValue ctor.name
-                        -- Convert argument type annotations to Types
+                        -- Convert argument type annotations to Types and expand aliases
                         argTypes =
                             ctor.args
                                 |> List.map (\locAnn -> typeAnnotationToType (AST.getValue locAnn))
+                                |> List.map (expandTypeAliases env.typeAliases)
                         -- Build constructor type: arg1 -> arg2 -> ... -> ResultType
                         ctorType =
                             List.foldr

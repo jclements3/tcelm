@@ -245,6 +245,122 @@ function prefixDeclarations(source, moduleName) {
 }
 
 /**
+ * Extract balanced parentheses content from a string starting at index
+ * Returns the content inside the parens (not including the parens)
+ */
+function extractBalancedParens(str, startIdx) {
+    if (str[startIdx] !== '(') return null;
+    let depth = 1;
+    let i = startIdx + 1;
+    while (i < str.length && depth > 0) {
+        if (str[i] === '(') depth++;
+        else if (str[i] === ')') depth--;
+        i++;
+    }
+    if (depth !== 0) return null;
+    return str.substring(startIdx + 1, i - 1);
+}
+
+/**
+ * Parse import statements and collect exposed names with their source modules
+ * Returns a map: { exposedName: sourceModuleName }
+ */
+function collectExposedImports(source) {
+    const exposed = {};
+    const lines = source.split('\n');
+
+    for (const line of lines) {
+        // Match: import ModuleName exposing (...)
+        const importMatch = line.match(/^import\s+([\w.]+)(?:\s+as\s+\w+)?\s+exposing\s*/);
+        if (importMatch) {
+            const moduleName = importMatch[1];
+            const exposingStart = line.indexOf('(', importMatch[0].length - 1);
+            if (exposingStart === -1) continue;
+
+            const exposingPart = extractBalancedParens(line, exposingStart);
+            if (!exposingPart) continue;
+
+            // Skip exposing (..) - can't rename everything
+            if (exposingPart.trim() === '..') continue;
+
+            // Parse exposed names - need to handle nested parens like Type(..)
+            let current = '';
+            let depth = 0;
+            const names = [];
+            for (const ch of exposingPart) {
+                if (ch === '(') {
+                    depth++;
+                    current += ch;
+                } else if (ch === ')') {
+                    depth--;
+                    current += ch;
+                } else if (ch === ',' && depth === 0) {
+                    if (current.trim()) names.push(current.trim());
+                    current = '';
+                } else {
+                    current += ch;
+                }
+            }
+            if (current.trim()) names.push(current.trim());
+
+            for (const name of names) {
+                // Handle Type(..) syntax - extract just the type name
+                const typeMatch = name.match(/^([A-Z][a-zA-Z0-9_]*)\s*\(\s*\.\.\s*\)/);
+                if (typeMatch) {
+                    exposed[typeMatch[1]] = moduleName;
+                    continue;
+                }
+                // Handle regular names (both functions and types)
+                const cleanName = name.replace(/\s*\([^)]*\)/, '').trim();
+                if (cleanName && !cleanName.includes(' ') && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(cleanName)) {
+                    exposed[cleanName] = moduleName;
+                }
+            }
+        }
+    }
+
+    return exposed;
+}
+
+/**
+ * Escape string for use in regex
+ */
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Rewrite exposed names from imports to their prefixed forms
+ */
+function rewriteExposedNames(source, exposedMap, mergedModuleNames) {
+    let result = source;
+
+    for (const [name, moduleName] of Object.entries(exposedMap)) {
+        // Only rewrite if this module is being merged (not a builtin)
+        if (!mergedModuleNames.has(moduleName)) continue;
+
+        // Skip names that contain special characters
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) continue;
+
+        // Determine prefix based on whether it's a type or function
+        const isType = name[0] === name[0].toUpperCase();
+        const prefix = isType
+            ? moduleName.replace(/\./g, '_')  // Keep case for types
+            : moduleName.replace(/\./g, '_').toLowerCase();  // Lowercase for functions
+
+        // Replace bare references to this name
+        // Use word boundaries and avoid matching qualified names
+        const escapedName = escapeRegex(name);
+        result = result.replace(
+            new RegExp(`(?<!\\.)\\b${escapedName}\\b(?!\\.)`, 'g'),
+            `${prefix}_${name}`
+        );
+    }
+
+    return result;
+}
+
+/**
  * Rewrite qualified names (Module.func) to unqualified or prefixed names
  */
 function rewriteQualifiedNames(source, moduleNames) {
@@ -449,6 +565,70 @@ function prefixModuleDefinitions(source, moduleName) {
 }
 
 /**
+ * Collect all exports from a module (types, constructors, functions)
+ * Returns { types: [], constructors: [], functions: [] }
+ */
+function collectModuleExports(source) {
+    return {
+        types: collectTypeNames(source),
+        constructors: collectConstructorNames(source),
+        functions: collectFunctionNames(source)
+    };
+}
+
+/**
+ * Check if a module uses "exposing (..)" for another module
+ * Returns a list of module names that are imported with (..)
+ */
+function collectWildcardImports(source) {
+    const wildcardImports = [];
+    const lines = source.split('\n');
+
+    for (const line of lines) {
+        const importMatch = line.match(/^import\s+([\w.]+)(?:\s+as\s+\w+)?\s+exposing\s*\(\s*\.\.\s*\)/);
+        if (importMatch) {
+            wildcardImports.push(importMatch[1]);
+        }
+    }
+
+    return wildcardImports;
+}
+
+/**
+ * Build a map of exposed names from wildcard imports
+ * Uses the exports from each imported module
+ */
+function buildWildcardExposedMap(wildcardImports, modules) {
+    const exposed = {};
+
+    for (const modName of wildcardImports) {
+        const mod = modules.get(modName);
+        if (!mod) continue;
+
+        const exports = collectModuleExports(mod.source);
+
+        // Add all types
+        for (const typeName of exports.types) {
+            exposed[typeName] = modName;
+        }
+
+        // Add all constructors
+        for (const ctorName of exports.constructors) {
+            if (!exposed[ctorName]) {  // Don't overwrite types
+                exposed[ctorName] = modName;
+            }
+        }
+
+        // Add all functions
+        for (const funcName of exports.functions) {
+            exposed[funcName] = modName;
+        }
+    }
+
+    return exposed;
+}
+
+/**
  * Merge all modules into a single source
  */
 function mergeModules(modules, sortedNames, mainModuleName) {
@@ -457,6 +637,9 @@ function mergeModules(modules, sortedNames, mainModuleName) {
         const mod = modules.get(n);
         return mod && !mod.isMain;
     });
+
+    // Create a set of merged module names for checking imports
+    const mergedModuleSet = new Set(sortedNames);
 
     // Collect all imports from all modules
     const allImports = new Set();
@@ -495,14 +678,27 @@ function mergeModules(modules, sortedNames, mainModuleName) {
 
         mergedParts.push(`-- === Module: ${name} ===`);
 
+        // Collect exposed imports from this module's source (explicit exposing)
+        const exposedImports = collectExposedImports(mod.source);
+
+        // Collect wildcard imports (exposing (..)) and build their exposed map
+        const wildcardImports = collectWildcardImports(mod.source);
+        const wildcardExposed = buildWildcardExposedMap(wildcardImports, modules);
+
+        // Merge both maps (explicit takes priority)
+        const allExposed = { ...wildcardExposed, ...exposedImports };
+
         if (mod.isMain) {
             // For main module, rewrite qualified names to prefixed names
+            body = rewriteExposedNames(body, allExposed, mergedModuleSet);
             body = rewriteQualifiedNames(body, nonMainModuleNames);
             mergedParts.push(body);
         } else {
             // For non-main modules:
-            // 1. Prefix function names with module name
-            // 2. Rewrite any qualified references within the module
+            // 1. Rewrite exposed names from imports to prefixed forms
+            // 2. Prefix function names with module name
+            // 3. Rewrite any qualified references within the module
+            body = rewriteExposedNames(body, allExposed, mergedModuleSet);
             body = prefixModuleDefinitions(body, name);
             body = rewriteQualifiedNames(body, nonMainModuleNames);
             mergedParts.push(body);

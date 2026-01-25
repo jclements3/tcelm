@@ -448,11 +448,23 @@ desugarLambda ctx patterns body =
 
         pat :: rest ->
             let
-                ( typedVar, ctx1 ) = patternToTypedVar ctx (AST.getValue pat)
+                astPat = AST.getValue pat
+                ( typedVar, ctx1 ) = patternToTypedVar ctx astPat
                 innerBody = desugarLambda ctx1 rest body
                 resultType = Core.exprType innerBody
+                -- For complex patterns (tuple, record, etc.), wrap inner body in case expression
+                finalBody =
+                    if isSimplePattern astPat then
+                        innerBody
+                    else
+                        let
+                            patCore = desugarPattern ctx1 astPat
+                            alt = Core.Alt patCore Nothing innerBody
+                            scrutinee = Core.EVar typedVar
+                        in
+                        Core.ECase scrutinee [ alt ] resultType
             in
-            Core.ELam typedVar innerBody (TArrow typedVar.type_ resultType)
+            Core.ELam typedVar finalBody (TArrow typedVar.type_ resultType)
 
 
 
