@@ -1415,14 +1415,19 @@ parseBinOpRest minPrec left state =
             in
             if isOp then
                 let
-                    ( prec, _ ) = getOperatorPrec opValue
+                    ( prec, assoc ) = getOperatorPrec opValue
                 in
                 if prec >= minPrec then
                     let
                         -- Advance past the operator token
                         state1 = advance state0
+                        -- For right-associative operators, use same precedence
+                        -- For left-associative, use prec + 1 to ensure left grouping
+                        nextPrec = case assoc of
+                            RightAssoc -> prec
+                            _ -> prec + 1
                     in
-                    case parseBinOpExpr (prec + 1) state1 of
+                    case parseBinOpExpr nextPrec state1 of
                         Err e -> Err e
                         Ok ( right, state2 ) ->
                             let
