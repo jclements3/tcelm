@@ -901,6 +901,27 @@ generateRuntime _ =
         , "    return elm_just(*result.data.c);"
         , "}"
         , ""
+        , "static elm_value_t elm_Result_map2(elm_value_t f, elm_value_t r1, elm_value_t r2) {"
+        , "    if (r1.tag == 300) return r1;"
+        , "    if (r2.tag == 300) return r2;"
+        , "    elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, *r1.data.c);"
+        , "    return elm_ok(elm_apply1((elm_closure_t *)f1.data.p, *r2.data.c));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Result_map3(elm_value_t f, elm_value_t r1, elm_value_t r2, elm_value_t r3) {"
+        , "    if (r1.tag == 300) return r1;"
+        , "    if (r2.tag == 300) return r2;"
+        , "    if (r3.tag == 300) return r3;"
+        , "    elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, *r1.data.c);"
+        , "    elm_value_t f2 = elm_apply1((elm_closure_t *)f1.data.p, *r2.data.c);"
+        , "    return elm_ok(elm_apply1((elm_closure_t *)f2.data.p, *r3.data.c));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Result_fromMaybe(elm_value_t errVal, elm_value_t maybe) {"
+        , "    if (maybe.tag == 200) return elm_err(errVal);"
+        , "    return elm_ok(*maybe.data.c);"
+        , "}"
+        , ""
         , "/* String module */"
         , "static elm_value_t elm_String_length(elm_value_t s) {"
         , "    return elm_int((int64_t)strlen(s.data.s));"
@@ -2894,6 +2915,9 @@ getFunctionArity ctx name =
         "Result.mapError" -> 2
         "Result.andThen" -> 2
         "Result.toMaybe" -> 1
+        "Result.map2" -> 3
+        "Result.map3" -> 4
+        "Result.fromMaybe" -> 2
 
         -- String module (unary)
         "String.length" -> 1
@@ -3122,6 +3146,7 @@ isBuiltin name =
         , "Maybe.withDefault", "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5"
         -- Result module
         , "Result.withDefault", "Result.map", "Result.mapError", "Result.andThen", "Result.toMaybe"
+        , "Result.map2", "Result.map3", "Result.fromMaybe"
         -- String module
         , "String.length", "String.isEmpty", "String.reverse", "String.concat"
         , "String.append", "String.join", "String.fromInt", "String.toInt", "String.fromFloat", "String.toFloat"

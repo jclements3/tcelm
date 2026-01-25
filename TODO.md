@@ -180,6 +180,10 @@
   - String.toList, String.fromList - convert to/from List Char
   - String.padLeft, String.padRight - pad strings with fill character
   - 124 tests passing
+- [x] 2026-01-25: More Result functions:
+  - Result.map2, Result.map3 - combine multiple Results
+  - Result.fromMaybe - convert Maybe to Result with error value
+  - 126 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
@@ -425,6 +429,8 @@ Result.andThen (\validated ->
 - [x] Result.andThen
 - [x] Result.withDefault
 - [x] Result.toMaybe
+- [x] Result.map2 / Result.map3
+- [x] Result.fromMaybe
 
 ### 3.6 Basics ✅ COMPLETE
 - [x] identity

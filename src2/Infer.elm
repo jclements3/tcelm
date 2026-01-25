@@ -317,6 +317,27 @@ builtinTypes =
                 (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
                     (TApp (TCon "Maybe") (TVar "a")))
           )
+        , ( "Result.map2"
+          , Scheme [ "e", "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
+                        (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "b"))
+                            (TApp (TApp (TCon "Result") (TVar "e")) (TVar "c")))))
+          )
+        , ( "Result.map3"
+          , Scheme [ "e", "a", "b", "c", "d" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TVar "d"))))
+                    (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
+                        (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "b"))
+                            (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "c"))
+                                (TApp (TApp (TCon "Result") (TVar "e")) (TVar "d"))))))
+          )
+        , ( "Result.fromMaybe"
+          , Scheme [ "e", "a" ] []
+                (TArrow (TVar "e")
+                    (TArrow (TApp (TCon "Maybe") (TVar "a"))
+                        (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))))
+          )
 
         -- String module
         , ( "String.length", Scheme [] [] (TArrow (TCon "String") (TCon "Int")) )
