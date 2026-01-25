@@ -40,7 +40,7 @@ import Codegen.Shared as Shared exposing (ExprCtx, MainValue(..), collectAllFunc
 import Codegen.Union as Union
 import Generate.C as C
 import Json.Decode as Decode
-import Target.RTEMS as RTEMS
+import Target.RTEMS as RTEMS exposing (CodegenConfig)
 import Target.TCC as TCC
 import Json.Encode as Encode
 import Parse.Module as Module
@@ -118,7 +118,7 @@ compile target source =
             let
                 cCode =
                     if target == "rtems" then
-                        generateRtemsCode ast
+                        RTEMS.generateCode rtemsCodegenConfig ast
 
                     else if target == "native" then
                         generateNativeCode ast
@@ -150,6 +150,19 @@ compile target source =
                 [ ( "success", Encode.bool False )
                 , ( "error", Encode.string (formatErrors errors) )
                 ]
+
+
+{-| Configuration for RTEMS code generation.
+Provides callbacks to shared code generation functions.
+-}
+rtemsCodegenConfig : CodegenConfig
+rtemsCodegenConfig =
+    { extractMain = extractMain
+    , generateImportCode = generateImportCode
+    , generateUserFunction = generateUserFunction
+    , collectLocalFunctionsWithScope = collectLocalFunctionsWithScope
+    , generateLiftedFunction = generateLiftedFunction
+    }
 
 
 {-| Generate C code for RTEMS target (x86_64) with Init wrapper

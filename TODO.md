@@ -2,15 +2,19 @@
 
 ## Current Progress
 
-**Last Updated**: 2025-01-24
-**Last Session**: Created TODO.md, analyzed codebase structure
-**Next Action**: Start Phase 1.1 - Extract Target/RTEMS.elm from Cli.elm
+**Last Updated**: 2026-01-24
+**Last Session**: Extracted RTEMS code generation to Target/RTEMS.elm
+**Next Action**: Continue Phase 1.1 - Extract Target/Native.elm from Cli.elm
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
 - [x] 2025-01-24: Analyzed Cli.elm structure (6,353 lines, 168 case statements)
 - [x] 2025-01-24: Documented Codegen/ module responsibilities
-- [ ] **NEXT**: Extract generateRtemsCode (lines 159-770) to Target/RTEMS.elm
+- [x] 2026-01-24: Extracted generateRtemsCode to Target/RTEMS.elm (~1600 lines)
+  - Created CodegenConfig type for callback injection pattern
+  - Moved all RTEMS preambles, runtime code, helpers
+  - Cli.elm now calls RTEMS.generateCode via config
+- [ ] **NEXT**: Extract generateNativeCode (lines 775-851) to Target/Native.elm
 
 ---
 
@@ -35,7 +39,7 @@
 Goal: Reduce Cli.elm from 6,353 lines to <2,000 lines by extracting to focused modules.
 
 ### 1.1 Extract Target Generators
-- [ ] Create `Target/RTEMS.elm` - move generateRtemsCode (lines 159-770)
+- [x] Create `Target/RTEMS.elm` - move generateRtemsCode (lines 159-770)
 - [ ] Create `Target/Native.elm` - move generateNativeCode (lines 775-851)
 - [ ] Create `Target/TCC.elm` - move generateTccCode, generateTccLibCode, generateTccHeader (lines 858-1620)
 - [ ] Keep Cli.elm as thin orchestrator that calls Target modules
@@ -278,7 +282,8 @@ Goal: Develop in browser, deploy to RTEMS.
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| src/Cli.elm | Main CLI, all code generators | 6,353 |
+| src/Cli.elm | Main CLI, orchestrates code generators | 6,353 |
+| src/Target/RTEMS.elm | RTEMS target code generation | ~1,600 |
 | src/Generate/C.elm | Module-based C generation | ~500 |
 | src/Codegen/Shared.elm | Common types and helpers | 343 |
 | src/Codegen/Expr.elm | Expression generation | 240 |
