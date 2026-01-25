@@ -334,13 +334,14 @@
   - Added looksLikeCaseBranch to detect and stop at case branch patterns
   - `Dict.update key (\maybeVal -> case ...) dict` now parses correctly
   - 256 tests passing
-- [ ] **ISSUE**: Do-notation parsing not working correctly
-  - `do { x <- Ok 10; Ok x }` produces incorrect Core IR
-  - Pre-existing issue, not related to recent parser changes
-- [ ] **ISSUE**: Type inference for cons patterns (x :: xs)
-  - Type error: "Unbound variable: x" for pattern `x :: xs`
-  - Affects: pattern05_semigroup_min, pattern05_semigroup_max
-- [ ] **NEXT**: Fix do-notation parsing/desugaring
+- [x] 2026-01-25: Fixed cons patterns and tuple let bindings
+  - Parser: scanForArrow now recognizes `::` as pattern component
+  - Parser: looksLikeLetBinding now handles tuple/record/list patterns
+  - Type inference: apply substitution to let binding types
+  - Fixed: `x :: xs -> x` patterns in case branches work
+  - Fixed: `let (a, b) = expr in ...` after simple bindings work
+  - 265 tests passing (all FP patterns pass)
+- [ ] **NEXT**: Continue testing and improving compiler robustness
 
 ---
 
