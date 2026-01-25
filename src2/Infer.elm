@@ -168,6 +168,25 @@ builtinTypes =
                     (TArrow (TVar "b") (TArrow (TVar "a") (TVar "c"))))
           )
 
+        -- Order type
+        , ( "LT", Scheme [] [] (TCon "Order") )
+        , ( "EQ", Scheme [] [] (TCon "Order") )
+        , ( "GT", Scheme [] [] (TCon "Order") )
+        , ( "compare"
+          , Scheme [ "comparable" ] []
+                (TArrow (TVar "comparable") (TArrow (TVar "comparable") (TCon "Order")))
+          )
+        , ( "curry"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "c"))
+                    (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c"))))
+          )
+        , ( "uncurry"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TTuple [ TVar "a", TVar "b" ]) (TVar "c")))
+          )
+
         -- List module
         , ( "List.isEmpty", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")) )
         , ( "List.length", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Int")) )

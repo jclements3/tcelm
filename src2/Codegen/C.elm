@@ -514,6 +514,54 @@ generateRuntime _ =
         , "    return elm_apply1((elm_closure_t *)elm_apply1((elm_closure_t *)f.data.p, a).data.p, b);"
         , "}"
         , ""
+        , "/* Order type - LT (700), EQ (701), GT (702) */"
+        , "static elm_value_t elm_lt(void) { return (elm_value_t){ .tag = 700, .data.p = NULL, .next = NULL }; }"
+        , "static elm_value_t elm_eq(void) { return (elm_value_t){ .tag = 701, .data.p = NULL, .next = NULL }; }"
+        , "static elm_value_t elm_gt(void) { return (elm_value_t){ .tag = 702, .data.p = NULL, .next = NULL }; }"
+        , ""
+        , "static elm_value_t elm_compare(elm_value_t a, elm_value_t b) {"
+        , "    /* Compare integers (tag 0) */"
+        , "    if (a.tag == 0 && b.tag == 0) {"
+        , "        if (a.data.i < b.data.i) return elm_lt();"
+        , "        if (a.data.i > b.data.i) return elm_gt();"
+        , "        return elm_eq();"
+        , "    }"
+        , "    /* Compare floats (tag 1) */"
+        , "    if (a.tag == 1 && b.tag == 1) {"
+        , "        if (a.data.f < b.data.f) return elm_lt();"
+        , "        if (a.data.f > b.data.f) return elm_gt();"
+        , "        return elm_eq();"
+        , "    }"
+        , "    /* Compare strings (tag 2) */"
+        , "    if (a.tag == 2 && b.tag == 2) {"
+        , "        int cmp = strcmp(a.data.s, b.data.s);"
+        , "        if (cmp < 0) return elm_lt();"
+        , "        if (cmp > 0) return elm_gt();"
+        , "        return elm_eq();"
+        , "    }"
+        , "    /* Compare chars (tag 3) */"
+        , "    if (a.tag == 3 && b.tag == 3) {"
+        , "        if (a.data.i < b.data.i) return elm_lt();"
+        , "        if (a.data.i > b.data.i) return elm_gt();"
+        , "        return elm_eq();"
+        , "    }"
+        , "    /* Default: EQ for same tag, LT otherwise */"
+        , "    return elm_eq();"
+        , "}"
+        , ""
+        , "static elm_value_t elm_curry(elm_value_t f, elm_value_t a, elm_value_t b) {"
+        , "    /* curry : ((a, b) -> c) -> a -> b -> c */"
+        , "    return elm_apply1((elm_closure_t *)f.data.p, elm_tuple2(a, b));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_uncurry(elm_value_t f, elm_value_t tuple) {"
+        , "    /* uncurry : (a -> b -> c) -> (a, b) -> c */"
+        , "    elm_value_t a = *tuple.data.c;"
+        , "    elm_value_t b = *tuple.next;"
+        , "    elm_value_t f1 = elm_apply1((elm_closure_t *)f.data.p, a);"
+        , "    return elm_apply1((elm_closure_t *)f1.data.p, b);"
+        , "}"
+        , ""
         , "static elm_value_t elm_min(elm_value_t a, elm_value_t b) {"
         , "    return a.data.i < b.data.i ? a : b;"
         , "}"
@@ -2638,11 +2686,14 @@ generateConAccum ctx renames name args =
                 "Err" -> "elm_err"
                 "True" -> "elm_bool(true)"
                 "False" -> "elm_bool(false)"
+                "LT" -> "elm_lt"
+                "EQ" -> "elm_eq"
+                "GT" -> "elm_gt"
                 _ -> "elm_" ++ name
 
         resultCode =
-            if List.isEmpty args && (name == "True" || name == "False") then
-                funcName
+            if List.isEmpty args && (name == "True" || name == "False" || name == "LT" || name == "EQ" || name == "GT") then
+                funcName ++ "()"
             else
                 funcName ++ "(" ++ String.join ", " argCodes ++ ")"
     in
@@ -2868,6 +2919,14 @@ getFunctionArity ctx name =
         "abs" -> 1
         "modBy" -> 2
         "remainderBy" -> 2
+        "compare" -> 2
+        "curry" -> 3
+        "uncurry" -> 2
+
+        -- Order type (nullary)
+        "LT" -> 0
+        "EQ" -> 0
+        "GT" -> 0
 
         -- List module (unary)
         "List.isEmpty" -> 1
@@ -3138,7 +3197,9 @@ isBuiltin name =
         , "_op_append", "_op_cons"
         -- Basics module
         , "identity", "always", "flip", "min", "max", "clamp", "abs"
-        , "modBy", "remainderBy"
+        , "modBy", "remainderBy", "compare", "curry", "uncurry"
+        -- Order type
+        , "LT", "EQ", "GT"
         -- List module
         , "List.isEmpty", "List.length", "List.reverse", "List.member"
         , "List.head", "List.tail", "List.take", "List.drop"
@@ -3618,10 +3679,13 @@ generateConWithRenames ctx renames name args =
                 "Err" -> "elm_err"
                 "True" -> "elm_bool(true)"
                 "False" -> "elm_bool(false)"
+                "LT" -> "elm_lt"
+                "EQ" -> "elm_eq"
+                "GT" -> "elm_gt"
                 _ -> "elm_" ++ name
     in
-    if List.isEmpty args && (name == "True" || name == "False") then
-        funcName
+    if List.isEmpty args && (name == "True" || name == "False" || name == "LT" || name == "EQ" || name == "GT") then
+        funcName ++ "()"
     else
         funcName ++ "(" ++ argCodes ++ ")"
 
@@ -3872,10 +3936,13 @@ generateCon ctx name args =
                 "Err" -> "elm_err"
                 "True" -> "elm_bool(true)"
                 "False" -> "elm_bool(false)"
+                "LT" -> "elm_lt"
+                "EQ" -> "elm_eq"
+                "GT" -> "elm_gt"
                 _ -> "elm_" ++ name
     in
-    if List.isEmpty args && (name == "True" || name == "False") then
-        funcName
+    if List.isEmpty args && (name == "True" || name == "False" || name == "LT" || name == "EQ" || name == "GT") then
+        funcName ++ "()"
     else
         funcName ++ "(" ++ argCodes ++ ")"
 
@@ -4010,6 +4077,9 @@ generateMain ctx =
             , "            printf(\")\");"
             , "            break;"
             , "        }"
+            , "        case 700: printf(\"LT\"); break;"
+            , "        case 701: printf(\"EQ\"); break;"
+            , "        case 702: printf(\"GT\"); break;"
             , "        default: printf(\"<value:%d>\", v.tag); break;"
             , "    }"
             , "}"

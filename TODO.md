@@ -184,6 +184,8 @@
   - Result.map2, Result.map3 - combine multiple Results
   - Result.fromMaybe - convert Maybe to Result with error value
   - 126 tests passing
+- [x] 2026-01-25: List.singleton
+  - 127 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
