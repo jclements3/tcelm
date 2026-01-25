@@ -161,7 +161,12 @@
   - Bitwise.and, Bitwise.or, Bitwise.xor, Bitwise.complement
   - Bitwise.shiftLeftBy, Bitwise.shiftRightBy, Bitwise.shiftRightZfBy
   - 114 tests passing
-- [ ] **NEXT**: Type classes, FFI, Array module
+- [x] 2026-01-25: Array module (list-based implementation):
+  - Array.empty, fromList, toList, toIndexedList, length, isEmpty
+  - Array.get, set, push, append, slice
+  - Array.map, indexedMap, foldl, foldr, filter
+  - 119 tests passing
+- [ ] **NEXT**: Type classes, FFI
 
 ---
 
