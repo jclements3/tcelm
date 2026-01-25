@@ -1558,6 +1558,122 @@ generateRuntime _ =
         , "    /* Unsigned right shift - need to cast to unsigned first */"
         , "    return elm_int((int64_t)((uint64_t)value.data.i >> bits.data.i));"
         , "}"
+        , ""
+        , "/* ===== ARRAY MODULE ===== */"
+        , "/* Array implemented as a list for simplicity - can optimize to true arrays later */"
+        , ""
+        , "static elm_value_t elm_Array_empty(void) {"
+        , "    return elm_nil();"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_fromList(elm_value_t list) {"
+        , "    return list;  /* Array is just a list for now */"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_toList(elm_value_t arr) {"
+        , "    return arr;  /* Array is just a list for now */"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_toIndexedList(elm_value_t arr) {"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = arr;"
+        , "    int64_t i = 0;"
+        , "    while (xs.tag == 101) {"
+        , "        result = elm_cons(elm_tuple2(elm_int(i), *xs.data.c), result);"
+        , "        i++;"
+        , "        xs = *xs.next;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_length(elm_value_t arr) {"
+        , "    return elm_List_length(arr);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_isEmpty(elm_value_t arr) {"
+        , "    return elm_bool(arr.tag == 100);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_get(elm_value_t index, elm_value_t arr) {"
+        , "    int64_t i = index.data.i;"
+        , "    if (i < 0) return elm_nothing();"
+        , "    elm_value_t xs = arr;"
+        , "    while (xs.tag == 101 && i > 0) {"
+        , "        xs = *xs.next;"
+        , "        i--;"
+        , "    }"
+        , "    if (xs.tag == 101) return elm_just(*xs.data.c);"
+        , "    return elm_nothing();"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_set(elm_value_t index, elm_value_t value, elm_value_t arr) {"
+        , "    int64_t targetIdx = index.data.i;"
+        , "    if (targetIdx < 0) return arr;"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = arr;"
+        , "    int64_t i = 0;"
+        , "    while (xs.tag == 101) {"
+        , "        if (i == targetIdx) {"
+        , "            result = elm_cons(value, result);"
+        , "        } else {"
+        , "            result = elm_cons(*xs.data.c, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "        i++;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_push(elm_value_t value, elm_value_t arr) {"
+        , "    return elm_List_append(arr, elm_cons(value, elm_nil()));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_append(elm_value_t arr1, elm_value_t arr2) {"
+        , "    return elm_List_append(arr1, arr2);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_slice(elm_value_t start, elm_value_t end, elm_value_t arr) {"
+        , "    int64_t s = start.data.i;"
+        , "    int64_t e = end.data.i;"
+        , "    int64_t len = elm_List_length(arr).data.i;"
+        , "    /* Handle negative indices */"
+        , "    if (s < 0) s = len + s;"
+        , "    if (e < 0) e = len + e;"
+        , "    if (s < 0) s = 0;"
+        , "    if (e > len) e = len;"
+        , "    if (s >= e) return elm_nil();"
+        , "    elm_value_t result = elm_nil();"
+        , "    elm_value_t xs = arr;"
+        , "    int64_t i = 0;"
+        , "    while (xs.tag == 101 && i < e) {"
+        , "        if (i >= s) {"
+        , "            result = elm_cons(*xs.data.c, result);"
+        , "        }"
+        , "        xs = *xs.next;"
+        , "        i++;"
+        , "    }"
+        , "    return elm_List_reverse(result);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_map(elm_value_t f, elm_value_t arr) {"
+        , "    return elm_List_map(f, arr);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_indexedMap(elm_value_t f, elm_value_t arr) {"
+        , "    return elm_List_indexedMap(f, arr);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_foldl(elm_value_t f, elm_value_t acc, elm_value_t arr) {"
+        , "    return elm_List_foldl(f, acc, arr);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_foldr(elm_value_t f, elm_value_t acc, elm_value_t arr) {"
+        , "    return elm_List_foldr(f, acc, arr);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Array_filter(elm_value_t pred, elm_value_t arr) {"
+        , "    return elm_List_filter(pred, arr);"
+        , "}"
         ]
 
 
@@ -2597,6 +2713,30 @@ getFunctionArity ctx name =
         "Bitwise.shiftRightBy" -> 2
         "Bitwise.shiftRightZfBy" -> 2
 
+        -- Array module (zero-arity)
+        "Array.empty" -> 0
+
+        -- Array module (unary)
+        "Array.fromList" -> 1
+        "Array.toList" -> 1
+        "Array.toIndexedList" -> 1
+        "Array.length" -> 1
+        "Array.isEmpty" -> 1
+
+        -- Array module (binary)
+        "Array.get" -> 2
+        "Array.push" -> 2
+        "Array.append" -> 2
+        "Array.map" -> 2
+        "Array.indexedMap" -> 2
+        "Array.filter" -> 2
+
+        -- Array module (ternary)
+        "Array.set" -> 3
+        "Array.slice" -> 3
+        "Array.foldl" -> 3
+        "Array.foldr" -> 3
+
         -- User-defined functions - get arity from definition
         _ ->
             case Dict.get name ctx.functions of
@@ -2712,6 +2852,11 @@ isBuiltin name =
         -- Bitwise module
         , "Bitwise.and", "Bitwise.or", "Bitwise.xor", "Bitwise.complement"
         , "Bitwise.shiftLeftBy", "Bitwise.shiftRightBy", "Bitwise.shiftRightZfBy"
+        -- Array module
+        , "Array.empty", "Array.fromList", "Array.toList", "Array.toIndexedList"
+        , "Array.length", "Array.isEmpty", "Array.get", "Array.set"
+        , "Array.push", "Array.append", "Array.slice"
+        , "Array.map", "Array.indexedMap", "Array.foldl", "Array.foldr", "Array.filter"
         ]
 
 

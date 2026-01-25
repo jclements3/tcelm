@@ -496,6 +496,78 @@ builtinTypes =
         , ( "Bitwise.shiftLeftBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
         , ( "Bitwise.shiftRightBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
         , ( "Bitwise.shiftRightZfBy", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int"))) )
+
+        -- Array module
+        , ( "Array.empty"
+          , Scheme [ "a" ] [] (TApp (TCon "Array") (TVar "a"))
+          )
+        , ( "Array.fromList"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Array") (TVar "a")))
+          )
+        , ( "Array.toList"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "List") (TVar "a")))
+          )
+        , ( "Array.toIndexedList"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "List") (TTuple [ TCon "Int", TVar "a" ])))
+          )
+        , ( "Array.length"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Array") (TVar "a")) (TCon "Int"))
+          )
+        , ( "Array.isEmpty"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Array") (TVar "a")) (TCon "Bool"))
+          )
+        , ( "Array.get"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int") (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))))
+          )
+        , ( "Array.set"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int") (TArrow (TVar "a") (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "a")))))
+          )
+        , ( "Array.push"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "a"))))
+          )
+        , ( "Array.append"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Array") (TVar "a")) (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "a"))))
+          )
+        , ( "Array.slice"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int") (TArrow (TCon "Int") (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "a")))))
+          )
+        , ( "Array.map"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "b"))))
+          )
+        , ( "Array.indexedMap"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TCon "Int") (TArrow (TVar "a") (TVar "b")))
+                    (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "b"))))
+          )
+        , ( "Array.foldl"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b")
+                        (TArrow (TApp (TCon "Array") (TVar "a")) (TVar "b"))))
+          )
+        , ( "Array.foldr"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b")
+                        (TArrow (TApp (TCon "Array") (TVar "a")) (TVar "b"))))
+          )
+        , ( "Array.filter"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "Array") (TVar "a")) (TApp (TCon "Array") (TVar "a"))))
+          )
         ]
 
 
