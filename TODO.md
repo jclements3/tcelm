@@ -202,7 +202,7 @@
   - 150 tests passing
 - [x] 2026-01-25: More standard library functions
   - Tuple.mapBoth - apply functions to both tuple elements
-  - String.fromChar - convert single Char to String
+  - String.fromChar, String.indexes, String.indices - char/search functions
   - String.replace - replace all occurrences of a substring
   - List.sortWith - sort with custom comparator (a -> a -> Order)
   - Char.isHexDigit, Char.isOctDigit, Char.isSpace - more character classifiers
@@ -211,8 +211,9 @@
   - Dict.partition, Set.partition - split by predicate
   - Debug.todo - crash with message for incomplete code
   - Fixed: LT/EQ/GT constructors now in builtinConstructors
-  - 162 tests passing, ~240 builtin functions
-- [ ] **NEXT**: Type classes, Task support for FFI
+  - 163 tests passing, ~245 builtin functions
+  - FFI working (foreign import generates wrappers for C functions)
+- [ ] **NEXT**: Type classes (infrastructure ready, needs instance resolution), Task support
 
 ---
 
