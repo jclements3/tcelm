@@ -45,6 +45,7 @@ type alias Env =
     , classes : Dict ClassName TypeClass
     , instances : List Instance
     , constructors : Dict String Scheme  -- data constructor types
+    , typeAliases : Dict String ( List String, Type )  -- alias name -> (type params, expanded type)
     }
 
 
@@ -54,6 +55,7 @@ emptyEnv =
     , classes = builtinClasses
     , instances = builtinInstances
     , constructors = builtinConstructors
+    , typeAliases = Dict.empty
     }
 
 
@@ -1447,6 +1449,108 @@ qualNameToTypeName qname =
         Nothing -> qname.name
 
 
+{-| Expand type aliases in a Type.
+    Takes the alias map and the type to expand.
+    Handles parametric aliases like `type alias MyList a = List a`.
+-}
+expandTypeAliases : Dict String ( List String, Type ) -> Type -> Type
+expandTypeAliases aliases ty =
+    case ty of
+        TCon name ->
+            case Dict.get name aliases of
+                Just ( [], aliasBody ) ->
+                    -- Non-parametric alias, expand it (recursively)
+                    expandTypeAliases aliases aliasBody
+
+                Just ( params, _ ) ->
+                    -- Parametric alias used without arguments - error or leave as-is
+                    -- For now, leave as-is (may cause unification error later)
+                    TCon name
+
+                Nothing ->
+                    TCon name
+
+        TApp left right ->
+            -- Check if this is an alias application like `MyList Int`
+            case collectAppArgs ty of
+                ( TCon name, args ) ->
+                    case Dict.get name aliases of
+                        Just ( params, aliasBody ) ->
+                            if List.length params == List.length args then
+                                -- Substitute type parameters with arguments
+                                let
+                                    paramSubst = Dict.fromList (List.map2 Tuple.pair params args)
+                                    expanded = substituteTypeVars paramSubst aliasBody
+                                in
+                                expandTypeAliases aliases expanded
+                            else
+                                -- Wrong number of arguments, leave partially applied
+                                TApp (expandTypeAliases aliases left) (expandTypeAliases aliases right)
+
+                        Nothing ->
+                            TApp (expandTypeAliases aliases left) (expandTypeAliases aliases right)
+
+                _ ->
+                    TApp (expandTypeAliases aliases left) (expandTypeAliases aliases right)
+
+        TArrow left right ->
+            TArrow (expandTypeAliases aliases left) (expandTypeAliases aliases right)
+
+        TRecord fields maybeRow ->
+            TRecord
+                (List.map (\( name, fieldTy ) -> ( name, expandTypeAliases aliases fieldTy )) fields)
+                maybeRow
+
+        TTuple types ->
+            TTuple (List.map (expandTypeAliases aliases) types)
+
+        TVar _ ->
+            ty
+
+
+{-| Collect arguments from a chain of TApp nodes.
+    `TApp (TApp (TCon "Dict") (TCon "String")) (TCon "Int")`
+    becomes `(TCon "Dict", [TCon "String", TCon "Int"])`
+-}
+collectAppArgs : Type -> ( Type, List Type )
+collectAppArgs ty =
+    case ty of
+        TApp left right ->
+            let
+                ( head, args ) = collectAppArgs left
+            in
+            ( head, args ++ [ right ] )
+
+        _ ->
+            ( ty, [] )
+
+
+{-| Substitute type variables in a type with concrete types.
+-}
+substituteTypeVars : Dict String Type -> Type -> Type
+substituteTypeVars subst ty =
+    case ty of
+        TVar name ->
+            Dict.get name subst |> Maybe.withDefault ty
+
+        TCon _ ->
+            ty
+
+        TApp left right ->
+            TApp (substituteTypeVars subst left) (substituteTypeVars subst right)
+
+        TArrow left right ->
+            TArrow (substituteTypeVars subst left) (substituteTypeVars subst right)
+
+        TRecord fields maybeRow ->
+            TRecord
+                (List.map (\( name, fieldTy ) -> ( name, substituteTypeVars subst fieldTy )) fields)
+                maybeRow
+
+        TTuple types ->
+            TTuple (List.map (substituteTypeVars subst) types)
+
+
 {-| Get free type variables from a type annotation.
 -}
 typeAnnotationFreeVars : AST.TypeAnnotation -> List String
@@ -2615,20 +2719,41 @@ inferDecl env decl =
             let
                 name = AST.getValue valueDef.name
 
-                -- For recursive functions, we need to add a preliminary type binding
-                -- Create a fresh type variable for the function's type
-                ( prelimTy, state0 ) = freshTypeVar initialState
+                -- If there's a type annotation, use it (with alias expansion)
+                -- Otherwise, create a fresh type variable
+                ( prelimTy, state0 ) =
+                    case valueDef.typeAnnotation of
+                        Just locAnn ->
+                            let
+                                rawTy = typeAnnotationToType (AST.getValue locAnn)
+                                expandedTy = expandTypeAliases env.typeAliases rawTy
+                            in
+                            ( expandedTy, initialState )
+
+                        Nothing ->
+                            freshTypeVar initialState
 
                 -- Add the function name to the environment with a preliminary type
                 -- This allows recursive calls within the body to find the function
-                envWithSelf = extendEnv name (Scheme [] [] prelimTy) env
+                prelimScheme =
+                    case valueDef.typeAnnotation of
+                        Just locAnn ->
+                            let
+                                freeVars = typeAnnotationFreeVars (AST.getValue locAnn) |> Set.fromList |> Set.toList
+                            in
+                            Scheme freeVars [] prelimTy
+
+                        Nothing ->
+                            Scheme [] [] prelimTy
+
+                envWithSelf = extendEnv name prelimScheme env
             in
             case inferValueDef envWithSelf valueDef state0 of
                 Err e ->
                     Err e
 
                 Ok ( ty, state ) ->
-                    -- Unify the inferred type with the preliminary type
+                    -- Unify the inferred type with the preliminary/annotated type
                     case unify prelimTy ty of
                         Err e ->
                             Err e
@@ -2641,9 +2766,14 @@ inferDecl env decl =
                             in
                             Ok (extendEnv name scheme env)
 
-        AST.TypeAliasDecl _ ->
-            -- Type aliases are handled during kind checking
-            Ok env
+        AST.TypeAliasDecl aliasDef ->
+            -- Store type alias for expansion during type checking
+            let
+                aliasName = AST.getValue aliasDef.name
+                typeParams = List.map AST.getValue aliasDef.typeVars
+                aliasBody = typeAnnotationToType (AST.getValue aliasDef.body)
+            in
+            Ok { env | typeAliases = Dict.insert aliasName ( typeParams, aliasBody ) env.typeAliases }
 
         AST.CustomTypeDecl typeDef ->
             -- Add constructor types to environment
@@ -2713,7 +2843,8 @@ inferDecl env decl =
             let
                 name = AST.getValue foreignDef.name
                 typeAnn = AST.getValue foreignDef.type_
-                ty = typeAnnotationToType typeAnn
+                rawTy = typeAnnotationToType typeAnn
+                ty = expandTypeAliases env.typeAliases rawTy
                 freeVars = typeAnnotationFreeVars typeAnn |> Set.fromList |> Set.toList
                 scheme = Scheme freeVars [] ty
             in
