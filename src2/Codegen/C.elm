@@ -1178,8 +1178,13 @@ generateExprAccum ctx renames expr =
                     let
                         mangledName = mangleWithModule ctx name
                         arity = getFunctionArity ctx name
+                        -- Check if this is a local variable (shadows builtins with same name)
+                        isLocalVar = Set.member name ctx.localVars
                     in
                     if Set.member name ctx.closureParams then
+                        ( mangledName, ctx )
+                    else if isLocalVar then
+                        -- Local variable, use as-is (it's a closure value)
                         ( mangledName, ctx )
                     else if Dict.member name ctx.functions && arity > 0 then
                         ( generateFunctionClosure ctx mangledName arity, ctx )
@@ -1370,7 +1375,9 @@ generateAppAccum ctx renames func arg =
                 Nothing ->
                     let
                         mangledName = mangleWithModule ctx funcName
-                        isKnownFunction = Dict.member funcName ctx.functions || isBuiltin funcName
+                        -- Check if this is a local variable (shadows builtins with same name)
+                        isLocalVar = Set.member funcName ctx.localVars
+                        isKnownFunction = not isLocalVar && (Dict.member funcName ctx.functions || isBuiltin funcName)
                     in
                     if Set.member funcName ctx.closureParams || not isKnownFunction then
                         generateClosureApplyAccum ctx renames mangledName allArgs
@@ -1472,7 +1479,9 @@ generateLetAccum ctx renames var value body =
     let
         ( valueCode, ctx1 ) = generateExprAccum ctx renames value
         bodyRenames = Dict.remove var renames
-        ( bodyCode, ctx2 ) = generateExprAccum ctx1 bodyRenames body
+        -- Add let-bound variable to localVars so it shadows builtins with same name
+        bodyCtx = { ctx1 | localVars = Set.insert var ctx1.localVars }
+        ( bodyCode, ctx2 ) = generateExprAccum bodyCtx bodyRenames body
     in
     ( "({ elm_value_t " ++ mangle var ++ " = " ++ valueCode ++ "; " ++ bodyCode ++ "; })", ctx2 )
 
@@ -1482,6 +1491,8 @@ generateLetRecAccum ctx renames bindings body =
     let
         boundNames = List.map Tuple.first bindings
         innerRenames = List.foldl Dict.remove renames boundNames
+        -- Add let-rec bound variables to localVars so they shadow builtins
+        innerCtx = { ctx | localVars = Set.union ctx.localVars (Set.fromList boundNames) }
 
         decls =
             bindings
@@ -1496,7 +1507,7 @@ generateLetRecAccum ctx renames bindings body =
                     in
                     ( strs ++ [ mangle name ++ " = " ++ code ++ ";" ], newCtx )
                 )
-                ( [], ctx )
+                ( [], innerCtx )
                 bindings
 
         ( bodyCode, ctx2 ) = generateExprAccum ctx1 innerRenames body
@@ -2057,8 +2068,13 @@ generateExprWithRenames ctx renames expr =
                     let
                         mangledName = mangleWithModule ctx name
                         arity = getFunctionArity ctx name
+                        -- Check if this is a local variable (shadows builtins with same name)
+                        isLocalVar = Set.member name ctx.localVars
                     in
                     if Set.member name ctx.closureParams then
+                        mangledName
+                    else if isLocalVar then
+                        -- Local variable, use as-is (it's a closure value)
                         mangledName
                     else if Dict.member name ctx.functions && arity > 0 then
                         generateFunctionClosure ctx mangledName arity
@@ -2084,7 +2100,9 @@ generateExprWithRenames ctx renames expr =
                 valueCode = generateExprWithRenames ctx renames value
                 -- Remove var from renames in case it shadows a captured var
                 bodyRenames = Dict.remove var renames
-                bodyCode = generateExprWithRenames ctx bodyRenames body
+                -- Add let-bound variable to localVars so it shadows builtins with same name
+                bodyCtx = { ctx | localVars = Set.insert var ctx.localVars }
+                bodyCode = generateExprWithRenames bodyCtx bodyRenames body
             in
             "({ elm_value_t " ++ mangle var ++ " = " ++ valueCode ++ "; " ++ bodyCode ++ "; })"
 
@@ -2093,6 +2111,8 @@ generateExprWithRenames ctx renames expr =
                 boundNames = List.map Tuple.first bindings
                 -- Remove all bound names from renames
                 innerRenames = List.foldl Dict.remove renames boundNames
+                -- Add let-rec bound variables to localVars so they shadow builtins
+                innerCtx = { ctx | localVars = Set.union ctx.localVars (Set.fromList boundNames) }
 
                 decls =
                     bindings
@@ -2102,11 +2122,11 @@ generateExprWithRenames ctx renames expr =
                 assigns =
                     bindings
                         |> List.map (\( name, e ) ->
-                            mangle name ++ " = " ++ generateExprWithRenames ctx innerRenames e ++ ";"
+                            mangle name ++ " = " ++ generateExprWithRenames innerCtx innerRenames e ++ ";"
                         )
                         |> String.join " "
 
-                bodyCode = generateExprWithRenames ctx innerRenames body
+                bodyCode = generateExprWithRenames innerCtx innerRenames body
             in
             "({ " ++ decls ++ " " ++ assigns ++ " " ++ bodyCode ++ "; })"
 
@@ -2183,7 +2203,9 @@ generateAppWithRenames ctx renames func arg =
                 Nothing ->
                     let
                         mangledName = mangleWithModule ctx funcName
-                        isKnownFunction = Dict.member funcName ctx.functions || isBuiltin funcName
+                        -- Check if this is a local variable (shadows builtins with same name)
+                        isLocalVar = Set.member funcName ctx.localVars
+                        isKnownFunction = not isLocalVar && (Dict.member funcName ctx.functions || isBuiltin funcName)
                     in
                     if Set.member funcName ctx.closureParams || not isKnownFunction then
                         generateClosureApplyWithRenames ctx renames mangledName allArgs
