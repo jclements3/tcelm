@@ -2102,7 +2102,9 @@ inferLet env bindings body state =
 
                 Ok ( bindTy, state1 ) ->
                     let
-                        patBinds = patternBindings (AST.getValue letBind.pattern) bindTy
+                        -- Apply substitution to get the resolved type
+                        resolvedBindTy = applySubst state1.substitution bindTy
+                        patBinds = patternBindings (AST.getValue letBind.pattern) resolvedBindTy
                         env1 =
                             List.foldl
                                 (\( name, ty ) e ->

@@ -2020,11 +2020,51 @@ looksLikeLetBinding : ParseState -> Bool
 looksLikeLetBinding state =
     case currentToken state of
         Just tok ->
-            if tok.type_ == LowerIdent then
-                scanForEqualsVsArrow (advance state) 0
-            else
-                False
+            case tok.type_ of
+                -- Simple variable binding: name = ...
+                LowerIdent ->
+                    scanForEqualsVsArrow (advance state) 0
+                -- Complex pattern binding: (a, b) = ... or { a, b } = ... or [a, b] = ...
+                LParen ->
+                    scanForEqualsAfterParen (advance state) 1
+                LBrace ->
+                    scanForEqualsAfterParen (advance state) 1
+                LBracket ->
+                    scanForEqualsAfterParen (advance state) 1
+                _ ->
+                    False
         Nothing -> False
+
+
+{-| Scan for = after a complex pattern (paren/brace/bracket).
+    Must track balanced parens to find the closing delimiter, then check for =.
+-}
+scanForEqualsAfterParen : ParseState -> Int -> Bool
+scanForEqualsAfterParen state nestLevel =
+    if nestLevel > 50 then
+        False
+    else if nestLevel == 0 then
+        -- We've closed all parens, check if next token is =
+        case currentToken state of
+            Just t ->
+                t.type_ == Equals
+            Nothing ->
+                False
+    else
+        case currentToken state of
+            Just t ->
+                case t.type_ of
+                    LParen -> scanForEqualsAfterParen (advance state) (nestLevel + 1)
+                    LBrace -> scanForEqualsAfterParen (advance state) (nestLevel + 1)
+                    LBracket -> scanForEqualsAfterParen (advance state) (nestLevel + 1)
+                    RParen -> scanForEqualsAfterParen (advance state) (nestLevel - 1)
+                    RBrace -> scanForEqualsAfterParen (advance state) (nestLevel - 1)
+                    RBracket -> scanForEqualsAfterParen (advance state) (nestLevel - 1)
+                    Newline -> False  -- Hit newline before closing, not a let binding
+                    Indent _ -> False
+                    _ -> scanForEqualsAfterParen (advance state) nestLevel
+            Nothing ->
+                False
 
 
 {-| Scan ahead looking for = (let binding) or -> (case branch).
@@ -2106,6 +2146,7 @@ scanForArrow state depth =
                     CharLit -> scanForArrow (advance state) (depth + 1)
                     Dot -> scanForArrow (advance state) (depth + 1)  -- Qualified names in patterns
                     KwAs -> scanForArrow (advance state) (depth + 1)  -- pattern as name
+                    DoubleColon -> scanForArrow (advance state) (depth + 1)  -- Cons pattern (x :: xs)
                     -- Stop at things that indicate not a pattern
                     Equals -> False  -- Let binding
                     Newline -> False
