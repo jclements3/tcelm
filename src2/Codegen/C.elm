@@ -1291,6 +1291,17 @@ generateRuntime _ =
         , "    return millis; /* Posix is just Int in milliseconds */"
         , "}"
         , ""
+        , "/* Process module */"
+        , "static elm_value_t elm_Process_sleep(elm_value_t ms) {"
+        , "    /* Sleep for given milliseconds (as Float for Elm compatibility) */"
+        , "    double millis = ms.data.f;"
+        , "    struct timespec ts;"
+        , "    ts.tv_sec = (time_t)(millis / 1000);"
+        , "    ts.tv_nsec = (long)((millis - ts.tv_sec * 1000) * 1000000);"
+        , "    nanosleep(&ts, NULL);"
+        , "    return elm_task_succeed(elm_unit());"
+        , "}"
+        , ""
         , "/* String module */"
         , "static elm_value_t elm_String_length(elm_value_t s) {"
         , "    return elm_int((int64_t)strlen(s.data.s));"
@@ -3801,6 +3812,9 @@ getFunctionArity ctx name =
         "Time.posixToMillis" -> 1
         "Time.millisToPosix" -> 1
 
+        -- Process module
+        "Process.sleep" -> 1
+
         -- String module (unary)
         "String.length" -> 1
         "String.isEmpty" -> 1
@@ -4076,6 +4090,8 @@ isBuiltin name =
         , "Task.onError", "Task.map2", "Task.map3", "Task.sequence"
         -- Time module
         , "Time.now", "Time.posixToMillis", "Time.millisToPosix"
+        -- Process module
+        , "Process.sleep"
         -- String module
         , "String.length", "String.isEmpty", "String.reverse", "String.concat"
         , "String.append", "String.join", "String.fromInt", "String.toInt", "String.fromFloat", "String.toFloat"

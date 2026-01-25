@@ -504,6 +504,12 @@ builtinTypes =
           , Scheme [] [] (TArrow (TCon "Int") (TCon "Int"))
           )
 
+        -- Process module (for async operations)
+        , ( "Process.sleep"
+          , Scheme [ "x" ] []
+                (TArrow (TCon "Float") (TApp (TApp (TCon "Task") (TVar "x")) (TCon "Unit")))
+          )
+
         -- String module
         , ( "String.length", Scheme [] [] (TArrow (TCon "String") (TCon "Int")) )
         , ( "String.isEmpty", Scheme [] [] (TArrow (TCon "String") (TCon "Bool")) )
