@@ -265,6 +265,41 @@ builtinTypes =
                     (TArrow (TApp (TCon "List") (TVar "a"))
                         (TTuple [ TApp (TCon "List") (TVar "a"), TApp (TCon "List") (TVar "a") ])))
           )
+        , ( "List.unzip"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TApp (TCon "List") (TTuple [ TVar "a", TVar "b" ]))
+                    (TTuple [ TApp (TCon "List") (TVar "a"), TApp (TCon "List") (TVar "b") ]))
+          )
+        , ( "List.map2"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TApp (TCon "List") (TVar "a"))
+                        (TArrow (TApp (TCon "List") (TVar "b")) (TApp (TCon "List") (TVar "c")))))
+          )
+        , ( "List.map3"
+          , Scheme [ "a", "b", "c", "d" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TVar "d"))))
+                    (TArrow (TApp (TCon "List") (TVar "a"))
+                        (TArrow (TApp (TCon "List") (TVar "b"))
+                            (TArrow (TApp (TCon "List") (TVar "c")) (TApp (TCon "List") (TVar "d"))))))
+          )
+        , ( "List.map4"
+          , Scheme [ "a", "b", "c", "d", "e" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TArrow (TVar "d") (TVar "e")))))
+                    (TArrow (TApp (TCon "List") (TVar "a"))
+                        (TArrow (TApp (TCon "List") (TVar "b"))
+                            (TArrow (TApp (TCon "List") (TVar "c"))
+                                (TArrow (TApp (TCon "List") (TVar "d")) (TApp (TCon "List") (TVar "e")))))))
+          )
+        , ( "List.map5"
+          , Scheme [ "a", "b", "c", "d", "e", "f" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TArrow (TVar "d") (TArrow (TVar "e") (TVar "f"))))))
+                    (TArrow (TApp (TCon "List") (TVar "a"))
+                        (TArrow (TApp (TCon "List") (TVar "b"))
+                            (TArrow (TApp (TCon "List") (TVar "c"))
+                                (TArrow (TApp (TCon "List") (TVar "d"))
+                                    (TArrow (TApp (TCon "List") (TVar "e")) (TApp (TCon "List") (TVar "f"))))))))
+          )
 
         -- Maybe module
         , ( "Maybe.withDefault", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "Maybe") (TVar "a")) (TVar "a"))) )
