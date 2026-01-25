@@ -309,6 +309,16 @@
   - Unit constructor: `()` maps to `elm_unit()` not `elm_Unit()`
   - Record field access precedence: `Dict.get 1 ledger.accounts` parses correctly
   - 219 tests passing
+- [x] 2026-01-25: FP Pattern Tests (42 tests)
+  - All 25 supported FP patterns from patterns.md tested
+  - Patterns 1-16, 18-25, 30: Functor, Applicative, Monad, Monoid, Semigroup,
+    Foldable, Traversable, Contravariant, Bifunctor, Either, Lens, Reader,
+    Writer, State, Kleisli, Validation, Comonad, Profunctor, Arrow, Category,
+    Semigroupal, Alternative, MonadPlus, Distributive, Continuation
+  - Known limitations discovered:
+    - Operator sections `(+)`, `(*)` not supported (use lambdas)
+    - `++` for strings requires `String.append` (not `++` operator)
+  - 261 tests passing
 - [ ] **NEXT**: Build ledger module to validate compiler features
 
 ---
