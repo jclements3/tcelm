@@ -351,7 +351,15 @@
   - EUnit now produces TCon "()" to match TAUnit (was TCon "Unit")
   - Fixed typedef collision for single-constructor types (type T = T a)
   - 265 tests passing
-- [ ] **NEXT**: Continue toward self-hosting (compile tcelm2 with itself)
+- [ ] **NEXT**: Self-hosting roadmap
+  - [x] Individual module compilation works (Types.elm, AST.elm produce valid C)
+  - [ ] Bundler issues: duplicate main(), merged modules not working correctly
+  - [ ] Need to link against Set, Dict runtime implementations
+  - [ ] Need to not generate main() for library modules
+  - Current blockers for self-hosting:
+    1. Multi-module bundler needs fixes
+    2. Standard library runtime (Set, Dict, etc.) needs to be included
+    3. Library modules should not have main()
 
 ---
 
