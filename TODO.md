@@ -394,7 +394,11 @@
   - Known limitations (non-blockers):
     - Mutual recursion requires forward declarations (isEven/isOdd pattern)
     - Record pattern destructuring in let bindings not fully supported
-    - Cons operator (::) type inference has edge cases
+  - [x] Fixed: cons operator (::) right-associativity for chained expressions
+- [x] 2026-01-25: Integration test expansion
+  - [x] Fixed right-associative operator parsing (::, ++, ||, &&, etc.)
+  - [x] Added 10 ledger-specific integration tests
+  - [x] Total: 57 integration tests, 265 unit tests all passing
 
 ---
 
@@ -769,8 +773,8 @@ For 4-core NUC parallel execution.
 
 ### 7.2 Testing
 - [ ] Unit tests for Codegen modules
-- [x] Integration tests (Elm → C → execution) - 47 tests in tests/tcelm2/integration/
-- [ ] Ledger-specific test cases
+- [x] Integration tests (Elm → C → execution) - 57 tests in tests/tcelm2/integration/
+- [x] Ledger-specific test cases (10 tests covering accounts, transactions, balances, events)
 
 ---
 

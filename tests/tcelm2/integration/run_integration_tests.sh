@@ -317,6 +317,126 @@ main =
         |> (\x -> x - 15)'
 
 echo ""
+echo "=== Ledger-specific tests ==="
+echo ""
+
+# Account record with balance
+run_test "ledger_account" "1000" 'module Main exposing (main)
+type alias Account =
+    { id : Int
+    , name : String
+    , balance : Int
+    }
+main =
+    let account = { id = 1, name = "Cash", balance = 1000 }
+    in account.balance'
+
+# Transaction validation with Result
+run_test "ledger_validate_txn" "100" 'module Main exposing (main)
+validateAmount : Int -> Result String Int
+validateAmount amount =
+    if amount > 0 then
+        Ok amount
+    else
+        Err "Amount must be positive"
+main =
+    case validateAmount 100 of
+        Ok amt -> amt
+        Err _ -> 0'
+
+# Account lookup with Dict
+run_test "ledger_account_lookup" "500" 'module Main exposing (main)
+main =
+    let accounts = Dict.fromList [(1, 500), (2, 1000)]
+    in case Dict.get 1 accounts of
+        Just balance -> balance
+        Nothing -> 0'
+
+# Balance update with Dict
+run_test "ledger_balance_update" "700" 'module Main exposing (main)
+main =
+    let accounts = Dict.fromList [(1, 500)]
+        updated = Dict.update 1 (\maybeVal ->
+            case maybeVal of
+                Just bal -> Just (bal + 200)
+                Nothing -> Nothing
+        ) accounts
+    in case Dict.get 1 updated of
+        Just bal -> bal
+        Nothing -> 0'
+
+# Double-entry transaction posting
+run_test "ledger_double_entry" "0" 'module Main exposing (main)
+main =
+    let debit = Dict.singleton 1 100
+        credit = Dict.insert 2 (-100) debit
+        total = List.foldl (+) 0 (Dict.values credit)
+    in total'
+
+# Event sourcing pattern - replaying events
+run_test "ledger_event_replay" "1300" 'module Main exposing (main)
+type Event
+    = Deposit Int
+    | Withdraw Int
+applyEvent : Event -> Int -> Int
+applyEvent event balance =
+    case event of
+        Deposit amt -> balance + amt
+        Withdraw amt -> balance - amt
+main =
+    let events = [Deposit 1000, Deposit 500, Withdraw 200]
+    in List.foldl applyEvent 0 events'
+
+# Maybe chain for account operations
+run_test "ledger_maybe_chain" "800" 'module Main exposing (main)
+findAccount : Int -> Maybe Int
+findAccount id =
+    if id == 1 then Just 1000 else Nothing
+applyFee : Int -> Maybe Int
+applyFee bal =
+    if bal > 100 then Just (bal - 200) else Nothing
+main =
+    case Maybe.andThen applyFee (findAccount 1) of
+        Just balance -> balance
+        Nothing -> 0'
+
+# Result chain for transaction processing
+run_test "ledger_result_chain" "850" 'module Main exposing (main)
+validatePositive : Int -> Result String Int
+validatePositive n =
+    if n > 0 then Ok n else Err "Must be positive"
+applyDiscount : Int -> Result String Int
+applyDiscount amt =
+    Ok (amt - 150)
+main =
+    let result = do
+            validated <- validatePositive 1000
+            discounted <- applyDiscount validated
+            Ok discounted
+    in case result of
+        Ok val -> val
+        Err _ -> 0'
+
+# Transaction with multiple accounts
+run_test "ledger_multi_account" "3" 'module Main exposing (main)
+main =
+    let accounts = Dict.fromList [(1, 100), (2, 0), (3, 50), (4, 200)]
+        positiveCount = accounts
+            |> Dict.values
+            |> List.filter (\b -> b > 0)
+            |> List.length
+    in positiveCount'
+
+# Balance query returning Maybe
+run_test "ledger_balance_query" "1" 'module Main exposing (main)
+main =
+    let accounts = Dict.fromList [(1, 500), (2, 0)]
+        hasPositive = case Dict.get 1 accounts of
+            Just bal -> bal > 0
+            Nothing -> False
+    in if hasPositive then 1 else 0'
+
+echo ""
 echo "================================"
 echo "Results: $passed passed, $failed failed, $total total"
 echo "================================"
