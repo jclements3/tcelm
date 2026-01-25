@@ -1185,6 +1185,9 @@ generateExprAccum ctx renames expr =
                         ( generateFunctionClosure ctx mangledName arity, ctx )
                     else if arity == 0 && Dict.member name ctx.functions then
                         ( mangledName ++ "()", ctx )
+                    else if isBuiltin name && arity > 0 then
+                        -- Builtin function used as a value - wrap in closure
+                        ( generateFunctionClosure ctx mangledName arity, ctx )
                     else
                         ( mangledName, ctx )
 
@@ -2043,6 +2046,9 @@ generateExprWithRenames ctx renames expr =
                         generateFunctionClosure ctx mangledName arity
                     else if arity == 0 && Dict.member name ctx.functions then
                         mangledName ++ "()"
+                    else if isBuiltin name && arity > 0 then
+                        -- Builtin function used as a value - wrap in closure
+                        generateFunctionClosure ctx mangledName arity
                     else
                         mangledName
 
