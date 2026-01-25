@@ -143,7 +143,17 @@
   - Maintains insertion order
   - Fixed: zero-arity builtin functions now properly called with ()
   - 94 tests passing
-- [ ] **NEXT**: Type classes, Dict.map/filter/foldl, FFI
+- [x] 2026-01-25: Dict higher-order functions:
+  - Dict.update, Dict.map, Dict.filter, Dict.foldl, Dict.foldr
+  - Fixed closure extraction in Dict higher-order functions
+  - 97 tests passing
+- [x] 2026-01-25: Set module with list-based implementation:
+  - Set.empty, Set.singleton, Set.insert, Set.remove, Set.member
+  - Set.size, Set.isEmpty, Set.toList, Set.fromList
+  - Set.union, Set.intersect, Set.diff (set operations)
+  - Set.map, Set.filter, Set.foldl, Set.foldr (higher-order functions)
+  - 103 tests passing
+- [ ] **NEXT**: Type classes, FFI, Char module
 
 ---
 
@@ -360,7 +370,7 @@ Result.andThen (\validated ->
 - [x] List.sort / List.sortBy
 - [x] List.partition
 
-### 3.3 Dict Module ✅ MOSTLY COMPLETE
+### 3.3 Dict Module ✅ COMPLETE
 - [x] Dict.empty
 - [x] Dict.singleton
 - [x] Dict.insert
@@ -370,10 +380,10 @@ Result.andThen (\validated ->
 - [x] Dict.size / Dict.isEmpty
 - [x] Dict.keys / Dict.values
 - [x] Dict.toList / Dict.fromList
-- [ ] Dict.update - needs implementation
-- [ ] Dict.map - needs implementation
-- [ ] Dict.filter - needs implementation
-- [ ] Dict.foldl - needs implementation
+- [x] Dict.update
+- [x] Dict.map
+- [x] Dict.filter
+- [x] Dict.foldl / Dict.foldr
 
 ### 3.4 Maybe Module ✅ COMPLETE
 - [x] Maybe.map
