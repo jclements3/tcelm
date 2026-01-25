@@ -850,7 +850,7 @@ inferBranches env scrutTy resultTy branches state =
                 br = AST.getValue branch
                 -- Apply current substitution to scrutinee type to resolve type variables
                 resolvedScrutTy = applySubst state.substitution scrutTy
-                ( patBinds, state0 ) = patternBindingsWithState (AST.getValue br.pattern) resolvedScrutTy state
+                ( patBinds, state0 ) = patternBindingsWithState env (AST.getValue br.pattern) resolvedScrutTy state
                 env1 =
                     List.foldl
                         (\( name, ty ) e -> extendEnv name (Scheme [] [] ty) e)
@@ -1081,8 +1081,8 @@ patternBindings pattern ty =
 
 {-| Extract variable bindings from a pattern, generating fresh type variables when needed.
 -}
-patternBindingsWithState : AST.Pattern -> Type -> InferState -> ( List ( String, Type ), InferState )
-patternBindingsWithState pattern ty state =
+patternBindingsWithState : Env -> AST.Pattern -> Type -> InferState -> ( List ( String, Type ), InferState )
+patternBindingsWithState env pattern ty state =
     case pattern of
         AST.PVar name ->
             ( [ ( name, ty ) ], state )
@@ -1093,9 +1093,46 @@ patternBindingsWithState pattern ty state =
         AST.PLit _ ->
             ( [], state )
 
-        AST.PCon _ subPats ->
-            -- Would need constructor type info to get sub-pattern types
-            ( [], state )
+        AST.PCon qname subPats ->
+            -- Look up constructor type and extract argument types
+            let
+                ctorName = qualNameToString qname
+            in
+            case Dict.get ctorName env.constructors of
+                Just scheme ->
+                    let
+                        -- Instantiate the scheme to get actual types (ignore constraints for now)
+                        ( ctorTy, _, state1 ) = instantiate scheme state
+
+                        -- Extract argument types from constructor type
+                        argTypes = extractArgTypes ctorTy
+
+                        -- Bind sub-patterns to their types
+                        bindSubPat i subPat accState =
+                            let
+                                subTy =
+                                    List.drop i argTypes
+                                        |> List.head
+                                        |> Maybe.withDefault (TVar "a")
+                            in
+                            patternBindingsWithState env (AST.getValue subPat) subTy accState
+
+                        ( allBinds, finalState ) =
+                            List.foldl
+                                (\( i, subPat ) ( bindsAcc, st ) ->
+                                    let
+                                        ( newBinds, st1 ) = bindSubPat i subPat st
+                                    in
+                                    ( bindsAcc ++ newBinds, st1 )
+                                )
+                                ( [], state1 )
+                                (List.indexedMap Tuple.pair subPats)
+                    in
+                    ( allBinds, finalState )
+
+                Nothing ->
+                    -- Constructor not found, return empty bindings
+                    ( [], state )
 
         AST.PRecord fields ->
             case ty of
@@ -1159,12 +1196,12 @@ patternBindingsWithState pattern ty state =
 
         AST.PAlias inner alias_ ->
             let
-                ( innerBinds, state1 ) = patternBindingsWithState (AST.getValue inner) ty state
+                ( innerBinds, state1 ) = patternBindingsWithState env (AST.getValue inner) ty state
             in
             ( ( AST.getValue alias_, ty ) :: innerBinds, state1 )
 
         AST.PParens inner ->
-            patternBindingsWithState (AST.getValue inner) ty state
+            patternBindingsWithState env (AST.getValue inner) ty state
 
         AST.PUnit ->
             ( [], state )
@@ -1366,3 +1403,22 @@ inferFunctionDef env args body state =
                 Ok ( restTy, state2 ) ->
                     -- Build arrow type: argTy -> restTy
                     Ok ( TArrow argTy restTy, state2 )
+
+
+-- Extract argument types from a function type (e.g., Int -> Box returns [Int])
+extractArgTypes : Type -> List Type
+extractArgTypes ty =
+    case ty of
+        TArrow argTy resultTy ->
+            argTy :: extractArgTypes resultTy
+
+        _ ->
+            []
+
+
+-- Convert a qualified name to a string
+qualNameToString : AST.QualName -> String
+qualNameToString qname =
+    case qname.module_ of
+        Nothing -> qname.name
+        Just mod -> mod ++ "." ++ qname.name

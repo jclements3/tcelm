@@ -561,8 +561,10 @@ parseCustomType startRegion state =
         Ok ( name, state1 ) ->
             let
                 ( typeVars, state2 ) = parseTypeVars state1
+                -- Skip newlines before the = (allows multi-line type definitions)
+                state2a = skipNewlines state2
             in
-            case expect Equals state2 of
+            case expect Equals state2a of
                 Err e -> Err e
                 Ok ( _, state3 ) ->
                     let
