@@ -130,6 +130,36 @@ skipNewlines state =
             state
 
 
+-- Skip newlines but stop if the next token is at column 1 AND is not an operator
+-- This allows multi-line expressions with operators at the start of a line
+-- (e.g., pipelines) while still stopping at new top-level declarations
+skipNewlinesUnlessAtColumn1 : ParseState -> ParseState
+skipNewlinesUnlessAtColumn1 state =
+    case currentToken state of
+        Just tok ->
+            case tok.type_ of
+                Newline ->
+                    skipNewlinesUnlessAtColumn1 (advance state)
+
+                Indent _ ->
+                    skipNewlinesUnlessAtColumn1 (advance state)
+
+                _ ->
+                    -- If token is at column 1, check if it's an operator (continue) or not (stop)
+                    if tok.region.start.column == 1 then
+                        -- Operators at column 1 are continuations (like |> at start of line)
+                        if tok.type_ == Operator || tok.type_ == DoubleColon then
+                            state
+                        else
+                            -- Non-operator at column 1 = new declaration, don't advance
+                            state
+                    else
+                        state
+
+        Nothing ->
+            state
+
+
 tokenTypeName : TokenType -> String
 tokenTypeName tt =
     case tt of
@@ -1276,7 +1306,11 @@ parseBinOpExpr minPrec state =
 
 parseBinOpRest : Int -> Located Expr -> Parser (Located Expr)
 parseBinOpRest minPrec left state =
-    case currentToken state of
+    -- Skip newlines to allow operators on new lines (but check for column 1 declarations)
+    let
+        state0 = skipNewlinesUnlessAtColumn1 state
+    in
+    case currentToken state0 of
         Just tok ->
             -- Handle both Operator tokens and DoubleColon (::) specially
             let
@@ -1290,7 +1324,7 @@ parseBinOpRest minPrec left state =
                 if prec >= minPrec then
                     let
                         -- Advance past the operator token
-                        state1 = advance state
+                        state1 = advance state0
                     in
                     case parseBinOpExpr (prec + 1) state1 of
                         Err e -> Err e
@@ -1302,12 +1336,12 @@ parseBinOpRest minPrec left state =
                             in
                             parseBinOpRest minPrec newLeft state2
                 else
-                    Ok ( left, state )
+                    Ok ( left, state0 )
             else
-                Ok ( left, state )
+                Ok ( left, state0 )
 
         Nothing ->
-            Ok ( left, state )
+            Ok ( left, state0 )
 
 
 getOperatorPrec : String -> ( Int, Associativity )
