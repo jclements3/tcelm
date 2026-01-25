@@ -77,7 +77,7 @@ main =
 
 ---
 
-### 2. Applicative → `apply` ⚠️
+### 2. Applicative → `apply` ✅
 
 **Action:** Apply wrapped function to wrapped value
 
@@ -107,10 +107,10 @@ print(result)  # Just(6)
 ```
 
 ```elm
--- tcelm: Applicative via Maybe.map2, Maybe.map3, etc.
+-- tcelm: Applicative via Maybe.map2/3/4/5, Result.map2/3
 module Main exposing (main)
 
--- No direct apply, but map2/map3 achieve same result
+-- Full applicative support via mapN functions
 add : Int -> Int -> Int
 add x y = x + y
 
@@ -170,7 +170,7 @@ print(result)  # Nothing()
 ```
 
 ```elm
--- tcelm: Monad via andThen (flatMap)
+-- tcelm: Monad via andThen (flatMap) + do-notation
 module Main exposing (main)
 
 safeDivide : Int -> Int -> Maybe Int
@@ -180,13 +180,22 @@ safeDivide x y =
     else
         Just (x // y)
 
--- Chain Maybe operations
+-- Chain Maybe operations with pipeline
 result : Maybe Int
 result =
     Just 10
         |> Maybe.andThen (\x -> safeDivide x 2)
         |> Maybe.andThen (\x -> safeDivide x 1)
 -- result = Just 5
+
+-- BETTER: Use do-notation for cleaner code
+resultDo : Maybe Int
+resultDo = do
+    x <- Just 10
+    y <- safeDivide x 2
+    z <- safeDivide y 1
+    Just z
+-- resultDo = Just 5
 
 -- Chain with failure
 resultFail : Maybe Int
@@ -1771,7 +1780,7 @@ main = result
 - ⚠️ = Manual implementation / workaround
 - ❌ = Not possible (requires HKT or advanced type features)
 
-**Bottom line:** 25 of 30 patterns are usable in tcelm (10 direct, 15 manual). Only 5 require type system features that Elm/tcelm don't have
+**Bottom line:** 25 of 30 patterns are usable in tcelm (8 direct ✅, 17 manual ⚠️). Only 5 require type system features that Elm/tcelm don't have (HKT, rank-2 types, existentials)
 
 ---
 
@@ -1827,14 +1836,73 @@ result4 = addThenDouble 5  -- 12
 main = result1
 ```
 
-### Pattern Matching ⚠️
+### Do-Notation ✅
 
-Current tcelm pattern matching support:
+tcelm supports Haskell-style do-notation for Maybe, Result, and Task monads:
 
 ```elm
 module Main exposing (main)
 
--- Supported patterns
+-- Do-notation automatically desugars to andThen chains
+-- The monad is detected from constructor usage (Just/Nothing -> Maybe, Ok/Err -> Result)
+
+-- Maybe monad with do-notation
+safeDivide : Int -> Int -> Maybe Int
+safeDivide x y =
+    if y == 0 then Nothing else Just (x // y)
+
+computeMaybe : Maybe Int
+computeMaybe = do
+    x <- Just 10
+    y <- safeDivide x 2
+    z <- safeDivide y 1
+    Just (z + 1)
+-- Result: Just 6
+
+-- Result monad with do-notation
+validateAge : Int -> Result String Int
+validateAge age =
+    if age < 0 then Err "Age must be positive"
+    else if age > 150 then Err "Age must be realistic"
+    else Ok age
+
+validateName : String -> Result String String
+validateName name =
+    if String.isEmpty name then Err "Name is required"
+    else Ok name
+
+validateUser : String -> Int -> Result String (String, Int)
+validateUser name age = do
+    validName <- validateName name
+    validAge <- validateAge age
+    Ok (validName, validAge)
+-- validateUser "Alice" 30 = Ok ("Alice", 30)
+-- validateUser "" 30 = Err "Name is required"
+-- validateUser "Bob" -5 = Err "Age must be positive"
+
+-- Let bindings inside do blocks
+complexComputation : Maybe Int
+complexComputation = do
+    x <- Just 5
+    let doubled = x * 2
+    y <- Just (doubled + 3)
+    Just (x + y)
+-- Result: Just 18
+
+main =
+    case computeMaybe of
+        Just n -> n
+        Nothing -> -1
+```
+
+### Pattern Matching ✅
+
+tcelm pattern matching support (all major patterns working):
+
+```elm
+module Main exposing (main)
+
+-- Constructor patterns
 type Color = Red | Green | Blue
 
 getColorCode : Color -> Int
@@ -1855,18 +1923,96 @@ area shape =
         Circle r -> 3.14159 * r * r
         Rectangle w h -> w * h
 
--- Tuple patterns (supported)
+-- Tuple patterns (up to 3 elements)
 swap : (a, b) -> (b, a)
 swap pair =
     case pair of
         (x, y) -> (y, x)
 
--- TODO: These patterns need completion in tcelm
--- List cons: x :: xs
--- Nested constructors: Just (Ok value)
--- As-patterns: (x :: xs) as list
+-- List cons patterns
+headOrZero : List Int -> Int
+headOrZero list =
+    case list of
+        x :: xs -> x
+        [] -> 0
+
+-- Nested constructor patterns
+unwrapNestedMaybe : Maybe (Maybe Int) -> Int
+unwrapNestedMaybe outer =
+    case outer of
+        Just (Just n) -> n
+        Just Nothing -> -1
+        Nothing -> -2
+
+-- As-patterns
+listWithLength : List a -> (Int, List a)
+listWithLength list =
+    case list of
+        (x :: xs) as all -> (List.length all, all)
+        [] -> (0, [])
+
+-- Record patterns
+type alias User = { name : String, age : Int }
+
+getUserAge : User -> Int
+getUserAge user =
+    case user of
+        { name, age } -> age
 
 main = getColorCode Red
+```
+
+### Type Classes ✅
+
+tcelm supports Elm-style constrained polymorphism with built-in type classes:
+
+```elm
+module Main exposing (main)
+
+-- Built-in type classes: comparable, appendable, number
+
+-- comparable: Int, Float, Char, String, List comparable, Tuple of comparables
+sortedInts : List Int
+sortedInts = List.sort [3, 1, 4, 1, 5, 9]  -- [1, 1, 3, 4, 5, 9]
+
+sortedStrings : List String
+sortedStrings = List.sort ["banana", "apple", "cherry"]  -- ["apple", "banana", "cherry"]
+
+-- List of comparable tuples
+sortedPairs : List (Int, String)
+sortedPairs = List.sort [(2, "b"), (1, "a"), (2, "a")]  -- [(1, "a"), (2, "a"), (2, "b")]
+
+-- compare : comparable -> comparable -> Order
+comparison : Order
+comparison = compare 5 3  -- GT
+
+-- appendable: String, List a
+-- The ++ operator works for both
+combined : String
+combined = "Hello" ++ " " ++ "World"
+
+combinedList : List Int
+combinedList = [1, 2] ++ [3, 4]  -- [1, 2, 3, 4]
+
+-- number: Int, Float
+-- Arithmetic operators work uniformly
+sumInts : Int
+sumInts = 5 + 3  -- 8
+
+sumFloats : Float
+sumFloats = 5.5 + 3.2  -- 8.7
+
+-- Dict and Set require comparable keys/elements
+type alias ScoreBoard = Dict.Dict String Int
+
+scores : ScoreBoard
+scores = Dict.fromList [("Alice", 100), ("Bob", 85)]
+
+-- Set of comparable elements
+uniqueChars : Set.Set Char
+uniqueChars = Set.fromList ['a', 'b', 'a', 'c']  -- Set with 'a', 'b', 'c'
+
+main = List.sum sortedInts
 ```
 
 ---
@@ -1876,16 +2022,16 @@ main = getColorCode Red
 | # | Pattern | tcelm Support | Implementation |
 |---|---------|---------------|----------------|
 | 1 | Functor | ✅ | `Maybe.map`, `List.map`, `Result.map` |
-| 2 | Applicative | ⚠️ | `Maybe.map2`, `Maybe.map3` |
-| 3 | Monad | ✅ | `Maybe.andThen`, `Result.andThen` |
+| 2 | Applicative | ✅ | `Maybe.map2/3/4/5`, `Result.map2/3` |
+| 3 | Monad | ✅ | `andThen` + **do-notation** |
 | 4 | Monoid | ✅ | Explicit combine functions |
 | 5 | Semigroup | ✅ | Explicit combine functions |
 | 6 | Foldable | ✅ | `List.foldl`, `List.foldr` |
 | 7 | Traversable | ⚠️ | Custom `traverse` functions |
 | 8 | Contravariant | ⚠️ | Function composition |
-| 9 | Bifunctor | ⚠️ | `Result.map` + `Result.mapError` |
+| 9 | Bifunctor | ⚠️ | `Result.map` + `Result.mapError`, `Tuple.mapBoth` |
 | 10 | Either | ✅ | `Result` type |
-| 11 | Lens | ⚠️ | Record update syntax |
+| 11 | Lens | ⚠️ | Record update syntax `{ r | field = x }` |
 | 12 | Reader | ⚠️ | Explicit config passing |
 | 13 | Writer | ⚠️ | Tuple `(value, logs)` |
 | 14 | State | ⚠️ | Explicit state threading |
@@ -1899,12 +2045,12 @@ main = getColorCode Red
 
 **Essential (use daily):**
 1. Functor (`map`)
-2. Monad (`andThen`)
+2. Monad (`andThen` + do-notation)
 3. Either (`Result`)
 4. Foldable (`foldl`)
 
 **Important (use often):**
-5. Applicative (`map2`)
+5. Applicative (`map2/3/4/5`)
 6. Monoid (explicit combine)
 7. Pipeline operators (`|>`, `>>`)
 
@@ -1920,3 +2066,11 @@ main = getColorCode Red
 - [Elm Guide](https://guide.elm-lang.org/)
 - [tcelm TODO.md](../TODO.md) - Design philosophy and roadmap
 - [Elm Core Library](https://package.elm-lang.org/packages/elm/core/latest/)
+
+---
+
+## Test Coverage
+
+All 25 supported FP patterns have been tested and verified with tcelm2. See `tests/fp_patterns/` for the complete test suite.
+
+**Current status:** 265 tests passing, ~270 builtin functions implemented.

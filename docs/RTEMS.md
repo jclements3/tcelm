@@ -155,6 +155,29 @@ read : Port -> Int -> String       -- Read bytes (non-blocking)
 onReceive : Port -> (String -> msg) -> Sub msg  -- Receive subscription
 ```
 
+### Additional RTEMS Modules
+
+tcelm provides extensive hardware and system integration:
+
+| Module | Purpose |
+|--------|---------|
+| `Rtems.ADC` | Analog-to-digital converter input |
+| `Rtems.DAC` | Digital-to-analog converter output |
+| `Rtems.I2C` | I2C bus communication |
+| `Rtems.SPI` | SPI bus communication |
+| `Rtems.Clock` | System clock and time management |
+| `Rtems.Task` | RTEMS task creation and management |
+| `Rtems.Events` | Event-based synchronization |
+| `Rtems.Barrier` | Barrier synchronization primitives |
+| `Rtems.Sync` | Semaphores, mutexes, condition variables |
+| `Rtems.Interrupt` | Interrupt service routine integration |
+| `Rtems.Socket` | BSD socket networking |
+| `Rtems.Network` | Network configuration and utilities |
+| `Rtems.SMP` | Symmetric multi-processing support |
+| `Rtems.Shell` | Interactive shell command registration |
+
+See `lib/Rtems/*.elm` for complete API documentation.
+
 ## Shell Commands
 
 When RTEMS shell is enabled, tcelm provides interactive commands:
@@ -276,6 +299,7 @@ See `examples/rtems/` for complete examples:
 - `Counter.elm` - Simple counter at 10 Hz
 - `ControlLoop.elm` - 240 Hz PID control loop
 - `SensorNetwork.elm` - Multi-task sensor network with channels
+- `ShellScript.elm` - Custom shell command registration
 
 ## Files
 
@@ -284,25 +308,63 @@ runtime/
 ├── tcelm_arena.h/c      # Arena allocator
 ├── tcelm_types.h/c      # Elm value types
 ├── tcelm_basics.h/c     # Basic operations
-├── tcelm_rtems.h/c      # RTEMS integration
-├── tcelm_shell.h/c      # Shell commands
-├── test_runtime.c       # Runtime tests
-├── test_rtems.c         # RTEMS integration tests
+├── tcelm_list.h/c       # List operations
+├── tcelm_string.h/c     # String operations
+├── tcelm_rtems.h/c      # RTEMS integration core
+├── tcelm_task.h/c       # Task management
+├── tcelm_channel.h/c    # Pub/sub channels
+├── tcelm_timer.h/c      # Timer management
+├── tcelm_shell.h/c      # Shell integration
+├── tcelm_shell_ops.h/c  # Shell command implementations
+├── tcelm_gpio.h/c       # GPIO hardware abstraction
+├── tcelm_uart.h/c       # UART serial communication
+├── tcelm_adc.h/c        # ADC input
+├── tcelm_dac.h/c        # DAC output
+├── tcelm_i2c.h/c        # I2C bus
+├── tcelm_spi.h/c        # SPI bus
+├── tcelm_socket.h/c     # BSD sockets
+├── tcelm_smp.h/c        # Multi-core support
+├── tcelm_semaphore.h/c  # Semaphore primitives
+├── tcelm_barrier.h/c    # Barrier synchronization
+├── tcelm_mvar.h/c       # Synchronized mutable variables
+├── tcelm_events.h/c     # Event flags
+├── tcelm_isr.h/c        # Interrupt service routines
+├── tcelm_clock.h/c      # Clock and time
+├── tcelm_worker.h/c     # Worker task pattern
+├── tcelm_protected.h/c  # Protected objects
+├── tcelm_rms.h/c        # Rate Monotonic Scheduling
+├── tcelm_budget.h/c     # Execution time budgets
+├── test_*.c             # Test files
 └── Makefile             # Build system
 
 lib/
 ├── Rtems.elm            # Main RTEMS module
-├── Rtems/
-│   ├── Gpio.elm         # GPIO bindings
-│   └── Uart.elm         # UART bindings
+└── Rtems/
+    ├── ADC.elm          # Analog-to-digital
+    ├── Barrier.elm      # Barrier sync
+    ├── Clock.elm        # Clock/time
+    ├── DAC.elm          # Digital-to-analog
+    ├── Events.elm       # Event flags
+    ├── Gpio.elm         # GPIO pins
+    ├── I2C.elm          # I2C bus
+    ├── Interrupt.elm    # ISR bindings
+    ├── Network.elm      # Network config
+    ├── Shell.elm        # Shell commands
+    ├── SMP.elm          # Multi-core
+    ├── Socket.elm       # BSD sockets
+    ├── SPI.elm          # SPI bus
+    ├── Sync.elm         # Semaphores, mutexes
+    ├── Task.elm         # Task management
+    └── Uart.elm         # Serial communication
 
-src/Generate/
-└── C.elm                # C code generator (with RTEMS support)
+src/Target/
+└── RTEMS.elm            # RTEMS code generator (~1600 lines)
 
 examples/rtems/
-├── Counter.elm          # Simple counter
-├── ControlLoop.elm      # Real-time control
-└── SensorNetwork.elm    # Multi-task example
+├── Counter.elm          # Simple counter at 10 Hz
+├── ControlLoop.elm      # 240 Hz PID control loop
+├── SensorNetwork.elm    # Multi-task sensor network
+└── ShellScript.elm      # Shell command example
 ```
 
 ## Comparison with C and Ada
