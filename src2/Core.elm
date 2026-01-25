@@ -9,6 +9,7 @@ module Core exposing
     , DataCon
     , TypedVar
     , FuncDef
+    , ForeignDef
     , DataDef
     , DataConDef
     , ClassDef
@@ -79,6 +80,14 @@ type Decl
     | DataDecl DataDef
     | ClassDecl ClassDef
     | InstDecl InstDef
+    | ForeignDecl ForeignDef
+
+
+type alias ForeignDef =
+    { name : Var          -- Elm function name
+    , cName : String      -- C function name to call
+    , type_ : Scheme      -- Type signature
+    }
 
 
 type alias FuncDef =

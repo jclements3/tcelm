@@ -166,7 +166,17 @@
   - Array.get, set, push, append, slice
   - Array.map, indexedMap, foldl, foldr, filter
   - 119 tests passing
-- [ ] **NEXT**: Type classes, FFI
+- [x] 2026-01-25: Maybe.map3/map4/map5 - complete Maybe module
+  - 120 tests passing
+- [x] 2026-01-25: FFI (foreign import) support:
+  - Parse `foreign import name : Type` declarations
+  - Convert type annotations to Types (typeAnnotationToType in Infer.elm, Desugar.elm)
+  - Generate extern declarations for C functions
+  - Generate wrapper functions that convert elm_value_t <-> C types
+  - Support for Int, Float, Bool, String, Char, (), Ptr types
+  - Foreign functions properly integrated with code generator (mangling, arity, calls)
+  - 120 tests passing
+- [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
 
@@ -403,7 +413,7 @@ Result.andThen (\validated ->
 - [x] Maybe.andThen
 - [x] Maybe.withDefault
 - [x] Maybe.map2
-- [ ] Maybe.map3 - needs implementation
+- [x] Maybe.map3 / map4 / map5
 
 ### 3.5 Result Module ✅ COMPLETE
 - [x] Result.map
@@ -430,24 +440,24 @@ Result.andThen (\validated ->
 
 **Goal**: Call C functions from Elm, integrate with RTEMS APIs.
 
-### 4.1 Basic FFI
+### 4.1 Basic FFI ✅ COMPLETE
 ```elm
 foreign import rtems_task_wake_after : Int -> Task ()
 foreign import serial_write : String -> Task ()
 foreign import gpio_read : Int -> Task Int
 ```
-- [ ] Parse `foreign import` declarations
-- [ ] Generate C function call wrappers
-- [ ] Handle return type conversion
+- [x] Parse `foreign import` declarations
+- [x] Generate C function call wrappers
+- [x] Handle return type conversion (Int, Float, Bool, String, Char, ())
 - [ ] Handle Task wrapping for async operations
 
-### 4.2 Pointer Types
+### 4.2 Pointer Types ⚠️ PARTIAL
 ```elm
 type alias FileHandle = Ptr
 foreign import fopen : String -> String -> Task FileHandle
 foreign import fclose : FileHandle -> Task ()
 ```
-- [ ] Opaque `Ptr` type
+- [x] Opaque `Ptr` type (void* as elm_value_t with tag 7)
 - [ ] Safe handle patterns
 - [ ] Null pointer handling
 

@@ -619,6 +619,92 @@ lookupEnv name env =
     Dict.get name env.types
 
 
+{-| Convert an AST type annotation to a Type.
+-}
+typeAnnotationToType : AST.TypeAnnotation -> Type
+typeAnnotationToType ann =
+    case ann of
+        AST.TAVar name ->
+            TVar name
+
+        AST.TACon qname ->
+            TCon (qualNameToTypeName qname)
+
+        AST.TAApp left right ->
+            TApp
+                (typeAnnotationToType (AST.getValue left))
+                (typeAnnotationToType (AST.getValue right))
+
+        AST.TAArrow left right ->
+            TArrow
+                (typeAnnotationToType (AST.getValue left))
+                (typeAnnotationToType (AST.getValue right))
+
+        AST.TARecord fields maybeRow ->
+            TRecord
+                (List.map (\( locName, locTy ) ->
+                    ( AST.getValue locName, typeAnnotationToType (AST.getValue locTy) ))
+                    fields)
+                (Maybe.map AST.getValue maybeRow)
+
+        AST.TATuple types ->
+            TTuple (List.map (\t -> typeAnnotationToType (AST.getValue t)) types)
+
+        AST.TAParens inner ->
+            typeAnnotationToType (AST.getValue inner)
+
+        AST.TAUnit ->
+            TCon "()"
+
+
+qualNameToTypeName : AST.QualName -> String
+qualNameToTypeName qname =
+    case qname.module_ of
+        Just mod -> mod ++ "." ++ qname.name
+        Nothing -> qname.name
+
+
+{-| Get free type variables from a type annotation.
+-}
+typeAnnotationFreeVars : AST.TypeAnnotation -> List String
+typeAnnotationFreeVars ann =
+    case ann of
+        AST.TAVar name ->
+            [ name ]
+
+        AST.TACon _ ->
+            []
+
+        AST.TAApp left right ->
+            typeAnnotationFreeVars (AST.getValue left)
+                ++ typeAnnotationFreeVars (AST.getValue right)
+
+        AST.TAArrow left right ->
+            typeAnnotationFreeVars (AST.getValue left)
+                ++ typeAnnotationFreeVars (AST.getValue right)
+
+        AST.TARecord fields maybeRow ->
+            let
+                fieldVars =
+                    List.concatMap (\( _, locTy ) ->
+                        typeAnnotationFreeVars (AST.getValue locTy))
+                        fields
+                rowVar =
+                    case maybeRow of
+                        Just locName -> [ AST.getValue locName ]
+                        Nothing -> []
+            in
+            fieldVars ++ rowVar
+
+        AST.TATuple types ->
+            List.concatMap (\t -> typeAnnotationFreeVars (AST.getValue t)) types
+
+        AST.TAParens inner ->
+            typeAnnotationFreeVars (AST.getValue inner)
+
+        AST.TAUnit ->
+            []
+
 
 -- SUBSTITUTION
 
@@ -1670,11 +1756,13 @@ inferDecl env decl =
             Ok env
 
         AST.ForeignDecl foreignDef ->
-            -- Add foreign function to environment
+            -- Add foreign function to environment with proper type
             let
                 name = AST.getValue foreignDef.name
-                -- Simplified: would need to convert TypeAnnotation to Type
-                scheme = Scheme [] [] (TCon "Foreign")
+                typeAnn = AST.getValue foreignDef.type_
+                ty = typeAnnotationToType typeAnn
+                freeVars = typeAnnotationFreeVars typeAnn |> Set.fromList |> Set.toList
+                scheme = Scheme freeVars [] ty
             in
             Ok (extendEnv name scheme env)
 

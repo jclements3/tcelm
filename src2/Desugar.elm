@@ -111,7 +111,7 @@ desugarDecl ctx decl =
             Nothing
 
         AST.ForeignDecl foreignDef ->
-            Just (Core.FuncDecl (desugarForeign ctx foreignDef))
+            Just (Core.ForeignDecl (desugarForeign ctx foreignDef))
 
 
 desugarValueDef : DesugarCtx -> AST.ValueDef -> Core.FuncDef
@@ -230,16 +230,104 @@ desugarInstance ctx instDef =
     }
 
 
-desugarForeign : DesugarCtx -> AST.ForeignDef -> Core.FuncDef
+desugarForeign : DesugarCtx -> AST.ForeignDef -> Core.ForeignDef
 desugarForeign _ def =
     let
-        name = AST.getValue def.name
+        typeAnn = AST.getValue def.type_
+        ty = typeAnnotationToType typeAnn
+        freeVars = typeAnnotationFreeVars typeAnn
     in
-    { name = name
-    , type_ = Scheme [] [] (TCon "Foreign")
-    , args = []
-    , body = Core.EVar { name = def.cName, type_ = TCon "Foreign" }
+    { name = AST.getValue def.name
+    , cName = def.cName
+    , type_ = Scheme freeVars [] ty
     }
+
+
+{-| Convert an AST type annotation to a Type.
+-}
+typeAnnotationToType : AST.TypeAnnotation -> Type
+typeAnnotationToType ann =
+    case ann of
+        AST.TAVar name ->
+            TVar name
+
+        AST.TACon qname ->
+            TCon (qualNameToTypeName qname)
+
+        AST.TAApp left right ->
+            TApp
+                (typeAnnotationToType (AST.getValue left))
+                (typeAnnotationToType (AST.getValue right))
+
+        AST.TAArrow left right ->
+            TArrow
+                (typeAnnotationToType (AST.getValue left))
+                (typeAnnotationToType (AST.getValue right))
+
+        AST.TARecord fields maybeRow ->
+            TRecord
+                (List.map (\( locName, locTy ) ->
+                    ( AST.getValue locName, typeAnnotationToType (AST.getValue locTy) ))
+                    fields)
+                (Maybe.map AST.getValue maybeRow)
+
+        AST.TATuple types ->
+            TTuple (List.map (\t -> typeAnnotationToType (AST.getValue t)) types)
+
+        AST.TAParens inner ->
+            typeAnnotationToType (AST.getValue inner)
+
+        AST.TAUnit ->
+            TCon "()"
+
+
+qualNameToTypeName : AST.QualName -> String
+qualNameToTypeName qname =
+    case qname.module_ of
+        Just mod -> mod ++ "." ++ qname.name
+        Nothing -> qname.name
+
+
+{-| Get free type variables from a type annotation.
+-}
+typeAnnotationFreeVars : AST.TypeAnnotation -> List String
+typeAnnotationFreeVars ann =
+    case ann of
+        AST.TAVar name ->
+            [ name ]
+
+        AST.TACon _ ->
+            []
+
+        AST.TAApp left right ->
+            typeAnnotationFreeVars (AST.getValue left)
+                ++ typeAnnotationFreeVars (AST.getValue right)
+
+        AST.TAArrow left right ->
+            typeAnnotationFreeVars (AST.getValue left)
+                ++ typeAnnotationFreeVars (AST.getValue right)
+
+        AST.TARecord fields maybeRow ->
+            let
+                fieldVars =
+                    List.concatMap (\( _, locTy ) ->
+                        typeAnnotationFreeVars (AST.getValue locTy))
+                        fields
+                rowVar =
+                    case maybeRow of
+                        Just locName -> [ AST.getValue locName ]
+                        Nothing -> []
+            in
+            fieldVars ++ rowVar
+
+        AST.TATuple types ->
+            List.concatMap (\t -> typeAnnotationFreeVars (AST.getValue t)) types
+
+        AST.TAParens inner ->
+            typeAnnotationFreeVars (AST.getValue inner)
+
+        AST.TAUnit ->
+            []
 
 
 

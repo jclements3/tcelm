@@ -59,6 +59,7 @@ type alias GenCtx =
     , freshId : Int
     , dataTypes : Dict String Core.DataDef
     , functions : Dict String Core.FuncDef
+    , foreignFunctions : Dict String Core.ForeignDef
     , classes : Dict String Core.ClassDef
     , instances : List Core.InstDef
     , closureParams : Set.Set String  -- Function parameters that are closures
@@ -83,6 +84,7 @@ emptyCtx opts =
     , freshId = 0
     , dataTypes = Dict.empty
     , functions = Dict.empty
+    , foreignFunctions = Dict.empty
     , classes = Dict.empty
     , instances = []
     , closureParams = Set.empty
@@ -135,6 +137,9 @@ generateC opts module_ =
                 |> List.map .definition
                 |> String.join "\n\n"
     in
+    let
+        foreignWrappers = generateForeignWrappers finalCtx
+    in
     String.join "\n"
         [ generateHeader ctx1
         , ""
@@ -142,10 +147,14 @@ generateC opts module_ =
         , ""
         , generateTypeDecls ctx1
         , ""
+        , generateForeignExterns finalCtx
+        , ""
         , generateForwardDecls ctx1
         , if String.isEmpty lambdaForwardDecls then "" else "\n/* Lifted lambda forward declarations */\n" ++ lambdaForwardDecls
         , ""
         , if String.isEmpty lambdaDefinitions then "" else "/* ===== LIFTED LAMBDAS ===== */\n\n" ++ lambdaDefinitions
+        , ""
+        , if String.isEmpty foreignWrappers then "" else "/* ===== FOREIGN FUNCTION WRAPPERS ===== */\n\n" ++ foreignWrappers
         , ""
         , "/* ===== FUNCTIONS ===== */\n\n" ++ funcCode
         , ""
@@ -177,6 +186,9 @@ collectDecl decl ctx =
 
         Core.InstDecl instDef ->
             { ctx | instances = instDef :: ctx.instances }
+
+        Core.ForeignDecl foreignDef ->
+            { ctx | foreignFunctions = Dict.insert foreignDef.name foreignDef ctx.foreignFunctions }
 
 
 
@@ -266,6 +278,10 @@ generateRuntime _ =
         , ""
         , "static elm_value_t elm_unit(void) {"
         , "    return (elm_value_t){ .tag = 6, .data.i = 0, .next = NULL };"
+        , "}"
+        , ""
+        , "static elm_value_t elm_ptr(void *p) {"
+        , "    return (elm_value_t){ .tag = 7, .data.p = p, .next = NULL };"
         , "}"
         , ""
         , "/* List operations */"
@@ -1846,6 +1862,181 @@ generateForwardDecl ctx funcDef =
 
 
 
+-- FOREIGN FUNCTIONS
+
+
+{-| Generate extern declarations for foreign C functions.
+-}
+generateForeignExterns : GenCtx -> String
+generateForeignExterns ctx =
+    if Dict.isEmpty ctx.foreignFunctions then
+        ""
+    else
+        let
+            externs =
+                ctx.foreignFunctions
+                    |> Dict.values
+                    |> List.map generateForeignExtern
+                    |> String.join "\n"
+        in
+        "/* ===== FOREIGN FUNCTION EXTERNS ===== */\n" ++ externs
+
+
+generateForeignExtern : Core.ForeignDef -> String
+generateForeignExtern foreignDef =
+    -- Generate extern declaration based on the type signature
+    let
+        ( argTypes, returnType ) = collectForeignArgTypes foreignDef.type_
+        cReturnType = typeToCType returnType
+        cArgTypes =
+            if List.isEmpty argTypes then
+                "void"
+            else
+                argTypes
+                    |> List.indexedMap (\i ty -> typeToCType ty ++ " arg" ++ String.fromInt i)
+                    |> String.join ", "
+    in
+    "extern " ++ cReturnType ++ " " ++ foreignDef.cName ++ "(" ++ cArgTypes ++ ");"
+
+
+{-| Generate wrapper functions that call foreign C functions.
+-}
+generateForeignWrappers : GenCtx -> String
+generateForeignWrappers ctx =
+    ctx.foreignFunctions
+        |> Dict.values
+        |> List.map (generateForeignWrapper ctx)
+        |> String.join "\n\n"
+
+
+generateForeignWrapper : GenCtx -> Core.ForeignDef -> String
+generateForeignWrapper ctx foreignDef =
+    let
+        ( argTypes, returnType ) = collectForeignArgTypes foreignDef.type_
+        argCount = List.length argTypes
+
+        -- Generate parameter list for wrapper
+        wrapperParams =
+            if argCount == 0 then
+                "void"
+            else
+                List.range 0 (argCount - 1)
+                    |> List.map (\i -> "elm_value_t arg" ++ String.fromInt i)
+                    |> String.join ", "
+
+        -- Generate argument conversions (elm_value_t -> C type)
+        argConversions =
+            List.indexedMap (\i ty ->
+                let
+                    cType = typeToCType ty
+                    argName = "arg" ++ String.fromInt i
+                    cArgName = "c_arg" ++ String.fromInt i
+                in
+                "    " ++ cType ++ " " ++ cArgName ++ " = " ++ elmValueToC ty argName ++ ";"
+            ) argTypes
+
+        -- Call the foreign function
+        cArgs =
+            List.range 0 (argCount - 1)
+                |> List.map (\i -> "c_arg" ++ String.fromInt i)
+                |> String.join ", "
+
+        -- Convert return value (C type -> elm_value_t)
+        returnConversion =
+            if isUnitType returnType then
+                [ "    " ++ foreignDef.cName ++ "(" ++ cArgs ++ ");"
+                , "    return elm_unit();"
+                ]
+            else
+                [ "    " ++ typeToCType returnType ++ " result = " ++ foreignDef.cName ++ "(" ++ cArgs ++ ");"
+                , "    return " ++ cToElmValue returnType "result" ++ ";"
+                ]
+
+        wrapperName = mangle (ctx.moduleName ++ "_" ++ foreignDef.name)
+    in
+    String.join "\n"
+        ([ "static elm_value_t " ++ wrapperName ++ "(" ++ wrapperParams ++ ") {" ]
+         ++ argConversions
+         ++ returnConversion
+         ++ [ "}" ]
+        )
+
+
+{-| Collect argument types and return type from a function type scheme.
+-}
+collectForeignArgTypes : Scheme -> ( List Type, Type )
+collectForeignArgTypes (Scheme _ _ ty) =
+    collectArrowTypes ty
+
+
+collectArrowTypes : Type -> ( List Type, Type )
+collectArrowTypes ty =
+    case ty of
+        TArrow arg rest ->
+            let
+                ( moreArgs, ret ) = collectArrowTypes rest
+            in
+            ( arg :: moreArgs, ret )
+
+        _ ->
+            ( [], ty )
+
+
+{-| Convert a Type to a C type string.
+-}
+typeToCType : Type -> String
+typeToCType ty =
+    case ty of
+        TCon "Int" -> "int"
+        TCon "Float" -> "double"
+        TCon "Bool" -> "int"
+        TCon "String" -> "const char*"
+        TCon "()" -> "void"
+        TCon "Char" -> "char"
+        TApp (TCon "Ptr") _ -> "void*"
+        TApp (TCon "Task") _ -> "void*"  -- Task becomes opaque pointer
+        _ -> "elm_value_t"  -- For complex types, use the generic value type
+
+
+{-| Convert an elm_value_t to a C value.
+-}
+elmValueToC : Type -> String -> String
+elmValueToC ty varName =
+    case ty of
+        TCon "Int" -> varName ++ ".data.i"
+        TCon "Float" -> varName ++ ".data.d"
+        TCon "Bool" -> varName ++ ".data.i"
+        TCon "String" -> varName ++ ".data.s"
+        TCon "Char" -> "(char)" ++ varName ++ ".data.i"
+        TApp (TCon "Ptr") _ -> varName ++ ".data.p"
+        _ -> varName  -- For complex types, pass as-is
+
+
+{-| Convert a C value to an elm_value_t.
+-}
+cToElmValue : Type -> String -> String
+cToElmValue ty varName =
+    case ty of
+        TCon "Int" -> "elm_int(" ++ varName ++ ")"
+        TCon "Float" -> "elm_float(" ++ varName ++ ")"
+        TCon "Bool" -> "elm_bool(" ++ varName ++ ")"
+        TCon "String" -> "elm_string(" ++ varName ++ ")"
+        TCon "Char" -> "elm_int((int)" ++ varName ++ ")"
+        TCon "()" -> "elm_unit()"
+        TApp (TCon "Ptr") _ -> "elm_ptr(" ++ varName ++ ")"
+        _ -> varName  -- For complex types, assume it's already elm_value_t
+
+
+{-| Check if a type is the unit type.
+-}
+isUnitType : Type -> Bool
+isUnitType ty =
+    case ty of
+        TCon "()" -> True
+        TTuple [] -> True
+        _ -> False
+
+
 -- FUNCTIONS
 
 
@@ -1947,6 +2138,9 @@ generateExprAccum ctx renames expr =
                         -- Check if this is a local variable (shadows builtins with same name)
                         isLocalVar = Set.member name ctx.localVars
                     in
+                    let
+                        foreignArity = getForeignArity ctx name
+                    in
                     if Set.member name ctx.closureParams then
                         ( mangledName, ctx )
                     else if isLocalVar then
@@ -1961,6 +2155,12 @@ generateExprAccum ctx renames expr =
                         ( generateFunctionClosure ctx mangledName arity, ctx )
                     else if isBuiltin name && arity == 0 then
                         -- Zero-arity builtin, call it
+                        ( mangledName ++ "()", ctx )
+                    else if isForeign ctx name && foreignArity > 0 then
+                        -- Foreign function used as a value - wrap in closure
+                        ( generateFunctionClosure ctx mangledName foreignArity, ctx )
+                    else if isForeign ctx name && foreignArity == 0 then
+                        -- Zero-arity foreign function, call it
                         ( mangledName ++ "()", ctx )
                     else
                         ( mangledName, ctx )
@@ -2146,13 +2346,19 @@ generateAppAccum ctx renames func arg =
                         mangledName = mangleWithModule ctx funcName
                         -- Check if this is a local variable (shadows builtins with same name)
                         isLocalVar = Set.member funcName ctx.localVars
-                        isKnownFunction = not isLocalVar && (Dict.member funcName ctx.functions || isBuiltin funcName)
+                        isForeignFunc = isForeign ctx funcName
+                        isKnownFunction = not isLocalVar && (Dict.member funcName ctx.functions || isBuiltin funcName || isForeignFunc)
                     in
                     if Set.member funcName ctx.closureParams || not isKnownFunction then
                         generateClosureApplyAccum ctx renames mangledName allArgs
                     else
                         let
-                            arity = getFunctionArity ctx funcName
+                            -- Get arity: for foreign functions use getForeignArity, otherwise getFunctionArity
+                            arity =
+                                if isForeignFunc then
+                                    getForeignArity ctx funcName
+                                else
+                                    getFunctionArity ctx funcName
                             argCount = List.length allArgs
                         in
                         if arity == 0 then
@@ -2816,6 +3022,8 @@ mangleWithModule ctx name =
         mangle name
     else if Dict.member name ctx.functions then
         mangle (ctx.moduleName ++ "_" ++ name)
+    else if Dict.member name ctx.foreignFunctions then
+        mangle (ctx.moduleName ++ "_" ++ name)
     else
         mangle name
 
@@ -2885,6 +3093,28 @@ isBuiltin name =
         , "Array.push", "Array.append", "Array.slice"
         , "Array.map", "Array.indexedMap", "Array.foldl", "Array.foldr", "Array.filter"
         ]
+
+
+{-| Check if a name is a foreign function.
+-}
+isForeign : GenCtx -> String -> Bool
+isForeign ctx name =
+    Dict.member name ctx.foreignFunctions
+
+
+{-| Get the arity of a foreign function.
+-}
+getForeignArity : GenCtx -> String -> Int
+getForeignArity ctx name =
+    case Dict.get name ctx.foreignFunctions of
+        Just foreignDef ->
+            let
+                ( argTypes, _ ) = collectForeignArgTypes foreignDef.type_
+            in
+            List.length argTypes
+
+        Nothing ->
+            0
 
 
 generateLambda : GenCtx -> Core.TypedVar -> Core.Expr -> String
