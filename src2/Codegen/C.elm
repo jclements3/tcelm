@@ -208,6 +208,7 @@ generateHeader ctx =
         , "#include <string.h>"
         , "#include <stdint.h>"
         , "#include <stdbool.h>"
+        , "#include <math.h>"
         ]
 
 
@@ -492,6 +493,71 @@ generateRuntime _ =
         , ""
         , "static elm_value_t elm_isInfinite(elm_value_t f) {"
         , "    return elm_bool(isinf(f.data.f));"
+        , "}"
+        , ""
+        , "/* Math functions */"
+        , "static elm_value_t elm_sqrt(elm_value_t x) {"
+        , "    return elm_float(sqrt(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_sin(elm_value_t x) {"
+        , "    return elm_float(sin(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_cos(elm_value_t x) {"
+        , "    return elm_float(cos(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_tan(elm_value_t x) {"
+        , "    return elm_float(tan(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_asin(elm_value_t x) {"
+        , "    return elm_float(asin(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_acos(elm_value_t x) {"
+        , "    return elm_float(acos(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_atan(elm_value_t x) {"
+        , "    return elm_float(atan(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_atan2(elm_value_t y, elm_value_t x) {"
+        , "    return elm_float(atan2(y.data.f, x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_logBase(elm_value_t base, elm_value_t n) {"
+        , "    return elm_float(log(n.data.f) / log(base.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_e(void) {"
+        , "    return elm_float(2.718281828459045);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_pi(void) {"
+        , "    return elm_float(3.141592653589793);"
+        , "}"
+        , ""
+        , "static elm_value_t elm_ceiling(elm_value_t x) {"
+        , "    return elm_int((int64_t)ceil(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_floor(elm_value_t x) {"
+        , "    return elm_int((int64_t)floor(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_round(elm_value_t x) {"
+        , "    return elm_int((int64_t)round(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_truncate(elm_value_t x) {"
+        , "    return elm_int((int64_t)trunc(x.data.f));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_toFloat(elm_value_t n) {"
+        , "    return elm_float((double)n.data.i);"
         , "}"
         , ""
         , "/* List operators */"
@@ -3164,6 +3230,24 @@ getFunctionArity ctx name =
         "isNaN" -> 1
         "isInfinite" -> 1
 
+        -- Math functions
+        "sqrt" -> 1
+        "sin" -> 1
+        "cos" -> 1
+        "tan" -> 1
+        "asin" -> 1
+        "acos" -> 1
+        "atan" -> 1
+        "atan2" -> 2
+        "logBase" -> 2
+        "e" -> 0
+        "pi" -> 0
+        "ceiling" -> 1
+        "floor" -> 1
+        "round" -> 1
+        "truncate" -> 1
+        "toFloat" -> 1
+
         -- Order type (nullary)
         "LT" -> 0
         "EQ" -> 0
@@ -3456,6 +3540,9 @@ isBuiltin name =
         , "identity", "always", "flip", "min", "max", "clamp", "abs"
         , "modBy", "remainderBy", "compare", "curry", "uncurry"
         , "xor", "isNaN", "isInfinite"
+        -- Math functions
+        , "sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "atan2"
+        , "logBase", "e", "pi", "ceiling", "floor", "round", "truncate", "toFloat"
         -- Order type
         , "LT", "EQ", "GT"
         -- List module

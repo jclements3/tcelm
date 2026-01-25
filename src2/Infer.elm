@@ -190,6 +190,24 @@ builtinTypes =
         , ( "isNaN", Scheme [] [] (TArrow (TCon "Float") (TCon "Bool")) )
         , ( "isInfinite", Scheme [] [] (TArrow (TCon "Float") (TCon "Bool")) )
 
+        -- Math functions
+        , ( "sqrt", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "sin", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "cos", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "tan", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "asin", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "acos", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "atan", Scheme [] [] (TArrow (TCon "Float") (TCon "Float")) )
+        , ( "atan2", Scheme [] [] (TArrow (TCon "Float") (TArrow (TCon "Float") (TCon "Float"))) )
+        , ( "logBase", Scheme [] [] (TArrow (TCon "Float") (TArrow (TCon "Float") (TCon "Float"))) )
+        , ( "e", Scheme [] [] (TCon "Float") )
+        , ( "pi", Scheme [] [] (TCon "Float") )
+        , ( "ceiling", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
+        , ( "floor", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
+        , ( "round", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
+        , ( "truncate", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
+        , ( "toFloat", Scheme [] [] (TArrow (TCon "Int") (TCon "Float")) )
+
         -- List module
         , ( "List.isEmpty", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")) )
         , ( "List.length", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Int")) )
