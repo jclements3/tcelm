@@ -9,7 +9,7 @@ processString : String -> Int
 processString s = String.length s
 
 transformed : String -> Int
-transformed = dimap (\s -> String.append "hello " s) (\n -> n * 2) processString
+transformed = dimap (\s -> "hello " ++ s) (\n -> n * 2) processString
 
 result : Int
 result = transformed "world"

@@ -2,7 +2,7 @@
 module Test exposing (main)
 
 stringCombine : String -> String -> String
-stringCombine a b = String.append a b
+stringCombine a b = a ++ b
 
 stringEmpty : String
 stringEmpty = ""

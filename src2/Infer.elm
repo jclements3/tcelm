@@ -182,11 +182,11 @@ builtinTypes =
             Scheme [ "a", "b" ] []
                 (TArrow (TArrow (TVar "a") (TVar "b")) (TArrow (TVar "a") (TVar "b")))
 
-        -- List a -> List a -> List a
+        -- appendable a => a -> a -> a
         appendOp =
-            Scheme [ "a" ] []
-                (TArrow (TApp (TCon "List") (TVar "a"))
-                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))
+            Scheme [ "a" ] [ IsIn "appendable" (TVar "a") ]
+                (TArrow (TVar "a")
+                    (TArrow (TVar "a") (TVar "a"))
                 )
 
         -- a -> List a -> List a
