@@ -1225,8 +1225,26 @@ generateExprAccum ctx renames expr =
             -- Use elm_record_get to lookup field by name in linked list representation
             ( "elm_record_get(\"" ++ field ++ "\", " ++ recordCode ++ ")", ctx1 )
 
-        Core.ERecordUpdate record _ _ ->
-            generateExprAccum ctx renames record
+        Core.ERecordUpdate record updates _ ->
+            -- Generate record update: { record | field1 = val1, ... }
+            -- Build a new record with updated fields prepended
+            -- This works with linked-list representation where first match wins
+            let
+                ( recordCode, ctx1 ) = generateExprAccum ctx renames record
+
+                -- Build the chain of updated fields
+                updateChain =
+                    updates
+                        |> List.foldl
+                            (\( fieldName, fieldExpr ) acc ->
+                                let
+                                    ( fieldCode, _ ) = generateExprAccum ctx renames fieldExpr
+                                in
+                                "elm_record_field(\"" ++ fieldName ++ "\", " ++ fieldCode ++ ", " ++ acc ++ ")"
+                            )
+                            recordCode
+            in
+            ( updateChain, ctx1 )
 
         Core.ETyApp e _ _ ->
             generateExprAccum ctx renames e
@@ -2110,8 +2128,25 @@ generateExprWithRenames ctx renames expr =
             in
             "((" ++ recordCode ++ ").data.p->" ++ field ++ ")"
 
-        Core.ERecordUpdate record fields _ ->
-            generateExprWithRenames ctx renames record
+        Core.ERecordUpdate record updates _ ->
+            -- Generate record update: { record | field1 = val1, ... }
+            -- Build a new record with updated fields prepended
+            let
+                recordCode = generateExprWithRenames ctx renames record
+
+                -- Build the chain of updated fields
+                updateChain =
+                    updates
+                        |> List.foldl
+                            (\( fieldName, fieldExpr ) acc ->
+                                let
+                                    fieldCode = generateExprWithRenames ctx renames fieldExpr
+                                in
+                                "elm_record_field(\"" ++ fieldName ++ "\", " ++ fieldCode ++ ", " ++ acc ++ ")"
+                            )
+                            recordCode
+            in
+            updateChain
 
         Core.ETyApp e _ _ ->
             generateExprWithRenames ctx renames e
