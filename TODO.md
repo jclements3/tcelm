@@ -273,6 +273,13 @@
   - Endianness support: Bytes.LE, Bytes.BE
   - Fixed constructor mangling for qualified names (Bytes.LE -> elm_Bytes_LE)
   - 201 tests passing
+- [x] 2026-01-25: Extended Json.Decode module
+  - Json.Decode.index (array element by index)
+  - Json.Decode.at (nested field path)
+  - Json.Decode.oneOf (try multiple decoders)
+  - Json.Decode.maybe (wrap result in Maybe)
+  - Json.Decode.value (return raw JSON value)
+  - 204 tests passing
 - [ ] **NEXT**: Fixed-Size Integers (Phase 5.1) or more advanced features
 
 ---
@@ -584,6 +591,7 @@ For debugging, config, API communication:
 - [x] Json.Decode basics (string, int, float, bool, null)
 - [x] Decode.field, Decode.map, Decode.map2, Decode.andThen
 - [x] Decode.list, Decode.nullable, Decode.succeed, Decode.fail
+- [x] Decode.index, Decode.at, Decode.oneOf, Decode.maybe, Decode.value
 - [x] decodeString, decodeValue (run decoders)
 - [ ] Auto-derive for simple records (optional)
 

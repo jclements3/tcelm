@@ -1070,6 +1070,31 @@ builtinTypes =
           , Scheme [ "a" ] []
                 (TArrow (TCon "String") (TApp (TCon "Decoder") (TVar "a")))
           )
+        , ( "Json.Decode.index"
+          , Scheme [ "a" ] []
+                (TArrow (TCon "Int")
+                    (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                        (TApp (TCon "Decoder") (TVar "a"))))
+          )
+        , ( "Json.Decode.at"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "List") (TCon "String"))
+                    (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                        (TApp (TCon "Decoder") (TVar "a"))))
+          )
+        , ( "Json.Decode.oneOf"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "List") (TApp (TCon "Decoder") (TVar "a")))
+                    (TApp (TCon "Decoder") (TVar "a")))
+          )
+        , ( "Json.Decode.maybe"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "Decoder") (TVar "a"))
+                    (TApp (TCon "Decoder") (TApp (TCon "Maybe") (TVar "a"))))
+          )
+        , ( "Json.Decode.value"
+          , Scheme [] [] (TApp (TCon "Decoder") (TCon "Value"))
+          )
 
         -- Bytes module (core operations)
         , ( "Bytes.width"
