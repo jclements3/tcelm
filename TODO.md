@@ -3,8 +3,8 @@
 ## Current Progress
 
 **Last Updated**: 2026-01-24
-**Last Session**: Extracted RTEMS and Native code generation to Target modules
-**Next Action**: Continue Phase 1.1 - Expand Target/TCC.elm with generateTccCode
+**Last Session**: Completed Phase 1.1 - Extracted all target code generation to Target modules
+**Next Action**: Start Phase 1.2 - Expand Codegen.Pattern
 
 ### Session Log
 - [x] 2025-01-24: Created TODO.md with full roadmap
@@ -17,7 +17,11 @@
 - [x] 2026-01-24: Extracted generateNativeCode to Target/Native.elm (~100 lines)
   - Uses simpler CodegenConfig with forward decl and function callbacks
   - Cli.elm now calls Native.generateCode via config
-- [ ] **NEXT**: Extract TCC code generation to expand Target/TCC.elm
+- [x] 2026-01-24: Expanded Target/TCC.elm with full TCC code generation (~1350 lines)
+  - Added CodegenConfig with 7 callbacks for shared functions
+  - Moved generateTccCode, generateTccLibCode, generateTccHeader
+  - Cli.elm now calls TCC.generateCode/generateLibCode/generateHeader via config
+- [ ] **NEXT**: Continue Phase 1.2 - Expand Codegen.Pattern
 
 ---
 
@@ -41,11 +45,11 @@
 
 Goal: Reduce Cli.elm from 6,353 lines to <2,000 lines by extracting to focused modules.
 
-### 1.1 Extract Target Generators
+### 1.1 Extract Target Generators ✓
 - [x] Create `Target/RTEMS.elm` - move generateRtemsCode (lines 159-770)
 - [x] Create `Target/Native.elm` - move generateNativeCode (lines 775-851)
-- [ ] Create `Target/TCC.elm` - move generateTccCode, generateTccLibCode, generateTccHeader (lines 858-1620)
-- [ ] Keep Cli.elm as thin orchestrator that calls Target modules
+- [x] Create `Target/TCC.elm` - move generateTccCode, generateTccLibCode, generateTccHeader (lines 858-1620)
+- [x] Cli.elm now orchestrates via CodegenConfig callbacks to Target modules
 
 ### 1.2 Expand Codegen.Pattern
 - [ ] Move generateStandaloneCaseFallback (lines 4725-5100) to Codegen.Pattern
@@ -288,6 +292,7 @@ Goal: Develop in browser, deploy to RTEMS.
 | src/Cli.elm | Main CLI, orchestrates code generators | 6,353 |
 | src/Target/RTEMS.elm | RTEMS target code generation | ~1,600 |
 | src/Target/Native.elm | Native target code generation | ~100 |
+| src/Target/TCC.elm | TCC target code generation | ~1,350 |
 | src/Generate/C.elm | Module-based C generation | ~500 |
 | src/Codegen/Shared.elm | Common types and helpers | 343 |
 | src/Codegen/Expr.elm | Expression generation | 240 |

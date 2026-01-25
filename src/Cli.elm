@@ -128,15 +128,15 @@ compile target source =
                         C.generateNativeWorkerModule ast
 
                     else if target == "tcc" then
-                        generateTccCode ast
+                        TCC.generateCode tccCodegenConfig ast
 
                     else if target == "tcc-lib" then
                         -- Generate library module with module-qualified names
-                        generateTccLibCode ast
+                        TCC.generateLibCode tccCodegenConfig ast
 
                     else if target == "tcc-header" then
                         -- Generate header file with extern declarations
-                        generateTccHeader ast
+                        TCC.generateHeader tccCodegenConfig ast
 
                     else
                         C.generateModule ast
@@ -175,6 +175,21 @@ nativeCodegenConfig =
     , generateImportCode = generateImportCode
     , generateStandaloneForwardDecl = generateStandaloneForwardDecl
     , generateStandaloneFunction = generateStandaloneFunction
+    }
+
+
+{-| Configuration for TCC code generation.
+Provides callbacks to shared code generation functions.
+-}
+tccCodegenConfig : TCC.CodegenConfig
+tccCodegenConfig =
+    { extractMain = extractMain
+    , generateImportCode = generateImportCode
+    , generateUserFunction = generateUserFunction
+    , collectLocalFunctionsWithScope = collectLocalFunctionsWithScope
+    , generateLiftedFunction = generateLiftedFunction
+    , generateStandaloneExpr = generateStandaloneExpr
+    , filterReachableValues = filterReachableValues
     }
 
 
