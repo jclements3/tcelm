@@ -148,7 +148,9 @@ skipNewlinesUnlessAtColumn1 state =
                     -- If token is at column 1, check if it's an operator (continue) or not (stop)
                     if tok.region.start.column == 1 then
                         -- Operators at column 1 are continuations (like |> at start of line)
-                        if tok.type_ == Operator || tok.type_ == DoubleColon then
+                        -- Also include Pipe for record updates like { r \n | a = 1 }
+                        -- And Comma for multiline lists/records like [ a \n , b ]
+                        if tok.type_ == Operator || tok.type_ == DoubleColon || tok.type_ == Pipe || tok.type_ == Comma then
                             state
                         else
                             -- Non-operator at column 1 = new declaration, don't advance
@@ -1832,9 +1834,13 @@ parseRecordExpr state =
                 case expectIdent LowerIdent state1 of
                     Err e -> Err e
                     Ok ( name, state2 ) ->
-                        if peek Pipe state2 then
+                        -- Skip newlines to support multiline record updates: { r \n | a = 1 }
+                        let
+                            state2a = skipNewlines state2
+                        in
+                        if peek Pipe state2a then
                             -- Record update: { name | field = value }
-                            case expect Pipe state2 of
+                            case expect Pipe state2a of
                                 Err e -> Err e
                                 Ok ( _, state3 ) ->
                                     let

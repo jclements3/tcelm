@@ -321,7 +321,16 @@
   - Operator sections: `(+)`, `(*)`, `(::)` etc. now work as values
   - Example: `List.foldl (+) 0 [1,2,3]` compiles correctly
   - 265 tests passing
-- [ ] **NEXT**: Build ledger module to validate compiler features
+- [x] 2026-01-25: Fixed multiline record update parsing
+  - Added skipNewlines before checking for `|` in record expressions
+  - `{ r \n | a = 1 }` now parses correctly
+  - 265 tests passing
+- [ ] **NEXT**: Fix local function capture in anonymous lambdas
+  - Local functions used inside anonymous lambdas aren't captured
+  - Example: `let f x = x + 1 in List.foldl (\e a -> f e + a) 0 xs`
+  - Workaround: name the lambda first: `let f x = x + 1; g e a = f e + a in List.foldl g 0 xs`
+  - Ledger module needs this fix to compile
+- [ ] Build ledger module to validate compiler features (blocked by above)
 
 ---
 
