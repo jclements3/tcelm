@@ -157,7 +157,11 @@
   - Char.toCode / Char.fromCode, Char.toUpper / Char.toLower
   - Char.isDigit, Char.isLower, Char.isUpper, Char.isAlpha, Char.isAlphaNum
   - 109 tests passing
-- [ ] **NEXT**: Type classes, FFI, Bitwise module
+- [x] 2026-01-25: Bitwise module:
+  - Bitwise.and, Bitwise.or, Bitwise.xor, Bitwise.complement
+  - Bitwise.shiftLeftBy, Bitwise.shiftRightBy, Bitwise.shiftRightZfBy
+  - 114 tests passing
+- [ ] **NEXT**: Type classes, FFI, Array module
 
 ---
 
