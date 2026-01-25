@@ -157,6 +157,145 @@ builtinTypes =
         -- Basic values
         , ( "True", Scheme [] [] (TCon "Bool") )
         , ( "False", Scheme [] [] (TCon "Bool") )
+
+        -- Basics module
+        , ( "min", intBinOp )
+        , ( "max", intBinOp )
+        , ( "clamp", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TArrow (TCon "Int") (TCon "Int")))) )
+        , ( "flip"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TVar "b") (TArrow (TVar "a") (TVar "c"))))
+          )
+
+        -- List module
+        , ( "List.isEmpty", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")) )
+        , ( "List.length", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Int")) )
+        , ( "List.reverse", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))) )
+        , ( "List.member", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool"))) )
+        , ( "List.head", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TVar "a"))) )
+        , ( "List.tail", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "Maybe") (TApp (TCon "List") (TVar "a")))) )
+        , ( "List.take", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
+        , ( "List.drop", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
+        , ( "List.sum", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TCon "Int")) )
+        , ( "List.product", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TCon "Int")) )
+        , ( "List.maximum", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TApp (TCon "Maybe") (TCon "Int"))) )
+        , ( "List.minimum", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Int")) (TApp (TCon "Maybe") (TCon "Int"))) )
+        , ( "List.append", appendOp )
+        , ( "List.concat", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TApp (TCon "List") (TVar "a"))) (TApp (TCon "List") (TVar "a"))) )
+        , ( "List.intersperse", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a")))) )
+        , ( "List.range", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "Int") (TApp (TCon "List") (TCon "Int")))) )
+        , ( "List.repeat", Scheme [ "a" ] [] (TArrow (TCon "Int") (TArrow (TVar "a") (TApp (TCon "List") (TVar "a")))) )
+        , ( "List.map"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "b"))))
+          )
+        , ( "List.filter"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "a"))))
+          )
+        , ( "List.filterMap"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TCon "Maybe") (TVar "b")))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "b"))))
+          )
+        , ( "List.foldl"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b") (TArrow (TApp (TCon "List") (TVar "a")) (TVar "b"))))
+          )
+        , ( "List.foldr"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "b")))
+                    (TArrow (TVar "b") (TArrow (TApp (TCon "List") (TVar "a")) (TVar "b"))))
+          )
+        , ( "List.any"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")))
+          )
+        , ( "List.all"
+          , Scheme [ "a" ] []
+                (TArrow (TArrow (TVar "a") (TCon "Bool"))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")))
+          )
+        , ( "List.concatMap"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TCon "List") (TVar "b")))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "b"))))
+          )
+        , ( "List.indexedMap"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TCon "Int") (TArrow (TVar "a") (TVar "b")))
+                    (TArrow (TApp (TCon "List") (TVar "a")) (TApp (TCon "List") (TVar "b"))))
+          )
+
+        -- Maybe module
+        , ( "Maybe.withDefault", Scheme [ "a" ] [] (TArrow (TVar "a") (TArrow (TApp (TCon "Maybe") (TVar "a")) (TVar "a"))) )
+        , ( "Maybe.map"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a")) (TApp (TCon "Maybe") (TVar "b"))))
+          )
+        , ( "Maybe.andThen"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TCon "Maybe") (TVar "b")))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a")) (TApp (TCon "Maybe") (TVar "b"))))
+          )
+        , ( "Maybe.map2"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TApp (TCon "Maybe") (TVar "a"))
+                        (TArrow (TApp (TCon "Maybe") (TVar "b")) (TApp (TCon "Maybe") (TVar "c")))))
+          )
+
+        -- Result module (simplified - using type var for error)
+        , ( "Result.withDefault"
+          , Scheme [ "e", "a" ] []
+                (TArrow (TVar "a") (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a")) (TVar "a")))
+          )
+        , ( "Result.map"
+          , Scheme [ "e", "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
+                        (TApp (TApp (TCon "Result") (TVar "e")) (TVar "b"))))
+          )
+        , ( "Result.mapError"
+          , Scheme [ "e", "f", "a" ] []
+                (TArrow (TArrow (TVar "e") (TVar "f"))
+                    (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
+                        (TApp (TApp (TCon "Result") (TVar "f")) (TVar "a"))))
+          )
+        , ( "Result.andThen"
+          , Scheme [ "e", "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TApp (TCon "Result") (TVar "e")) (TVar "b")))
+                    (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
+                        (TApp (TApp (TCon "Result") (TVar "e")) (TVar "b"))))
+          )
+        , ( "Result.toMaybe"
+          , Scheme [ "e", "a" ] []
+                (TArrow (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))
+                    (TApp (TCon "Maybe") (TVar "a")))
+          )
+
+        -- String module
+        , ( "String.length", Scheme [] [] (TArrow (TCon "String") (TCon "Int")) )
+        , ( "String.isEmpty", Scheme [] [] (TArrow (TCon "String") (TCon "Bool")) )
+        , ( "String.reverse", Scheme [] [] (TArrow (TCon "String") (TCon "String")) )
+        , ( "String.concat", Scheme [] [] (TArrow (TApp (TCon "List") (TCon "String")) (TCon "String")) )
+        , ( "String.append", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.join", Scheme [] [] (TArrow (TCon "String") (TArrow (TApp (TCon "List") (TCon "String")) (TCon "String"))) )
+        , ( "String.fromInt", Scheme [] [] (TArrow (TCon "Int") (TCon "String")) )
+        , ( "String.toInt", Scheme [] [] (TArrow (TCon "String") (TApp (TCon "Maybe") (TCon "Int"))) )
+        , ( "String.left", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.right", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.dropLeft", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.dropRight", Scheme [] [] (TArrow (TCon "Int") (TArrow (TCon "String") (TCon "String"))) )
+        , ( "String.contains", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
+        , ( "String.startsWith", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
+        , ( "String.endsWith", Scheme [] [] (TArrow (TCon "String") (TArrow (TCon "String") (TCon "Bool"))) )
         ]
 
 
@@ -470,7 +609,11 @@ infer env expr state =
 
         AST.EVar qname ->
             let
-                name = qname.name
+                -- Use full qualified name for lookup
+                name =
+                    case qname.module_ of
+                        Nothing -> qname.name
+                        Just mod -> mod ++ "." ++ qname.name
             in
             case lookupEnv name env of
                 Nothing ->

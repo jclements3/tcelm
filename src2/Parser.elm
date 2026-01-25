@@ -1418,7 +1418,38 @@ parseAtomicExpr state =
                     Ok ( locate tok.region (EVar { module_ = Nothing, name = tok.value }), advance state )
 
                 UpperIdent ->
-                    Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), advance state )
+                    -- Check for qualified name: Module.name or Module.Constructor
+                    let
+                        state1 = advance state
+                    in
+                    case currentToken state1 of
+                        Just dotTok ->
+                            if dotTok.type_ == Dot then
+                                let
+                                    state2 = advance state1
+                                in
+                                case currentToken state2 of
+                                    Just nameTok ->
+                                        if nameTok.type_ == LowerIdent then
+                                            -- Module.func - qualified variable
+                                            Ok ( locate tok.region (EVar { module_ = Just tok.value, name = nameTok.value }), advance state2 )
+                                        else if nameTok.type_ == UpperIdent then
+                                            -- Module.Constructor - qualified constructor
+                                            Ok ( locate tok.region (EConstructor { module_ = Just tok.value, name = nameTok.value }), advance state2 )
+                                        else
+                                            -- Just Constructor without qualifier
+                                            Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
+
+                                    Nothing ->
+                                        -- Just Constructor
+                                        Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
+                            else
+                                -- Not a dot, just a constructor
+                                Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
+
+                        Nothing ->
+                            -- No more tokens, just a constructor
+                            Ok ( locate tok.region (EConstructor { module_ = Nothing, name = tok.value }), state1 )
 
                 LParen ->
                     parseTupleOrParenExpr state
