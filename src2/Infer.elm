@@ -1507,6 +1507,9 @@ expandTypeAliases aliases ty =
         TVar _ ->
             ty
 
+        TForall vars constraints body ->
+            TForall vars constraints (expandTypeAliases aliases body)
+
 
 {-| Collect arguments from a chain of TApp nodes.
     `TApp (TApp (TCon "Dict") (TCon "String")) (TCon "Int")`
@@ -1549,6 +1552,14 @@ substituteTypeVars subst ty =
 
         TTuple types ->
             TTuple (List.map (substituteTypeVars subst) types)
+
+        TForall vars constraints body ->
+            -- Remove bound variables from substitution
+            let
+                subst2 =
+                    List.foldl Dict.remove subst vars
+            in
+            TForall vars constraints (substituteTypeVars subst2 body)
 
 
 {-| Get free type variables from a type annotation.
@@ -2130,7 +2141,7 @@ infer env expr state =
             inferList env exprs state
 
         AST.EUnit ->
-            Ok ( TCon "Unit", state )
+            Ok ( TCon "()", state )
 
         AST.EParens inner ->
             infer env (AST.getValue inner) state
@@ -2791,12 +2802,16 @@ inferDecl env decl =
                     let
                         ctor = AST.getValue locCtor
                         ctorName = AST.getValue ctor.name
+                        -- Convert argument type annotations to Types
+                        argTypes =
+                            ctor.args
+                                |> List.map (\locAnn -> typeAnnotationToType (AST.getValue locAnn))
                         -- Build constructor type: arg1 -> arg2 -> ... -> ResultType
                         ctorType =
                             List.foldr
-                                (\_ t -> TArrow (TVar "a") t)  -- Simplified
+                                (\argTy t -> TArrow argTy t)
                                 resultType
-                                ctor.args
+                                argTypes
                         scheme = Scheme typeVars [] ctorType
                     in
                     { env1 | constructors = Dict.insert ctorName scheme env1.constructors }
