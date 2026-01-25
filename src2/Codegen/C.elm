@@ -209,6 +209,7 @@ generateHeader ctx =
         , "#include <stdint.h>"
         , "#include <stdbool.h>"
         , "#include <math.h>"
+        , "#include <time.h>"
         ]
 
 
@@ -1272,6 +1273,22 @@ generateRuntime _ =
         , "        xs = *xs.next;"
         , "    }"
         , "    return elm_task_succeed(elm_List_reverse(results));"
+        , "}"
+        , ""
+        , "/* Time module */"
+        , "static elm_value_t elm_Time_now(void) {"
+        , "    struct timespec ts;"
+        , "    clock_gettime(CLOCK_REALTIME, &ts);"
+        , "    int64_t millis = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;"
+        , "    return elm_task_succeed(elm_int(millis));"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Time_posixToMillis(elm_value_t posix) {"
+        , "    return posix; /* Posix is just Int in milliseconds */"
+        , "}"
+        , ""
+        , "static elm_value_t elm_Time_millisToPosix(elm_value_t millis) {"
+        , "    return millis; /* Posix is just Int in milliseconds */"
         , "}"
         , ""
         , "/* String module */"
@@ -3779,6 +3796,11 @@ getFunctionArity ctx name =
         "Task.map3" -> 4
         "Task.sequence" -> 1
 
+        -- Time module
+        "Time.now" -> 0
+        "Time.posixToMillis" -> 1
+        "Time.millisToPosix" -> 1
+
         -- String module (unary)
         "String.length" -> 1
         "String.isEmpty" -> 1
@@ -4052,6 +4074,8 @@ isBuiltin name =
         -- Task module
         , "Task.succeed", "Task.fail", "Task.map", "Task.andThen", "Task.mapError"
         , "Task.onError", "Task.map2", "Task.map3", "Task.sequence"
+        -- Time module
+        , "Time.now", "Time.posixToMillis", "Time.millisToPosix"
         -- String module
         , "String.length", "String.isEmpty", "String.reverse", "String.concat"
         , "String.append", "String.join", "String.fromInt", "String.toInt", "String.fromFloat", "String.toFloat"

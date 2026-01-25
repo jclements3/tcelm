@@ -492,6 +492,18 @@ builtinTypes =
                     (TApp (TApp (TCon "Task") (TVar "x")) (TApp (TCon "List") (TVar "a"))))
           )
 
+        -- Time module (POSIX time in milliseconds)
+        , ( "Time.now"
+          , Scheme [ "x" ] []
+                (TApp (TApp (TCon "Task") (TVar "x")) (TCon "Int"))
+          )
+        , ( "Time.posixToMillis"
+          , Scheme [] [] (TArrow (TCon "Int") (TCon "Int"))
+          )
+        , ( "Time.millisToPosix"
+          , Scheme [] [] (TArrow (TCon "Int") (TCon "Int"))
+          )
+
         -- String module
         , ( "String.length", Scheme [] [] (TArrow (TCon "String") (TCon "Int")) )
         , ( "String.isEmpty", Scheme [] [] (TArrow (TCon "String") (TCon "Bool")) )
