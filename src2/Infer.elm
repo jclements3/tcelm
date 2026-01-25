@@ -208,6 +208,10 @@ builtinTypes =
         , ( "truncate", Scheme [] [] (TArrow (TCon "Float") (TCon "Int")) )
         , ( "toFloat", Scheme [] [] (TArrow (TCon "Int") (TCon "Float")) )
 
+        -- Debug module
+        , ( "Debug.log", Scheme [ "a" ] [] (TArrow (TCon "String") (TArrow (TVar "a") (TVar "a"))) )
+        , ( "Debug.toString", Scheme [ "a" ] [] (TArrow (TVar "a") (TCon "String")) )
+
         -- List module
         , ( "List.isEmpty", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")) )
         , ( "List.length", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Int")) )
