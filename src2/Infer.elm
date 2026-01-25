@@ -428,6 +428,60 @@ builtinTypes =
                         (TApp (TApp (TCon "Result") (TVar "e")) (TVar "a"))))
           )
 
+        -- Task module (Task x a = async computation that may fail with x or succeed with a)
+        , ( "Task.succeed"
+          , Scheme [ "x", "a" ] []
+                (TArrow (TVar "a") (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a")))
+          )
+        , ( "Task.fail"
+          , Scheme [ "x", "a" ] []
+                (TArrow (TVar "x") (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a")))
+          )
+        , ( "Task.map"
+          , Scheme [ "x", "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a"))
+                        (TApp (TApp (TCon "Task") (TVar "x")) (TVar "b"))))
+          )
+        , ( "Task.andThen"
+          , Scheme [ "x", "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TApp (TCon "Task") (TVar "x")) (TVar "b")))
+                    (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a"))
+                        (TApp (TApp (TCon "Task") (TVar "x")) (TVar "b"))))
+          )
+        , ( "Task.mapError"
+          , Scheme [ "x", "y", "a" ] []
+                (TArrow (TArrow (TVar "x") (TVar "y"))
+                    (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a"))
+                        (TApp (TApp (TCon "Task") (TVar "y")) (TVar "a"))))
+          )
+        , ( "Task.onError"
+          , Scheme [ "x", "y", "a" ] []
+                (TArrow (TArrow (TVar "x") (TApp (TApp (TCon "Task") (TVar "y")) (TVar "a")))
+                    (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a"))
+                        (TApp (TApp (TCon "Task") (TVar "y")) (TVar "a"))))
+          )
+        , ( "Task.map2"
+          , Scheme [ "x", "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a"))
+                        (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "b"))
+                            (TApp (TApp (TCon "Task") (TVar "x")) (TVar "c")))))
+          )
+        , ( "Task.map3"
+          , Scheme [ "x", "a", "b", "c", "d" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TArrow (TVar "c") (TVar "d"))))
+                    (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a"))
+                        (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "b"))
+                            (TArrow (TApp (TApp (TCon "Task") (TVar "x")) (TVar "c"))
+                                (TApp (TApp (TCon "Task") (TVar "x")) (TVar "d"))))))
+          )
+        , ( "Task.sequence"
+          , Scheme [ "x", "a" ] []
+                (TArrow (TApp (TCon "List") (TApp (TApp (TCon "Task") (TVar "x")) (TVar "a")))
+                    (TApp (TApp (TCon "Task") (TVar "x")) (TApp (TCon "List") (TVar "a"))))
+          )
+
         -- String module
         , ( "String.length", Scheme [] [] (TArrow (TCon "String") (TCon "Int")) )
         , ( "String.isEmpty", Scheme [] [] (TArrow (TCon "String") (TCon "Bool")) )

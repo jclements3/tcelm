@@ -637,6 +637,15 @@ detectMonad statements =
                         "Err" -> Just "Result"
                         _ -> Nothing
 
+                AST.EVar qname ->
+                    -- Check for Task.succeed/Task.fail
+                    case ( qname.module_, qname.name ) of
+                        ( Just "Task", "succeed" ) -> Just "Task"
+                        ( Just "Task", "fail" ) -> Just "Task"
+                        ( Nothing, "succeed" ) -> Just "Task"
+                        ( Nothing, "fail" ) -> Just "Task"
+                        _ -> Nothing
+
                 AST.EApp func _ ->
                     checkExpr (AST.getValue func)
 
