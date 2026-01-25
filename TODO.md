@@ -198,7 +198,8 @@
   - Basics: xor, isNaN, isInfinite
   - Math: sqrt, sin, cos, tan, asin, acos, atan, atan2, logBase, e, pi
   - Rounding: ceiling, floor, round, truncate, toFloat
-  - 149 tests passing
+  - Debug: log, toString
+  - 150 tests passing
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
