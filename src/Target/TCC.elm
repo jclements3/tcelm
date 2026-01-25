@@ -210,10 +210,79 @@ generateCode config ast =
                     )
                 |> String.join "\n"
 
+        -- Get complex constant names for reference transformation
+        complexConstantNames =
+            complexConstants |> List.map (\( name, _, _ ) -> name)
+
         -- Replace complex constant references with function calls in an expression
-        -- NOTE: For self-hosting, we skip this transformation to avoid closure capture issues
+        -- For each complex constant name, replace `elm_name` with `elm_name()` when
+        -- not already followed by `(` and not followed by `_` (which would indicate
+        -- a different identifier like `elm_name_helper`)
         fixComplexConstantRefs code =
-            code
+            let
+                replaceOne name codeStr =
+                    let
+                        pattern = "elm_" ++ name
+                        patternLen = String.length pattern
+
+                        isAlphaNum s =
+                            case String.uncons s of
+                                Just (c, _) ->
+                                    Char.isAlphaNum c
+                                Nothing ->
+                                    False
+
+                        -- Check if we should replace at a given position in the given string
+                        shouldReplace str pos =
+                            let
+                                -- Check character after the pattern
+                                charAfter = String.slice (pos + patternLen) (pos + patternLen + 1) str
+                            in
+                            charAfter /= "_"  -- Not part of longer identifier
+                                && charAfter /= "("  -- Not already a function call
+                                && not (isAlphaNum charAfter)  -- Not followed by alphanumeric
+
+                        -- Find all occurrences and replace
+                        doReplace str offset =
+                            let
+                                remaining = String.dropLeft offset str
+                            in
+                            case findNext pattern remaining 0 of
+                                Nothing ->
+                                    str
+                                Just relativePos ->
+                                    let
+                                        absolutePos = offset + relativePos
+                                    in
+                                    if shouldReplace str absolutePos then
+                                        -- Replace: insert () after the pattern
+                                        let
+                                            before = String.left absolutePos str
+                                            after = String.dropLeft (absolutePos + patternLen) str
+                                        in
+                                        doReplace (before ++ pattern ++ "()" ++ after) (absolutePos + patternLen + 2)
+                                    else
+                                        -- Skip this occurrence
+                                        doReplace str (absolutePos + patternLen)
+
+                        -- Simple substring finder
+                        findNext needle haystack start =
+                            let
+                                needleLen = String.length needle
+                                haystackLen = String.length haystack
+                                checkAt i =
+                                    if i + needleLen > haystackLen then
+                                        Nothing
+                                    else if String.slice i (i + needleLen) haystack == needle then
+                                        Just i
+                                    else
+                                        checkAt (i + 1)
+                            in
+                            checkAt start
+                    in
+                    doReplace codeStr 0
+            in
+            List.foldl replaceOne code complexConstantNames
 
         -- Replace __LAMBDA_fieldName__ markers with actual function names
         replaceLambdaMarkers : String -> String -> String
