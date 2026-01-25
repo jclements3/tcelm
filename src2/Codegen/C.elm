@@ -62,6 +62,16 @@ type alias GenCtx =
     , classes : Dict String Core.ClassDef
     , instances : List Core.InstDef
     , closureParams : Set.Set String  -- Function parameters that are closures
+    , localVars : Set.Set String       -- Local variables in scope (for free var computation)
+    , liftedLambdas : List LiftedLambda -- Accumulated lifted lambda functions
+    }
+
+
+{-| A lambda that has been lifted to a top-level function.
+-}
+type alias LiftedLambda =
+    { name : String           -- Generated function name (e.g., "__lambda_0")
+    , definition : String     -- Full C function definition
     }
 
 
@@ -76,6 +86,8 @@ emptyCtx opts =
     , classes = Dict.empty
     , instances = []
     , closureParams = Set.empty
+    , localVars = Set.empty
+    , liftedLambdas = []
     }
 
 
@@ -105,6 +117,23 @@ generateC opts module_ =
     let
         ctx = collectDecls (emptyCtx opts) module_.decls
         ctx1 = { ctx | moduleName = module_.name }
+
+        -- First pass: collect all lifted lambdas by generating functions
+        ( funcCode, finalCtx ) = generateFunctionsWithLambdas ctx1
+
+        -- Generate lambda forward declarations and definitions
+        lambdaForwardDecls =
+            finalCtx.liftedLambdas
+                |> List.reverse  -- Reverse to get declaration order
+                |> List.map .name
+                |> List.map (\name -> "static elm_value_t " ++ name ++ "();")
+                |> String.join "\n"
+
+        lambdaDefinitions =
+            finalCtx.liftedLambdas
+                |> List.reverse
+                |> List.map .definition
+                |> String.join "\n\n"
     in
     String.join "\n"
         [ generateHeader ctx1
@@ -114,10 +143,13 @@ generateC opts module_ =
         , generateTypeDecls ctx1
         , ""
         , generateForwardDecls ctx1
+        , if String.isEmpty lambdaForwardDecls then "" else "\n/* Lifted lambda forward declarations */\n" ++ lambdaForwardDecls
         , ""
-        , generateFunctions ctx1
+        , if String.isEmpty lambdaDefinitions then "" else "/* ===== LIFTED LAMBDAS ===== */\n\n" ++ lambdaDefinitions
         , ""
-        , generateMain ctx1
+        , "/* ===== FUNCTIONS ===== */\n\n" ++ funcCode
+        , ""
+        , generateMain finalCtx
         ]
 
 
@@ -529,23 +561,33 @@ generateForwardDecl ctx funcDef =
 -- FUNCTIONS
 
 
-generateFunctions : GenCtx -> String
-generateFunctions ctx =
+{-| Generate all functions, accumulating lifted lambdas in the context.
+Returns (function code, updated context with lifted lambdas).
+-}
+generateFunctionsWithLambdas : GenCtx -> ( String, GenCtx )
+generateFunctionsWithLambdas ctx =
     let
-        funcs =
-            ctx.functions
-                |> Dict.values
-                |> List.map (generateFunction ctx)
-                |> String.join "\n\n"
+        funcDefs = Dict.values ctx.functions
+
+        -- Generate each function, threading the context through
+        ( funcCodes, finalCtx ) =
+            List.foldl
+                (\funcDef ( codes, accCtx ) ->
+                    let
+                        ( code, newCtx ) = generateFunctionWithLambdas accCtx funcDef
+                    in
+                    ( codes ++ [ code ], newCtx )
+                )
+                ( [], ctx )
+                funcDefs
     in
-    if String.isEmpty funcs then
-        ""
-    else
-        "/* ===== FUNCTIONS ===== */\n\n" ++ funcs
+    ( String.join "\n\n" funcCodes, finalCtx )
 
 
-generateFunction : GenCtx -> Core.FuncDef -> String
-generateFunction ctx funcDef =
+{-| Generate a single function, accumulating any lifted lambdas.
+-}
+generateFunctionWithLambdas : GenCtx -> Core.FuncDef -> ( String, GenCtx )
+generateFunctionWithLambdas ctx funcDef =
     let
         fullName = mangle (ctx.moduleName ++ "_" ++ funcDef.name)
 
@@ -564,89 +606,480 @@ generateFunction ctx funcDef =
             | indent = ctx.indent + 1
             , closureParams = Set.union ctx.closureParams (Set.fromList paramNames)
             }
-        bodyCode = generateExpr bodyCtx funcDef.body
+
+        ( bodyCode, finalCtx ) = generateExprAccum bodyCtx Dict.empty funcDef.body
+
+        funcCode =
+            "static elm_value_t " ++ fullName ++ "(" ++ params ++ ") {\n"
+                ++ indentStr bodyCtx ++ "return " ++ bodyCode ++ ";\n"
+                ++ "}"
     in
-    "static elm_value_t " ++ fullName ++ "(" ++ params ++ ") {\n"
-        ++ indentStr bodyCtx ++ "return " ++ bodyCode ++ ";\n"
-        ++ "}"
+    ( funcCode, finalCtx )
+
+
+-- Keep the old generateFunctions for backwards compatibility (not used in main path)
+generateFunctions : GenCtx -> String
+generateFunctions ctx =
+    let
+        ( code, _ ) = generateFunctionsWithLambdas ctx
+    in
+    code
+
+
+generateFunction : GenCtx -> Core.FuncDef -> String
+generateFunction ctx funcDef =
+    let
+        ( code, _ ) = generateFunctionWithLambdas ctx funcDef
+    in
+    code
 
 
 
 -- EXPRESSIONS
 
 
-generateExpr : GenCtx -> Core.Expr -> String
-generateExpr ctx expr =
+{-| Generate expression code, accumulating lifted lambdas in context.
+Returns (generated code, updated context).
+-}
+generateExprAccum : GenCtx -> Dict String String -> Core.Expr -> ( String, GenCtx )
+generateExprAccum ctx renames expr =
     case expr of
         Core.EVar tv ->
             let
                 name = tv.name
-                mangledName = mangleWithModule ctx name
-                arity = getFunctionArity ctx name
             in
-            -- Check if this is a closure parameter - just use the variable
-            if Set.member name ctx.closureParams then
-                mangledName
-            -- If it's a known function with arity > 0, wrap in closure
-            else if Dict.member name ctx.functions && arity > 0 then
-                generateFunctionClosure ctx mangledName arity
-            -- Zero-arity functions need to be called to get their value
-            else if arity == 0 && Dict.member name ctx.functions then
-                mangledName ++ "()"
-            else
-                mangledName
+            case Dict.get name renames of
+                Just renamed ->
+                    ( renamed, ctx )
+
+                Nothing ->
+                    let
+                        mangledName = mangleWithModule ctx name
+                        arity = getFunctionArity ctx name
+                    in
+                    if Set.member name ctx.closureParams then
+                        ( mangledName, ctx )
+                    else if Dict.member name ctx.functions && arity > 0 then
+                        ( generateFunctionClosure ctx mangledName arity, ctx )
+                    else if arity == 0 && Dict.member name ctx.functions then
+                        ( mangledName ++ "()", ctx )
+                    else
+                        ( mangledName, ctx )
 
         Core.ELit lit _ ->
-            generateLiteral lit
+            ( generateLiteral lit, ctx )
 
         Core.EApp func arg _ ->
-            generateApp ctx func arg
+            generateAppAccum ctx renames func arg
 
         Core.ELam tv body _ ->
-            generateLambda ctx tv body
+            generateLambdaAccum ctx renames tv body
 
         Core.ELet var value body _ ->
-            generateLet ctx var value body
+            generateLetAccum ctx renames var value body
 
         Core.ELetRec bindings body _ ->
-            generateLetRec ctx bindings body
+            generateLetRecAccum ctx renames bindings body
 
         Core.ECase scrutinee alts _ ->
-            generateCase ctx scrutinee alts
+            generateCaseAccum ctx renames scrutinee alts
 
         Core.ECon name args _ ->
-            generateCon ctx name args
+            generateConAccum ctx renames name args
 
         Core.ETuple exprs _ ->
-            generateTuple ctx exprs
+            generateTupleAccum ctx renames exprs
 
         Core.ERecord fields _ ->
-            generateRecord ctx fields
+            generateRecordAccum ctx renames fields
 
         Core.ERecordAccess record field _ ->
-            generateRecordAccess ctx record field
+            let
+                ( recordCode, ctx1 ) = generateExprAccum ctx renames record
+            in
+            ( "((" ++ recordCode ++ ").data.p->" ++ field ++ ")", ctx1 )
 
-        Core.ERecordUpdate record fields _ ->
-            generateRecordUpdate ctx record fields
+        Core.ERecordUpdate record _ _ ->
+            generateExprAccum ctx renames record
 
         Core.ETyApp e _ _ ->
-            -- Type applications are erased
-            generateExpr ctx e
+            generateExprAccum ctx renames e
 
         Core.ETyLam _ e _ ->
-            -- Type lambdas are erased
-            generateExpr ctx e
+            generateExprAccum ctx renames e
 
         Core.EDictApp func dict _ ->
-            -- Dictionary application
-            generateDictApp ctx func dict
+            let
+                ( funcCode, ctx1 ) = generateExprAccum ctx renames func
+                ( dictCode, ctx2 ) = generateExprAccum ctx1 renames dict
+            in
+            ( funcCode ++ "(" ++ dictCode ++ ")", ctx2 )
 
         Core.EDictLam tv body _ ->
-            -- Dictionary lambda
-            generateDictLam ctx tv body
+            generateLambdaAccum ctx renames tv body
 
-        Core.EDict className args _ ->
-            generateDict ctx className args
+        Core.EDict className _ _ ->
+            ( "(elm_dict_t *)&dict_" ++ className, ctx )
+
+
+{-| Generate a lambda as a top-level static function.
+Adds the function to liftedLambdas and returns the closure creation code.
+-}
+generateLambdaAccum : GenCtx -> Dict String String -> Core.TypedVar -> Core.Expr -> ( String, GenCtx )
+generateLambdaAccum ctx renames tv body =
+    let
+        ( funcName, ctx1 ) = freshName "__lambda" ctx
+        argName = mangle tv.name
+
+        -- Compute free variables
+        bodyFreeVars = Core.freeVars body
+        freeVarsExcludingParam = Set.remove tv.name bodyFreeVars
+
+        captures =
+            freeVarsExcludingParam
+                |> Set.filter (\v ->
+                    not (Dict.member v ctx1.functions)
+                        && not (isBuiltin v)
+                )
+                |> Set.toList
+
+        numCaptures = List.length captures
+
+        -- Parameters for the lifted function
+        captureParams =
+            captures
+                |> List.indexedMap (\i _ -> "elm_value_t _cap" ++ String.fromInt i)
+
+        allParams = captureParams ++ [ "elm_value_t " ++ argName ]
+        paramsStr = String.join ", " allParams
+
+        -- Renames for the lambda body
+        innerRenames =
+            captures
+                |> List.indexedMap (\i name -> ( name, "_cap" ++ String.fromInt i ))
+                |> Dict.fromList
+
+        bodyCtx =
+            { ctx1
+            | closureParams = Set.insert tv.name ctx1.closureParams
+            , localVars = Set.union ctx1.localVars (Set.fromList captures)
+            }
+
+        -- Generate body with accumulated lambdas
+        ( bodyCode, ctx2 ) = generateExprAccum bodyCtx innerRenames body
+
+        -- Create the lifted lambda definition
+        lambdaDef =
+            "static elm_value_t " ++ funcName ++ "(" ++ paramsStr ++ ") {\n"
+                ++ "    return " ++ bodyCode ++ ";\n"
+                ++ "}"
+
+        -- Add to lifted lambdas
+        ctx3 =
+            { ctx2
+            | liftedLambdas = { name = funcName, definition = lambdaDef } :: ctx2.liftedLambdas
+            }
+
+        -- Generate closure creation code
+        captureAssignments =
+            captures
+                |> List.indexedMap (\i name ->
+                    let
+                        sourceValue =
+                            case Dict.get name renames of
+                                Just outerRenamed -> outerRenamed
+                                Nothing -> mangle name
+                    in
+                    "_c->args[" ++ String.fromInt i ++ "] = " ++ sourceValue ++ ";"
+                )
+                |> String.join " "
+
+        totalArity = numCaptures + 1
+
+        closureCode =
+            "({"
+                ++ " elm_closure_t *_c = elm_alloc_closure();"
+                ++ " _c->func = (void *)" ++ funcName ++ ";"
+                ++ " _c->arity = " ++ String.fromInt totalArity ++ ";"
+                ++ " _c->applied = " ++ String.fromInt numCaptures ++ ";"
+                ++ " " ++ captureAssignments
+                ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
+                ++ " })"
+    in
+    ( closureCode, ctx3 )
+
+
+generateAppAccum : GenCtx -> Dict String String -> Core.Expr -> Core.Expr -> ( String, GenCtx )
+generateAppAccum ctx renames func arg =
+    let
+        ( baseFunc, allArgs ) = collectArgs func [ arg ]
+    in
+    case baseFunc of
+        Core.EVar tv ->
+            let
+                funcName = tv.name
+            in
+            case Dict.get funcName renames of
+                Just renamed ->
+                    generateClosureApplyAccum ctx renames renamed allArgs
+
+                Nothing ->
+                    let
+                        mangledName = mangleWithModule ctx funcName
+                        isKnownFunction = Dict.member funcName ctx.functions || isBuiltin funcName
+                    in
+                    if Set.member funcName ctx.closureParams || not isKnownFunction then
+                        generateClosureApplyAccum ctx renames mangledName allArgs
+                    else
+                        let
+                            arity = getFunctionArity ctx funcName
+                            argCount = List.length allArgs
+                        in
+                        if arity == 0 then
+                            generateClosureApplyAccum ctx renames (mangledName ++ "()") allArgs
+                        else if argCount == arity then
+                            -- Full application
+                            let
+                                ( argCodes, finalCtx ) =
+                                    List.foldl
+                                        (\a ( codes, accCtx ) ->
+                                            let
+                                                ( code, newCtx ) = generateExprAccum accCtx renames a
+                                            in
+                                            ( codes ++ [ code ], newCtx )
+                                        )
+                                        ( [], ctx )
+                                        allArgs
+                            in
+                            ( mangledName ++ "(" ++ String.join ", " argCodes ++ ")", finalCtx )
+                        else if argCount < arity then
+                            generatePartialAppAccum ctx renames mangledName allArgs arity
+                        else
+                            let
+                                ( directArgs, extraArgs ) = splitAt arity allArgs
+                                ( directCodes, ctx1 ) =
+                                    List.foldl
+                                        (\a ( codes, accCtx ) ->
+                                            let
+                                                ( code, newCtx ) = generateExprAccum accCtx renames a
+                                            in
+                                            ( codes ++ [ code ], newCtx )
+                                        )
+                                        ( [], ctx )
+                                        directArgs
+                                baseCall = mangledName ++ "(" ++ String.join ", " directCodes ++ ")"
+                            in
+                            generateClosureApplyAccum ctx1 renames baseCall extraArgs
+
+        Core.ECon name existingArgs _ ->
+            generateConAccum ctx renames name (existingArgs ++ allArgs)
+
+        _ ->
+            let
+                ( baseFuncCode, ctx1 ) = generateExprAccum ctx renames baseFunc
+                ( argCode, ctx2 ) = generateExprAccum ctx1 renames arg
+            in
+            ( "elm_apply1((elm_closure_t *)(" ++ baseFuncCode ++ ").data.p, " ++ argCode ++ ")", ctx2 )
+
+
+generateClosureApplyAccum : GenCtx -> Dict String String -> String -> List Core.Expr -> ( String, GenCtx )
+generateClosureApplyAccum ctx renames closureExpr args =
+    case args of
+        [] ->
+            ( closureExpr, ctx )
+
+        arg :: rest ->
+            let
+                ( argCode, ctx1 ) = generateExprAccum ctx renames arg
+                applied = "elm_apply1((elm_closure_t *)(" ++ closureExpr ++ ").data.p, " ++ argCode ++ ")"
+            in
+            generateClosureApplyAccum ctx1 renames applied rest
+
+
+generatePartialAppAccum : GenCtx -> Dict String String -> String -> List Core.Expr -> Int -> ( String, GenCtx )
+generatePartialAppAccum ctx renames funcName args arity =
+    let
+        ( argAssignments, finalCtx ) =
+            List.foldl
+                (\( i, a ) ( assigns, accCtx ) ->
+                    let
+                        ( argCode, newCtx ) = generateExprAccum accCtx renames a
+                    in
+                    ( assigns ++ [ "_c->args[" ++ String.fromInt i ++ "] = " ++ argCode ++ ";" ], newCtx )
+                )
+                ( [], ctx )
+                (List.indexedMap Tuple.pair args)
+
+        resultCode =
+            "({"
+                ++ " elm_closure_t *_c = elm_alloc_closure();"
+                ++ " _c->func = (void *)" ++ funcName ++ ";"
+                ++ " _c->arity = " ++ String.fromInt arity ++ ";"
+                ++ " _c->applied = " ++ String.fromInt (List.length args) ++ ";"
+                ++ " " ++ String.join " " argAssignments
+                ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
+                ++ " })"
+    in
+    ( resultCode, finalCtx )
+
+
+generateLetAccum : GenCtx -> Dict String String -> String -> Core.Expr -> Core.Expr -> ( String, GenCtx )
+generateLetAccum ctx renames var value body =
+    let
+        ( valueCode, ctx1 ) = generateExprAccum ctx renames value
+        bodyRenames = Dict.remove var renames
+        ( bodyCode, ctx2 ) = generateExprAccum ctx1 bodyRenames body
+    in
+    ( "({ elm_value_t " ++ mangle var ++ " = " ++ valueCode ++ "; " ++ bodyCode ++ "; })", ctx2 )
+
+
+generateLetRecAccum : GenCtx -> Dict String String -> List ( String, Core.Expr ) -> Core.Expr -> ( String, GenCtx )
+generateLetRecAccum ctx renames bindings body =
+    let
+        boundNames = List.map Tuple.first bindings
+        innerRenames = List.foldl Dict.remove renames boundNames
+
+        decls =
+            bindings
+                |> List.map (\( name, _ ) -> "elm_value_t " ++ mangle name ++ ";")
+                |> String.join " "
+
+        ( assigns, ctx1 ) =
+            List.foldl
+                (\( name, e ) ( strs, accCtx ) ->
+                    let
+                        ( code, newCtx ) = generateExprAccum accCtx innerRenames e
+                    in
+                    ( strs ++ [ mangle name ++ " = " ++ code ++ ";" ], newCtx )
+                )
+                ( [], ctx )
+                bindings
+
+        ( bodyCode, ctx2 ) = generateExprAccum ctx1 innerRenames body
+    in
+    ( "({ " ++ decls ++ " " ++ String.join " " assigns ++ " " ++ bodyCode ++ "; })", ctx2 )
+
+
+generateCaseAccum : GenCtx -> Dict String String -> Core.Expr -> List Core.Alt -> ( String, GenCtx )
+generateCaseAccum ctx renames scrutinee alts =
+    let
+        ( scrutCode, ctx1 ) = generateExprAccum ctx renames scrutinee
+        ( scrutVar, ctx2 ) = freshName "scrut" ctx1
+        ( resultVar, ctx3 ) = freshName "result" ctx2
+
+        ( branches, ctx4 ) =
+            List.foldl
+                (\alt ( strs, accCtx ) ->
+                    let
+                        ( code, newCtx ) = generateAltAccum accCtx renames scrutVar resultVar alt
+                    in
+                    ( strs ++ [ code ], newCtx )
+                )
+                ( [], ctx3 )
+                alts
+    in
+    ( "({ elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ "; elm_value_t " ++ resultVar ++ "; " ++ String.join " else " branches ++ " " ++ resultVar ++ "; })", ctx4 )
+
+
+generateAltAccum : GenCtx -> Dict String String -> String -> String -> Core.Alt -> ( String, GenCtx )
+generateAltAccum ctx renames scrutVar resultVar (Core.Alt pattern guard body) =
+    let
+        ( condition, bindings ) = patternCondition ctx scrutVar pattern
+
+        ( guardCode, ctx1 ) =
+            case guard of
+                Nothing ->
+                    ( "", ctx )
+
+                Just g ->
+                    let
+                        ( code, newCtx ) = generateExprAccum ctx renames g
+                    in
+                    ( " && (" ++ code ++ ").data.i", newCtx )
+
+        ( bodyCode, ctx2 ) = generateExprAccum ctx1 renames body
+    in
+    ( "if (" ++ condition ++ guardCode ++ ") { " ++ bindings ++ resultVar ++ " = " ++ bodyCode ++ "; }", ctx2 )
+
+
+generateConAccum : GenCtx -> Dict String String -> String -> List Core.Expr -> ( String, GenCtx )
+generateConAccum ctx renames name args =
+    let
+        ( argCodes, finalCtx ) =
+            List.foldl
+                (\a ( codes, accCtx ) ->
+                    let
+                        ( argCode, newCtx ) = generateExprAccum accCtx renames a
+                    in
+                    ( codes ++ [ argCode ], newCtx )
+                )
+                ( [], ctx )
+                args
+
+        funcName =
+            case name of
+                "Nil" -> "elm_nil"
+                "Cons" -> "elm_cons"
+                "Nothing" -> "elm_nothing"
+                "Just" -> "elm_just"
+                "Ok" -> "elm_ok"
+                "Err" -> "elm_err"
+                "True" -> "elm_bool(true)"
+                "False" -> "elm_bool(false)"
+                _ -> "elm_" ++ name
+
+        resultCode =
+            if List.isEmpty args && (name == "True" || name == "False") then
+                funcName
+            else
+                funcName ++ "(" ++ String.join ", " argCodes ++ ")"
+    in
+    ( resultCode, finalCtx )
+
+
+generateTupleAccum : GenCtx -> Dict String String -> List Core.Expr -> ( String, GenCtx )
+generateTupleAccum ctx renames exprs =
+    case exprs of
+        [] ->
+            ( "elm_unit()", ctx )
+
+        [ single ] ->
+            generateExprAccum ctx renames single
+
+        first :: rest ->
+            let
+                ( firstCode, ctx1 ) = generateExprAccum ctx renames first
+                ( restCode, ctx2 ) = generateTupleAccum ctx1 renames rest
+            in
+            ( "elm_cons(" ++ firstCode ++ ", " ++ restCode ++ ")", ctx2 )
+
+
+generateRecordAccum : GenCtx -> Dict String String -> List ( String, Core.Expr ) -> ( String, GenCtx )
+generateRecordAccum ctx renames fields =
+    let
+        ( fieldCodes, finalCtx ) =
+            List.foldl
+                (\( name, e ) ( codes, accCtx ) ->
+                    let
+                        ( code, newCtx ) = generateExprAccum accCtx renames e
+                    in
+                    ( codes ++ [ "." ++ name ++ " = " ++ code ], newCtx )
+                )
+                ( [], ctx )
+                fields
+
+        fieldDecls = List.map (\( n, _ ) -> "elm_value_t " ++ n) fields
+    in
+    ( "((elm_value_t){ .tag = 500, .data.p = &(struct { " ++ String.join "; " fieldDecls ++ "; }){ " ++ String.join ", " fieldCodes ++ " }, .next = NULL })", finalCtx )
+
+
+-- Old non-accumulating versions (kept for compatibility)
+generateExpr : GenCtx -> Core.Expr -> String
+generateExpr ctx expr =
+    let
+        ( code, _ ) = generateExprAccum ctx Dict.empty expr
+    in
+    code
 
 
 generateLiteral : Core.Literal -> String
@@ -882,23 +1315,417 @@ isBuiltin name =
 
 generateLambda : GenCtx -> Core.TypedVar -> Core.Expr -> String
 generateLambda ctx tv body =
-    -- Generate lambda using GCC nested function extension
-    -- This allows lambdas to capture local variables
+    -- Generate lambda with proper closure capture.
+    -- Captured variables are passed as explicit parameters and stored in the closure's args[].
+    -- This works with both GCC and TCC (no reliance on implicit stack capture).
     let
         ( funcName, ctx1 ) = freshName "lambda" ctx
         argName = mangle tv.name
-        -- Add the lambda parameter to closureParams so it's treated as a closure if called
-        bodyCtx = { ctx1 | closureParams = Set.insert tv.name ctx1.closureParams }
-        bodyCode = generateExpr bodyCtx body
+
+        -- Compute free variables in the body (excluding the lambda param, known functions, and builtins)
+        bodyFreeVars = Core.freeVars body
+        freeVarsExcludingParam = Set.remove tv.name bodyFreeVars
+
+        -- Filter out known top-level functions and builtins
+        captures =
+            freeVarsExcludingParam
+                |> Set.filter (\v ->
+                    not (Dict.member v ctx1.functions)
+                        && not (isBuiltin v)
+                )
+                |> Set.toList
+
+        numCaptures = List.length captures
+
+        -- Generate parameter list for the nested function: (cap0, cap1, ..., arg)
+        captureParams =
+            captures
+                |> List.indexedMap (\i _ -> "elm_value_t _cap" ++ String.fromInt i)
+
+        allParams = captureParams ++ [ "elm_value_t " ++ argName ]
+        paramsStr = String.join ", " allParams
+
+        -- In the function body, we need to reference captures by their parameter names
+        -- Create a context where capture names map to _cap0, _cap1, etc.
+        captureRenames =
+            captures
+                |> List.indexedMap (\i name -> ( name, "_cap" ++ String.fromInt i ))
+                |> Dict.fromList
+
+        -- Add the lambda parameter to closureParams
+        bodyCtx =
+            { ctx1
+            | closureParams = Set.insert tv.name ctx1.closureParams
+            , localVars = Set.union ctx1.localVars (Set.fromList captures)
+            }
+
+        -- Generate body code with capture renaming
+        bodyCode = generateExprWithRenames bodyCtx captureRenames body
+
+        -- Store captured values in args[]
+        captureAssignments =
+            captures
+                |> List.indexedMap (\i name ->
+                    "_c->args[" ++ String.fromInt i ++ "] = " ++ mangle name ++ ";"
+                )
+                |> String.join " "
+
+        totalArity = numCaptures + 1
     in
     "({"
-        ++ " elm_value_t " ++ funcName ++ "(elm_value_t " ++ argName ++ ") { return " ++ bodyCode ++ "; }"
+        ++ " elm_value_t " ++ funcName ++ "(" ++ paramsStr ++ ") { return " ++ bodyCode ++ "; }"
         ++ " elm_closure_t *_c = elm_alloc_closure();"
         ++ " _c->func = (void *)" ++ funcName ++ ";"
-        ++ " _c->arity = 1;"
-        ++ " _c->applied = 0;"
+        ++ " _c->arity = " ++ String.fromInt totalArity ++ ";"
+        ++ " _c->applied = " ++ String.fromInt numCaptures ++ ";"
+        ++ " " ++ captureAssignments
         ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
         ++ " })"
+
+
+{-| Generate expression code with variable renaming for captured variables.
+-}
+generateExprWithRenames : GenCtx -> Dict String String -> Core.Expr -> String
+generateExprWithRenames ctx renames expr =
+    case expr of
+        Core.EVar tv ->
+            let
+                name = tv.name
+            in
+            case Dict.get name renames of
+                Just renamed ->
+                    -- This is a captured variable, use the renamed parameter directly
+                    renamed
+
+                Nothing ->
+                    -- Not renamed, use normal generation
+                    let
+                        mangledName = mangleWithModule ctx name
+                        arity = getFunctionArity ctx name
+                    in
+                    if Set.member name ctx.closureParams then
+                        mangledName
+                    else if Dict.member name ctx.functions && arity > 0 then
+                        generateFunctionClosure ctx mangledName arity
+                    else if arity == 0 && Dict.member name ctx.functions then
+                        mangledName ++ "()"
+                    else
+                        mangledName
+
+        Core.ELit lit _ ->
+            generateLiteral lit
+
+        Core.EApp func arg _ ->
+            generateAppWithRenames ctx renames func arg
+
+        Core.ELam innerTv innerBody _ ->
+            generateLambdaWithRenames ctx renames innerTv innerBody
+
+        Core.ELet var value body _ ->
+            let
+                valueCode = generateExprWithRenames ctx renames value
+                -- Remove var from renames in case it shadows a captured var
+                bodyRenames = Dict.remove var renames
+                bodyCode = generateExprWithRenames ctx bodyRenames body
+            in
+            "({ elm_value_t " ++ mangle var ++ " = " ++ valueCode ++ "; " ++ bodyCode ++ "; })"
+
+        Core.ELetRec bindings body _ ->
+            let
+                boundNames = List.map Tuple.first bindings
+                -- Remove all bound names from renames
+                innerRenames = List.foldl Dict.remove renames boundNames
+
+                decls =
+                    bindings
+                        |> List.map (\( name, _ ) -> "elm_value_t " ++ mangle name ++ ";")
+                        |> String.join " "
+
+                assigns =
+                    bindings
+                        |> List.map (\( name, e ) ->
+                            mangle name ++ " = " ++ generateExprWithRenames ctx innerRenames e ++ ";"
+                        )
+                        |> String.join " "
+
+                bodyCode = generateExprWithRenames ctx innerRenames body
+            in
+            "({ " ++ decls ++ " " ++ assigns ++ " " ++ bodyCode ++ "; })"
+
+        Core.ECase scrutinee alts _ ->
+            generateCaseWithRenames ctx renames scrutinee alts
+
+        Core.ECon name args _ ->
+            generateConWithRenames ctx renames name args
+
+        Core.ETuple exprs _ ->
+            generateTupleWithRenames ctx renames exprs
+
+        Core.ERecord fields _ ->
+            generateRecordWithRenames ctx renames fields
+
+        Core.ERecordAccess record field _ ->
+            let
+                recordCode = generateExprWithRenames ctx renames record
+            in
+            "((" ++ recordCode ++ ").data.p->" ++ field ++ ")"
+
+        Core.ERecordUpdate record fields _ ->
+            generateExprWithRenames ctx renames record
+
+        Core.ETyApp e _ _ ->
+            generateExprWithRenames ctx renames e
+
+        Core.ETyLam _ e _ ->
+            generateExprWithRenames ctx renames e
+
+        Core.EDictApp func dict _ ->
+            generateExprWithRenames ctx renames func ++ "(" ++ generateExprWithRenames ctx renames dict ++ ")"
+
+        Core.EDictLam innerTv innerBody _ ->
+            generateLambdaWithRenames ctx renames innerTv innerBody
+
+        Core.EDict className _ _ ->
+            "(elm_dict_t *)&dict_" ++ className
+
+
+generateAppWithRenames : GenCtx -> Dict String String -> Core.Expr -> Core.Expr -> String
+generateAppWithRenames ctx renames func arg =
+    let
+        ( baseFunc, allArgs ) = collectArgs func [ arg ]
+    in
+    case baseFunc of
+        Core.EVar tv ->
+            let
+                funcName = tv.name
+            in
+            -- Check if this is a renamed capture
+            case Dict.get funcName renames of
+                Just renamed ->
+                    -- Captured closure, apply via elm_apply1
+                    generateClosureApplyWithRenames ctx renames renamed allArgs
+
+                Nothing ->
+                    let
+                        mangledName = mangleWithModule ctx funcName
+                        isKnownFunction = Dict.member funcName ctx.functions || isBuiltin funcName
+                    in
+                    if Set.member funcName ctx.closureParams || not isKnownFunction then
+                        generateClosureApplyWithRenames ctx renames mangledName allArgs
+                    else
+                        let
+                            arity = getFunctionArity ctx funcName
+                            argCount = List.length allArgs
+                        in
+                        if arity == 0 then
+                            generateClosureApplyWithRenames ctx renames (mangledName ++ "()") allArgs
+                        else if argCount == arity then
+                            mangledName ++ "(" ++ String.join ", " (List.map (generateExprWithRenames ctx renames) allArgs) ++ ")"
+                        else if argCount < arity then
+                            generatePartialAppWithRenames ctx renames mangledName allArgs arity
+                        else
+                            let
+                                ( directArgs, extraArgs ) = splitAt arity allArgs
+                                baseCall = mangledName ++ "(" ++ String.join ", " (List.map (generateExprWithRenames ctx renames) directArgs) ++ ")"
+                            in
+                            generateClosureApplyWithRenames ctx renames baseCall extraArgs
+
+        Core.ECon name existingArgs _ ->
+            generateConWithRenames ctx renames name (existingArgs ++ allArgs)
+
+        _ ->
+            "elm_apply1((elm_closure_t *)(" ++ generateExprWithRenames ctx renames baseFunc ++ ").data.p, " ++ generateExprWithRenames ctx renames arg ++ ")"
+
+
+generateClosureApplyWithRenames : GenCtx -> Dict String String -> String -> List Core.Expr -> String
+generateClosureApplyWithRenames ctx renames closureExpr args =
+    case args of
+        [] ->
+            closureExpr
+
+        arg :: rest ->
+            let
+                applied = "elm_apply1((elm_closure_t *)(" ++ closureExpr ++ ").data.p, " ++ generateExprWithRenames ctx renames arg ++ ")"
+            in
+            generateClosureApplyWithRenames ctx renames applied rest
+
+
+generatePartialAppWithRenames : GenCtx -> Dict String String -> String -> List Core.Expr -> Int -> String
+generatePartialAppWithRenames ctx renames funcName args arity =
+    let
+        argsCode =
+            args
+                |> List.indexedMap (\i a -> "_c->args[" ++ String.fromInt i ++ "] = " ++ generateExprWithRenames ctx renames a ++ ";")
+                |> String.join " "
+    in
+    "({"
+        ++ " elm_closure_t *_c = elm_alloc_closure();"
+        ++ " _c->func = (void *)" ++ funcName ++ ";"
+        ++ " _c->arity = " ++ String.fromInt arity ++ ";"
+        ++ " _c->applied = " ++ String.fromInt (List.length args) ++ ";"
+        ++ " " ++ argsCode
+        ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
+        ++ " })"
+
+
+generateLambdaWithRenames : GenCtx -> Dict String String -> Core.TypedVar -> Core.Expr -> String
+generateLambdaWithRenames ctx renames tv body =
+    -- For nested lambdas, we need to compute captures relative to current scope
+    let
+        ( funcName, ctx1 ) = freshName "lambda" ctx
+        argName = mangle tv.name
+
+        bodyFreeVars = Core.freeVars body
+        freeVarsExcludingParam = Set.remove tv.name bodyFreeVars
+
+        -- Captures include both actual local variables and renamed captures from outer scope
+        captures =
+            freeVarsExcludingParam
+                |> Set.filter (\v ->
+                    not (Dict.member v ctx1.functions)
+                        && not (isBuiltin v)
+                )
+                |> Set.toList
+
+        numCaptures = List.length captures
+
+        captureParams =
+            captures
+                |> List.indexedMap (\i _ -> "elm_value_t _cap" ++ String.fromInt i)
+
+        allParams = captureParams ++ [ "elm_value_t " ++ argName ]
+        paramsStr = String.join ", " allParams
+
+        -- New rename map for inner lambda
+        innerRenames =
+            captures
+                |> List.indexedMap (\i name -> ( name, "_cap" ++ String.fromInt i ))
+                |> Dict.fromList
+
+        bodyCtx =
+            { ctx1
+            | closureParams = Set.insert tv.name ctx1.closureParams
+            , localVars = Set.union ctx1.localVars (Set.fromList captures)
+            }
+
+        bodyCode = generateExprWithRenames bodyCtx innerRenames body
+
+        -- Store captured values - need to look up in outer renames for values
+        captureAssignments =
+            captures
+                |> List.indexedMap (\i name ->
+                    let
+                        sourceValue =
+                            case Dict.get name renames of
+                                Just outerRenamed -> outerRenamed
+                                Nothing -> mangle name
+                    in
+                    "_c->args[" ++ String.fromInt i ++ "] = " ++ sourceValue ++ ";"
+                )
+                |> String.join " "
+
+        totalArity = numCaptures + 1
+    in
+    "({"
+        ++ " elm_value_t " ++ funcName ++ "(" ++ paramsStr ++ ") { return " ++ bodyCode ++ "; }"
+        ++ " elm_closure_t *_c = elm_alloc_closure();"
+        ++ " _c->func = (void *)" ++ funcName ++ ";"
+        ++ " _c->arity = " ++ String.fromInt totalArity ++ ";"
+        ++ " _c->applied = " ++ String.fromInt numCaptures ++ ";"
+        ++ " " ++ captureAssignments
+        ++ " (elm_value_t){ .tag = 400, .data.p = _c, .next = NULL };"
+        ++ " })"
+
+
+generateCaseWithRenames : GenCtx -> Dict String String -> Core.Expr -> List Core.Alt -> String
+generateCaseWithRenames ctx renames scrutinee alts =
+    let
+        scrutCode = generateExprWithRenames ctx renames scrutinee
+        ( scrutVar, ctx1 ) = freshName "scrut" ctx
+        ( resultVar, ctx2 ) = freshName "result" ctx1
+
+        branches =
+            alts
+                |> List.map (generateAltWithRenames ctx2 renames scrutVar resultVar)
+                |> String.join " else "
+    in
+    "({ elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ "; elm_value_t " ++ resultVar ++ "; " ++ branches ++ " " ++ resultVar ++ "; })"
+
+
+generateAltWithRenames : GenCtx -> Dict String String -> String -> String -> Core.Alt -> String
+generateAltWithRenames ctx renames scrutVar resultVar (Core.Alt pattern guard body) =
+    let
+        ( condition, bindings ) = patternCondition ctx scrutVar pattern
+        -- Remove pattern-bound variables from renames to avoid shadowing issues
+        patVars = Core.freeVars body  -- Use body's free vars to find what pattern binds
+        bodyRenames = renames  -- Pattern variables are fresh, don't shadow renames
+
+        guardCode =
+            case guard of
+                Nothing -> ""
+                Just g -> " && (" ++ generateExprWithRenames ctx bodyRenames g ++ ").data.i"
+
+        bodyCode = generateExprWithRenames ctx bodyRenames body
+    in
+    "if (" ++ condition ++ guardCode ++ ") { " ++ bindings ++ resultVar ++ " = " ++ bodyCode ++ "; }"
+
+
+generateConWithRenames : GenCtx -> Dict String String -> String -> List Core.Expr -> String
+generateConWithRenames ctx renames name args =
+    let
+        argCodes =
+            args
+                |> List.map (generateExprWithRenames ctx renames)
+                |> String.join ", "
+
+        funcName =
+            case name of
+                "Nil" -> "elm_nil"
+                "Cons" -> "elm_cons"
+                "Nothing" -> "elm_nothing"
+                "Just" -> "elm_just"
+                "Ok" -> "elm_ok"
+                "Err" -> "elm_err"
+                "True" -> "elm_bool(true)"
+                "False" -> "elm_bool(false)"
+                _ -> "elm_" ++ name
+    in
+    if List.isEmpty args && (name == "True" || name == "False") then
+        funcName
+    else
+        funcName ++ "(" ++ argCodes ++ ")"
+
+
+generateTupleWithRenames : GenCtx -> Dict String String -> List Core.Expr -> String
+generateTupleWithRenames ctx renames exprs =
+    case exprs of
+        [] ->
+            "elm_unit()"
+
+        [ single ] ->
+            generateExprWithRenames ctx renames single
+
+        first :: rest ->
+            let
+                firstCode = generateExprWithRenames ctx renames first
+                restCode = generateTupleWithRenames ctx renames rest
+            in
+            "elm_cons(" ++ firstCode ++ ", " ++ restCode ++ ")"
+
+
+generateRecordWithRenames : GenCtx -> Dict String String -> List ( String, Core.Expr ) -> String
+generateRecordWithRenames ctx renames fields =
+    let
+        fieldCodes =
+            fields
+                |> List.map (\( name, e ) ->
+                    "." ++ name ++ " = " ++ generateExprWithRenames ctx renames e
+                )
+                |> String.join ", "
+    in
+    "((elm_value_t){ .tag = 500, .data.p = &(struct { " ++
+        String.join "; " (List.map (\( n, _ ) -> "elm_value_t " ++ n) fields) ++
+        "; }){ " ++ fieldCodes ++ " }, .next = NULL })"
 
 
 generateLet : GenCtx -> String -> Core.Expr -> Core.Expr -> String
