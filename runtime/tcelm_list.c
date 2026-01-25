@@ -662,11 +662,11 @@ static tcelm_value_t *merge_lists(tcelm_arena_t *arena, tcelm_value_t *left, tce
 
         if (values_compare(left_head, right_head) <= 0) {
             *tail_ptr = tcelm_cons(arena, left_head, TCELM_NIL);
-            tail_ptr = &((*tail_ptr)->data.list.tail);
+            tail_ptr = &((*tail_ptr)->data.list->tail);
             left = tcelm_list_tail(left);
         } else {
             *tail_ptr = tcelm_cons(arena, right_head, TCELM_NIL);
-            tail_ptr = &((*tail_ptr)->data.list.tail);
+            tail_ptr = &((*tail_ptr)->data.list->tail);
             right = tcelm_list_tail(right);
         }
     }
@@ -699,11 +699,11 @@ static tcelm_value_t *merge_lists_with(tcelm_arena_t *arena, tcelm_value_t *cmp,
 
         if (cmp_result <= 1) {  /* LT or EQ */
             *tail_ptr = tcelm_cons(arena, left_head, TCELM_NIL);
-            tail_ptr = &((*tail_ptr)->data.list.tail);
+            tail_ptr = &((*tail_ptr)->data.list->tail);
             left = tcelm_list_tail(left);
         } else {
             *tail_ptr = tcelm_cons(arena, right_head, TCELM_NIL);
-            tail_ptr = &((*tail_ptr)->data.list.tail);
+            tail_ptr = &((*tail_ptr)->data.list->tail);
             right = tcelm_list_tail(right);
         }
     }
@@ -735,7 +735,7 @@ static void split_list(tcelm_value_t *list, tcelm_value_t **left, tcelm_value_t 
     *right = tcelm_list_tail(slow);
 
     /* Cut the list */
-    slow->data.list.tail = TCELM_NIL;
+    slow->data.list->tail = NULL;
 }
 
 /*
@@ -835,7 +835,7 @@ tcelm_value_t *tcelm_list_sortBy(tcelm_arena_t *arena, tcelm_value_t *fn, tcelm_
             if (values_compare(key, other_key) < 0) {
                 break;
             }
-            insert_ptr = &((*insert_ptr)->data.list.tail);
+            insert_ptr = &((*insert_ptr)->data.list->tail);
         }
 
         /* Insert */

@@ -72,6 +72,7 @@ type alias GenCtx =
 -}
 type alias LiftedLambda =
     { name : String           -- Generated function name (e.g., "__lambda_0")
+    , params : String         -- Parameter list (e.g., "elm_value_t _cap0, elm_value_t elm_x")
     , definition : String     -- Full C function definition
     }
 
@@ -127,8 +128,7 @@ generateC opts module_ =
         lambdaForwardDecls =
             finalCtx.liftedLambdas
                 |> List.reverse  -- Reverse to get declaration order
-                |> List.map .name
-                |> List.map (\name -> "static elm_value_t " ++ name ++ "();")
+                |> List.map (\lam -> "static elm_value_t " ++ lam.name ++ "(" ++ lam.params ++ ");")
                 |> String.join "\n"
 
         lambdaDefinitions =
@@ -5163,8 +5163,12 @@ generateLambdaAccum ctx renames tv body =
         captures =
             freeVarsExcludingParam
                 |> Set.filter (\v ->
-                    not (Dict.member v ctx1.functions)
-                        && not (isBuiltin v)
+                    -- Local variables (from outer lambda params) should be captured
+                    -- even if they shadow builtins with the same name
+                    let
+                        isLocalVar = Set.member v ctx.closureParams || Set.member v ctx.localVars
+                    in
+                    isLocalVar || (not (Dict.member v ctx1.functions) && not (isBuiltin v))
                 )
                 |> Set.toList
 
@@ -5202,7 +5206,7 @@ generateLambdaAccum ctx renames tv body =
         -- Add to lifted lambdas
         ctx3 =
             { ctx2
-            | liftedLambdas = { name = funcName, definition = lambdaDef } :: ctx2.liftedLambdas
+            | liftedLambdas = { name = funcName, params = paramsStr, definition = lambdaDef } :: ctx2.liftedLambdas
             }
 
         -- Generate closure creation code
@@ -6430,11 +6434,14 @@ generateLambda ctx tv body =
         freeVarsExcludingParam = Set.remove tv.name bodyFreeVars
 
         -- Filter out known top-level functions and builtins
+        -- but keep local variables even if they shadow builtins
         captures =
             freeVarsExcludingParam
                 |> Set.filter (\v ->
-                    not (Dict.member v ctx1.functions)
-                        && not (isBuiltin v)
+                    let
+                        isLocalVar = Set.member v ctx.closureParams || Set.member v ctx.localVars
+                    in
+                    isLocalVar || (not (Dict.member v ctx1.functions) && not (isBuiltin v))
                 )
                 |> Set.toList
 
@@ -6716,11 +6723,14 @@ generateLambdaWithRenames ctx renames tv body =
         freeVarsExcludingParam = Set.remove tv.name bodyFreeVars
 
         -- Captures include both actual local variables and renamed captures from outer scope
+        -- Keep local variables even if they shadow builtins
         captures =
             freeVarsExcludingParam
                 |> Set.filter (\v ->
-                    not (Dict.member v ctx1.functions)
-                        && not (isBuiltin v)
+                    let
+                        isLocalVar = Set.member v ctx.closureParams || Set.member v ctx.localVars
+                    in
+                    isLocalVar || (not (Dict.member v ctx1.functions) && not (isBuiltin v))
                 )
                 |> Set.toList
 
