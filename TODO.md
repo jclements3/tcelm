@@ -83,7 +83,16 @@
 - [x] 2026-01-24: **MILESTONE 1 COMPLETE** - Multi-line pipelines:
   - Parser: skipNewlinesUnlessAtColumn1 allows operators on new lines
   - Working: `[1,2,3] |> List.map (\x -> x * 2) |> List.filter (\x -> x > 2) |> List.sum` = 10
-- [ ] **NEXT**: Records, custom types, do-notation
+- [x] 2026-01-24: Records with field access:
+  - Parser: record.field syntax (ERecordAccess)
+  - Codegen: records as linked lists of (name, value) pairs
+  - Working: `{ name = "Alice", age = 30 }.age` = 30
+- [x] 2026-01-24: Custom types with constructors and pattern matching:
+  - Parser: multi-line type definitions (newlines before =)
+  - Infer: pattern binding for constructor arguments
+  - Working: `type Shape = Circle Int | Rectangle Int Int` with case matching
+  - Working: `area (Rectangle 5 4)` = 20
+- [ ] **NEXT**: Tuple support, do-notation, more tests
 
 ---
 
@@ -128,6 +137,8 @@ Source -> Lexer -> Parser -> AST -> Type Inference -> Core IR -> C Code
 | Pipeline operators | ✅ Working | `|>` and `<|` desugar to function application |
 | Qualified names | ✅ Working | `List.map`, `Maybe.withDefault`, etc. |
 | Standard library | ✅ Working | List, Maybe, Result, String, Basics in C runtime |
+| Records | ✅ Working | Creation and field access (`record.field`) |
+| Custom types | ✅ Working | Constructors with args, pattern matching |
 | Type classes | 🔧 Infrastructure | Types defined, instance resolution TODO |
 
 ### Known Issues
