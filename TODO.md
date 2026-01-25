@@ -263,7 +263,17 @@
   - Fixed Debug.toString to properly display Result, Maybe, List, Tuple, Order
   - Fixed print_value to escape quotes in string output
   - 198 tests passing
-- [ ] **NEXT**: Binary Serialization (Phase 5.3)
+- [x] 2026-01-25: Bytes module (Binary Serialization)
+  - Bytes.width, Bytes.isEmpty (core operations)
+  - Bytes.Encode: signedInt8/16/32, unsignedInt8/16/32, float32/64
+  - Bytes.Encode: bytes, string, sequence, encode
+  - Bytes.Decode: signedInt8/16/32, unsignedInt8/16/32, float32/64
+  - Bytes.Decode: bytes, string, map, map2, andThen, succeed, fail
+  - Bytes.Decode.decode (run decoder on Bytes)
+  - Endianness support: Bytes.LE, Bytes.BE
+  - Fixed constructor mangling for qualified names (Bytes.LE -> elm_Bytes_LE)
+  - 201 tests passing
+- [ ] **NEXT**: Fixed-Size Integers (Phase 5.1) or more advanced features
 
 ---
 
@@ -577,12 +587,14 @@ For debugging, config, API communication:
 - [x] decodeString, decodeValue (run decoders)
 - [ ] Auto-derive for simple records (optional)
 
-### 5.3 Binary Serialization
+### 5.3 Binary Serialization ✅ COMPLETE
 For efficient storage/network:
-- [ ] Bytes type
-- [ ] Encode.int32, Encode.float64, etc.
-- [ ] Decode.int32, Decode.float64, etc.
-- [ ] Endianness control
+- [x] Bytes type (wraps byte buffer with length)
+- [x] Bytes.Encode: signedInt8/16/32, unsignedInt8/16/32, float32/64
+- [x] Bytes.Encode: bytes, string, sequence, encode
+- [x] Bytes.Decode: signedInt8/16/32, unsignedInt8/16/32, float32/64
+- [x] Bytes.Decode: bytes, string, map, map2, andThen, succeed, fail, decode
+- [x] Endianness control via Bytes.LE / Bytes.BE
 
 ### 5.4 Simple Deriving
 Reduce boilerplate for common cases:

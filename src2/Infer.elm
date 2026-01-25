@@ -1070,6 +1070,125 @@ builtinTypes =
           , Scheme [ "a" ] []
                 (TArrow (TCon "String") (TApp (TCon "Decoder") (TVar "a")))
           )
+
+        -- Bytes module (core operations)
+        , ( "Bytes.width"
+          , Scheme [] [] (TArrow (TCon "Bytes") (TCon "Int"))
+          )
+        , ( "Bytes.isEmpty"
+          , Scheme [] [] (TArrow (TCon "Bytes") (TCon "Bool"))
+          )
+
+        -- Bytes.Encode module
+        , ( "Bytes.Encode.signedInt8"
+          , Scheme [] [] (TArrow (TCon "Int") (TCon "Encoder"))
+          )
+        , ( "Bytes.Encode.signedInt16"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TArrow (TCon "Int") (TCon "Encoder")))
+          )
+        , ( "Bytes.Encode.signedInt32"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TArrow (TCon "Int") (TCon "Encoder")))
+          )
+        , ( "Bytes.Encode.unsignedInt8"
+          , Scheme [] [] (TArrow (TCon "Int") (TCon "Encoder"))
+          )
+        , ( "Bytes.Encode.unsignedInt16"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TArrow (TCon "Int") (TCon "Encoder")))
+          )
+        , ( "Bytes.Encode.unsignedInt32"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TArrow (TCon "Int") (TCon "Encoder")))
+          )
+        , ( "Bytes.Encode.float32"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TArrow (TCon "Float") (TCon "Encoder")))
+          )
+        , ( "Bytes.Encode.float64"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TArrow (TCon "Float") (TCon "Encoder")))
+          )
+        , ( "Bytes.Encode.bytes"
+          , Scheme [] [] (TArrow (TCon "Bytes") (TCon "Encoder"))
+          )
+        , ( "Bytes.Encode.string"
+          , Scheme [] [] (TArrow (TCon "String") (TCon "Encoder"))
+          )
+        , ( "Bytes.Encode.sequence"
+          , Scheme [] [] (TArrow (TApp (TCon "List") (TCon "Encoder")) (TCon "Encoder"))
+          )
+        , ( "Bytes.Encode.encode"
+          , Scheme [] [] (TArrow (TCon "Encoder") (TCon "Bytes"))
+          )
+
+        -- Bytes.Decode module
+        , ( "Bytes.Decode.decode"
+          , Scheme [ "a" ] []
+                (TArrow (TApp (TCon "BytesDecoder") (TVar "a"))
+                    (TArrow (TCon "Bytes")
+                        (TApp (TCon "Maybe") (TVar "a"))))
+          )
+        , ( "Bytes.Decode.signedInt8"
+          , Scheme [] [] (TApp (TCon "BytesDecoder") (TCon "Int"))
+          )
+        , ( "Bytes.Decode.signedInt16"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TApp (TCon "BytesDecoder") (TCon "Int")))
+          )
+        , ( "Bytes.Decode.signedInt32"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TApp (TCon "BytesDecoder") (TCon "Int")))
+          )
+        , ( "Bytes.Decode.unsignedInt8"
+          , Scheme [] [] (TApp (TCon "BytesDecoder") (TCon "Int"))
+          )
+        , ( "Bytes.Decode.unsignedInt16"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TApp (TCon "BytesDecoder") (TCon "Int")))
+          )
+        , ( "Bytes.Decode.unsignedInt32"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TApp (TCon "BytesDecoder") (TCon "Int")))
+          )
+        , ( "Bytes.Decode.float32"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TApp (TCon "BytesDecoder") (TCon "Float")))
+          )
+        , ( "Bytes.Decode.float64"
+          , Scheme [] [] (TArrow (TCon "Endianness") (TApp (TCon "BytesDecoder") (TCon "Float")))
+          )
+        , ( "Bytes.Decode.bytes"
+          , Scheme [] [] (TArrow (TCon "Int") (TApp (TCon "BytesDecoder") (TCon "Bytes")))
+          )
+        , ( "Bytes.Decode.string"
+          , Scheme [] [] (TArrow (TCon "Int") (TApp (TCon "BytesDecoder") (TCon "String")))
+          )
+        , ( "Bytes.Decode.map"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TVar "b"))
+                    (TArrow (TApp (TCon "BytesDecoder") (TVar "a"))
+                        (TApp (TCon "BytesDecoder") (TVar "b"))))
+          )
+        , ( "Bytes.Decode.map2"
+          , Scheme [ "a", "b", "c" ] []
+                (TArrow (TArrow (TVar "a") (TArrow (TVar "b") (TVar "c")))
+                    (TArrow (TApp (TCon "BytesDecoder") (TVar "a"))
+                        (TArrow (TApp (TCon "BytesDecoder") (TVar "b"))
+                            (TApp (TCon "BytesDecoder") (TVar "c")))))
+          )
+        , ( "Bytes.Decode.andThen"
+          , Scheme [ "a", "b" ] []
+                (TArrow (TArrow (TVar "a") (TApp (TCon "BytesDecoder") (TVar "b")))
+                    (TArrow (TApp (TCon "BytesDecoder") (TVar "a"))
+                        (TApp (TCon "BytesDecoder") (TVar "b"))))
+          )
+        , ( "Bytes.Decode.succeed"
+          , Scheme [ "a" ] []
+                (TArrow (TVar "a") (TApp (TCon "BytesDecoder") (TVar "a")))
+          )
+        , ( "Bytes.Decode.fail"
+          , Scheme [ "a" ] []
+                (TApp (TCon "BytesDecoder") (TVar "a"))
+          )
+
+        -- Endianness constructors
+        , ( "Bytes.LE"
+          , Scheme [] [] (TCon "Endianness")
+          )
+        , ( "Bytes.BE"
+          , Scheme [] [] (TCon "Endianness")
+          )
         ]
 
 
@@ -1087,6 +1206,8 @@ builtinConstructors =
         , ( "LT", Scheme [] [] (TCon "Order") )
         , ( "EQ", Scheme [] [] (TCon "Order") )
         , ( "GT", Scheme [] [] (TCon "Order") )
+        , ( "LE", Scheme [] [] (TCon "Endianness") )
+        , ( "BE", Scheme [] [] (TCon "Endianness") )
         ]
 
 
