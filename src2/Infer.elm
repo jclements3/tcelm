@@ -214,6 +214,7 @@ builtinTypes =
         -- Debug module
         , ( "Debug.log", Scheme [ "a" ] [] (TArrow (TCon "String") (TArrow (TVar "a") (TVar "a"))) )
         , ( "Debug.toString", Scheme [ "a" ] [] (TArrow (TVar "a") (TCon "String")) )
+        , ( "Debug.todo", Scheme [ "a" ] [] (TArrow (TCon "String") (TVar "a")) )
 
         -- List module
         , ( "List.isEmpty", Scheme [ "a" ] [] (TArrow (TApp (TCon "List") (TVar "a")) (TCon "Bool")) )

@@ -2393,6 +2393,13 @@ generateRuntime _ =
         , "    }"
         , "    return elm_string(buf);"
         , "}"
+        , ""
+        , "/* Debug.todo - crash with message (for incomplete code) */"
+        , "static elm_value_t elm_Debug_todo(elm_value_t msg) {"
+        , "    fprintf(stderr, \"TODO: %s\\n\", msg.data.s);"
+        , "    exit(1);"
+        , "    return elm_unit(); /* Never reached */"
+        , "}"
         ]
 
 
@@ -3501,6 +3508,7 @@ getFunctionArity ctx name =
         -- Debug module
         "Debug.log" -> 2
         "Debug.toString" -> 1
+        "Debug.todo" -> 1
 
         -- Order type (nullary)
         "LT" -> 0
@@ -3816,7 +3824,7 @@ isBuiltin name =
         , "logBase", "e", "pi", "degrees", "radians", "turns"
         , "ceiling", "floor", "round", "truncate", "toFloat"
         -- Debug module
-        , "Debug.log", "Debug.toString"
+        , "Debug.log", "Debug.toString", "Debug.todo"
         -- Order type
         , "LT", "EQ", "GT"
         -- List module
