@@ -209,8 +209,9 @@
   - Basics: degrees, radians, turns - angle conversion functions
   - Array.initialize, Array.repeat - array creation functions
   - Dict.partition, Set.partition - split by predicate
+  - Debug.todo - crash with message for incomplete code
   - Fixed: LT/EQ/GT constructors now in builtinConstructors
-  - 162 tests passing
+  - 162 tests passing, ~240 builtin functions
 - [ ] **NEXT**: Type classes, Task support for FFI
 
 ---
