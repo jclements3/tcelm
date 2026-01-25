@@ -478,25 +478,26 @@ desugarBinOp ctx left op right =
         _ ->
             -- Other operators: generate function call
             let
+                -- Prefix with _op_ to avoid shadowing conflicts with user variables
                 ( opFuncName, resultType ) =
                     case opName of
-                        "+" -> ( "add", TCon "Int" )
-                        "-" -> ( "sub", TCon "Int" )
-                        "*" -> ( "mul", TCon "Int" )
-                        "/" -> ( "div", TCon "Int" )
-                        "//" -> ( "intDiv", TCon "Int" )
-                        "^" -> ( "pow", TCon "Int" )
-                        "%" -> ( "mod", TCon "Int" )
-                        "==" -> ( "eq", TCon "Bool" )
-                        "/=" -> ( "neq", TCon "Bool" )
-                        "<" -> ( "lt", TCon "Bool" )
-                        ">" -> ( "gt", TCon "Bool" )
-                        "<=" -> ( "lte", TCon "Bool" )
-                        ">=" -> ( "gte", TCon "Bool" )
-                        "&&" -> ( "and", TCon "Bool" )
-                        "||" -> ( "or", TCon "Bool" )
-                        "++" -> ( "append", TVar "a" )
-                        "::" -> ( "cons", TVar "a" )
+                        "+" -> ( "_op_add", TCon "Int" )
+                        "-" -> ( "_op_sub", TCon "Int" )
+                        "*" -> ( "_op_mul", TCon "Int" )
+                        "/" -> ( "_op_div", TCon "Int" )
+                        "//" -> ( "_op_intDiv", TCon "Int" )
+                        "^" -> ( "_op_pow", TCon "Int" )
+                        "%" -> ( "_op_mod", TCon "Int" )
+                        "==" -> ( "_op_eq", TCon "Bool" )
+                        "/=" -> ( "_op_neq", TCon "Bool" )
+                        "<" -> ( "_op_lt", TCon "Bool" )
+                        ">" -> ( "_op_gt", TCon "Bool" )
+                        "<=" -> ( "_op_lte", TCon "Bool" )
+                        ">=" -> ( "_op_gte", TCon "Bool" )
+                        "&&" -> ( "_op_and", TCon "Bool" )
+                        "||" -> ( "_op_or", TCon "Bool" )
+                        "++" -> ( "_op_append", TVar "a" )
+                        "::" -> ( "_op_cons", TVar "a" )
                         _ -> ( opName, TVar "a" )
 
                 opVar = Core.EVar { name = opFuncName, type_ = TArrow (TVar "a") (TArrow (TVar "b") resultType) }

@@ -1769,28 +1769,24 @@ getFunctionArity ctx name =
         ">>" -> 2
         "<<" -> 2
 
-        -- Binary operators (desugared names from Desugar.elm)
-        "add" -> 2
-        "sub" -> 2
-        "mul" -> 2
-        "div" -> 2
-        "intDiv" -> 2
-        "pow" -> 2
-        "mod" -> 2
-        "eq" -> 2
-        "neq" -> 2
-        "lt" -> 2
-        "gt" -> 2
-        "lte" -> 2
-        "gte" -> 2
-        "and" -> 2
-        "or" -> 2
-        "append" -> 2
-        "cons" -> 2
-        "pipe" -> 2
-        "pipeLeft" -> 2
-        "compose" -> 2
-        "composeLeft" -> 2
+        -- Binary operators (desugared names with _op_ prefix from Desugar.elm)
+        "_op_add" -> 2
+        "_op_sub" -> 2
+        "_op_mul" -> 2
+        "_op_div" -> 2
+        "_op_intDiv" -> 2
+        "_op_pow" -> 2
+        "_op_mod" -> 2
+        "_op_eq" -> 2
+        "_op_neq" -> 2
+        "_op_lt" -> 2
+        "_op_gt" -> 2
+        "_op_lte" -> 2
+        "_op_gte" -> 2
+        "_op_and" -> 2
+        "_op_or" -> 2
+        "_op_append" -> 2
+        "_op_cons" -> 2
 
         -- Unary functions
         "not" -> 1
@@ -1949,12 +1945,11 @@ isBuiltin name =
         , "++", "::"
         , "|>", "<|", ">>", "<<"
         , "True", "False"
-        -- Desugared operator names (from Desugar.elm desugarBinOp)
-        , "add", "sub", "mul", "div", "intDiv", "pow", "mod"
-        , "eq", "neq", "lt", "gt", "lte", "gte"
-        , "and", "or"
-        , "append", "cons"
-        , "pipe", "pipeLeft", "compose", "composeLeft"
+        -- Desugared operator names with _op_ prefix (from Desugar.elm desugarBinOp)
+        , "_op_add", "_op_sub", "_op_mul", "_op_div", "_op_intDiv", "_op_pow", "_op_mod"
+        , "_op_eq", "_op_neq", "_op_lt", "_op_gt", "_op_lte", "_op_gte"
+        , "_op_and", "_op_or"
+        , "_op_append", "_op_cons"
         -- Basics module
         , "identity", "always", "flip", "min", "max", "clamp", "abs"
         , "modBy", "remainderBy"
@@ -2781,7 +2776,15 @@ generateMain ctx =
 
 mangle : String -> String
 mangle name =
-    "elm_" ++ String.map (\c -> if c == '.' then '_' else c) name
+    let
+        -- Strip _op_ prefix from operator names so _op_add -> add
+        baseName =
+            if String.startsWith "_op_" name then
+                String.dropLeft 4 name
+            else
+                name
+    in
+    "elm_" ++ String.map (\c -> if c == '.' then '_' else c) baseName
 
 
 escapeString : String -> String
