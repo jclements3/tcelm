@@ -5190,6 +5190,7 @@ generateFunctionsWithLambdas ctx =
 
 
 {-| Generate a single function, accumulating any lifted lambdas.
+    Implements tail call optimization for self-recursive functions.
 -}
 generateFunctionWithLambdas : GenCtx -> Core.FuncDef -> ( String, GenCtx )
 generateFunctionWithLambdas ctx funcDef =
@@ -5211,15 +5212,266 @@ generateFunctionWithLambdas ctx funcDef =
             | indent = ctx.indent + 1
             , closureParams = Set.union ctx.closureParams (Set.fromList paramNames)
             }
-
-        ( bodyCode, finalCtx ) = generateExprAccum bodyCtx Dict.empty funcDef.body
-
-        funcCode =
-            "static elm_value_t " ++ fullName ++ "(" ++ params ++ ") {\n"
-                ++ indentStr bodyCtx ++ "return " ++ bodyCode ++ ";\n"
-                ++ "}"
     in
-    ( funcCode, finalCtx )
+    -- Check if this function is tail-recursive
+    if isTailRecursive funcDef.name funcDef.body then
+        -- Generate loop-based TCO version
+        let
+            ( bodyCode, finalCtx ) = generateTcoBody bodyCtx funcDef.name funcDef.args funcDef.body
+            funcCode =
+                "static elm_value_t " ++ fullName ++ "(" ++ params ++ ") {\n"
+                    ++ indentStr bodyCtx ++ "while (1) {\n"
+                    ++ bodyCode
+                    ++ indentStr bodyCtx ++ "}\n"
+                    ++ "}"
+        in
+        ( funcCode, finalCtx )
+    else
+        -- Normal function generation
+        let
+            ( bodyCode, finalCtx ) = generateExprAccum bodyCtx Dict.empty funcDef.body
+            funcCode =
+                "static elm_value_t " ++ fullName ++ "(" ++ params ++ ") {\n"
+                    ++ indentStr bodyCtx ++ "return " ++ bodyCode ++ ";\n"
+                    ++ "}"
+        in
+        ( funcCode, finalCtx )
+
+
+{-| Check if an expression is tail-recursive with respect to a given function name.
+    Returns True if the function calls itself in tail position.
+-}
+isTailRecursive : String -> Core.Expr -> Bool
+isTailRecursive funcName expr =
+    case expr of
+        Core.EApp func arg _ ->
+            -- Check if this is a call to funcName
+            let
+                ( baseFunc, _ ) = collectArgs func [ arg ]
+            in
+            case baseFunc of
+                Core.EVar tv ->
+                    tv.name == funcName
+
+                _ ->
+                    False
+
+        Core.ECase _ alts _ ->
+            -- Function is tail-recursive if all alternatives are tail-recursive
+            List.all (\(Core.Alt _ _ body) -> isTailRecursive funcName body || not (containsCall funcName body)) alts
+
+        Core.ELet _ _ body _ ->
+            isTailRecursive funcName body
+
+        Core.ELetRec _ body _ ->
+            isTailRecursive funcName body
+
+        _ ->
+            False
+
+
+{-| Check if an expression contains a call to a function (non-tail position counts).
+-}
+containsCall : String -> Core.Expr -> Bool
+containsCall funcName expr =
+    case expr of
+        Core.EVar tv ->
+            tv.name == funcName
+
+        Core.EApp func arg _ ->
+            containsCall funcName func || containsCall funcName arg
+
+        Core.ELam _ body _ ->
+            containsCall funcName body
+
+        Core.ELet _ value body _ ->
+            containsCall funcName value || containsCall funcName body
+
+        Core.ELetRec bindings body _ ->
+            List.any (\( _, e ) -> containsCall funcName e) bindings || containsCall funcName body
+
+        Core.ECase scrutinee alts _ ->
+            containsCall funcName scrutinee || List.any (\(Core.Alt _ _ body) -> containsCall funcName body) alts
+
+        Core.ECon _ args _ ->
+            List.any (containsCall funcName) args
+
+        Core.ETuple exprs _ ->
+            List.any (containsCall funcName) exprs
+
+        Core.ERecord fields _ ->
+            List.any (\( _, e ) -> containsCall funcName e) fields
+
+        Core.ERecordAccess e _ _ ->
+            containsCall funcName e
+
+        Core.ERecordUpdate e updates _ ->
+            containsCall funcName e || List.any (\( _, ue ) -> containsCall funcName ue) updates
+
+        Core.ETyApp e _ _ ->
+            containsCall funcName e
+
+        Core.ETyLam _ e _ ->
+            containsCall funcName e
+
+        Core.EDictApp func dict _ ->
+            containsCall funcName func || containsCall funcName dict
+
+        Core.EDictLam _ body _ ->
+            containsCall funcName body
+
+        _ ->
+            False
+
+
+{-| Generate loop body for tail-recursive function.
+    Converts tail calls to parameter assignments, and non-tail returns to actual returns.
+-}
+generateTcoBody : GenCtx -> String -> List Core.TypedVar -> Core.Expr -> ( String, GenCtx )
+generateTcoBody ctx funcName args body =
+    let
+        innerCtx = { ctx | indent = ctx.indent + 1 }
+    in
+    case body of
+        Core.ECase scrutinee alts _ ->
+            -- Special case for boolean comparisons (if-then-else)
+            case tryTcoBooleanCase innerCtx funcName args scrutinee alts of
+                Just ( code, ctx1 ) ->
+                    ( code, ctx1 )
+
+                Nothing ->
+                    -- Fall back to regular case with TCO
+                    generateTcoCaseAccum innerCtx funcName args scrutinee alts
+
+        Core.ELet var value letBody _ ->
+            let
+                ( valueCode, ctx1 ) = generateExprAccum innerCtx Dict.empty value
+                ( bodyCode, ctx2 ) = generateTcoBody ctx1 funcName args letBody
+            in
+            ( indentStr innerCtx ++ "elm_value_t " ++ mangle var ++ " = " ++ valueCode ++ ";\n" ++ bodyCode, ctx2 )
+
+        Core.EApp func arg _ ->
+            let
+                ( baseFunc, allArgs ) = collectArgs func [ arg ]
+            in
+            case baseFunc of
+                Core.EVar tv ->
+                    if tv.name == funcName then
+                        -- Tail call - assign new values to parameters and continue loop
+                        generateTcoTailCall innerCtx args allArgs
+                    else
+                        -- Non-tail call - regular return
+                        let
+                            ( code, ctx1 ) = generateExprAccum innerCtx Dict.empty body
+                        in
+                        ( indentStr innerCtx ++ "return " ++ code ++ ";\n", ctx1 )
+
+                _ ->
+                    let
+                        ( code, ctx1 ) = generateExprAccum innerCtx Dict.empty body
+                    in
+                    ( indentStr innerCtx ++ "return " ++ code ++ ";\n", ctx1 )
+
+        _ ->
+            -- Base case or non-recursive - just return
+            let
+                ( code, ctx1 ) = generateExprAccum innerCtx Dict.empty body
+            in
+            ( indentStr innerCtx ++ "return " ++ code ++ ";\n", ctx1 )
+
+
+{-| Try to optimize boolean case in TCO body.
+-}
+tryTcoBooleanCase : GenCtx -> String -> List Core.TypedVar -> Core.Expr -> List Core.Alt -> Maybe ( String, GenCtx )
+tryTcoBooleanCase ctx funcName args scrutinee alts =
+    case alts of
+        [ Core.Alt (Core.PCon "True" [] _) Nothing trueBody, Core.Alt (Core.PCon "False" [] _) Nothing falseBody ] ->
+            tryGenerateUnboxedBoolCondition ctx Dict.empty scrutinee
+                |> Maybe.map (\( condCode, ctx1 ) ->
+                    let
+                        ( trueCode, ctx2 ) = generateTcoBody ctx1 funcName args trueBody
+                        ( falseCode, ctx3 ) = generateTcoBody ctx2 funcName args falseBody
+                    in
+                    ( indentStr ctx ++ "if (" ++ condCode ++ ") {\n" ++ trueCode ++ indentStr ctx ++ "} else {\n" ++ falseCode ++ indentStr ctx ++ "}\n", ctx3 )
+                )
+
+        [ Core.Alt (Core.PCon "False" [] _) Nothing falseBody, Core.Alt (Core.PCon "True" [] _) Nothing trueBody ] ->
+            tryGenerateUnboxedBoolCondition ctx Dict.empty scrutinee
+                |> Maybe.map (\( condCode, ctx1 ) ->
+                    let
+                        ( trueCode, ctx2 ) = generateTcoBody ctx1 funcName args trueBody
+                        ( falseCode, ctx3 ) = generateTcoBody ctx2 funcName args falseBody
+                    in
+                    ( indentStr ctx ++ "if (" ++ condCode ++ ") {\n" ++ trueCode ++ indentStr ctx ++ "} else {\n" ++ falseCode ++ indentStr ctx ++ "}\n", ctx3 )
+                )
+
+        _ ->
+            Nothing
+
+
+{-| Generate TCO case expression.
+-}
+generateTcoCaseAccum : GenCtx -> String -> List Core.TypedVar -> Core.Expr -> List Core.Alt -> ( String, GenCtx )
+generateTcoCaseAccum ctx funcName args scrutinee alts =
+    let
+        ( scrutCode, ctx1 ) = generateExprAccum ctx Dict.empty scrutinee
+        ( scrutVar, ctx2 ) = freshName "scrut" ctx1
+
+        ( branches, ctx3 ) =
+            List.foldl
+                (\(Core.Alt pattern guard altBody) ( strs, accCtx ) ->
+                    let
+                        ( condition, bindings ) = patternCondition accCtx scrutVar pattern
+                        ( bodyCode, newCtx ) = generateTcoBody accCtx funcName args altBody
+                    in
+                    ( strs ++ [ "if (" ++ condition ++ ") { " ++ bindings ++ "\n" ++ bodyCode ++ indentStr ctx ++ "}" ], newCtx )
+                )
+                ( [], ctx2 )
+                alts
+    in
+    ( indentStr ctx ++ "elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ ";\n"
+        ++ indentStr ctx ++ String.join " else " branches ++ "\n"
+    , ctx3 )
+
+
+{-| Generate tail call as parameter assignments.
+-}
+generateTcoTailCall : GenCtx -> List Core.TypedVar -> List Core.Expr -> ( String, GenCtx )
+generateTcoTailCall ctx args argExprs =
+    let
+        -- Generate temporary variables for all new values first
+        ( tempDecls, tempAssigns, ctx1 ) =
+            foldl2
+                (\param argExpr ( decls, assigns, accCtx ) ->
+                    let
+                        ( tempName, ctx2 ) = freshName "tco" accCtx
+                        ( argCode, ctx3 ) = generateExprAccum ctx2 Dict.empty argExpr
+                    in
+                    ( decls ++ [ indentStr ctx ++ "elm_value_t " ++ tempName ++ " = " ++ argCode ++ ";" ]
+                    , assigns ++ [ ( mangle param.name, tempName ) ]
+                    , ctx3
+                    )
+                )
+                ( [], [], ctx )
+                args
+                argExprs
+
+        -- Generate assignments from temps to params
+        paramAssigns =
+            tempAssigns
+                |> List.map (\( paramName, tempName ) -> indentStr ctx ++ paramName ++ " = " ++ tempName ++ ";")
+    in
+    ( String.join "\n" tempDecls ++ "\n" ++ String.join "\n" paramAssigns ++ "\n" ++ indentStr ctx ++ "continue;\n", ctx1 )
+
+
+{-| Helper to fold over two lists simultaneously.
+-}
+foldl2 : (a -> b -> c -> c) -> c -> List a -> List b -> c
+foldl2 f init list1 list2 =
+    List.foldl
+        (\( a, b ) acc -> f a b acc)
+        init
+        (List.map2 Tuple.pair list1 list2)
 
 
 -- Keep the old generateFunctions for backwards compatibility (not used in main path)
@@ -5494,20 +5746,42 @@ generateAppAccum ctx renames func arg =
                         if arity == 0 then
                             generateClosureApplyAccum ctx renames (mangledName ++ "()") allArgs
                         else if argCount == arity then
-                            -- Full application
-                            let
-                                ( argCodes, finalCtx ) =
-                                    List.foldl
-                                        (\a ( codes, accCtx ) ->
+                            -- Full application - check for unboxed arithmetic optimization
+                            case ( getUnboxedArithOp funcName, allArgs ) of
+                                ( Just ( op, _ ), [ arg1, arg2 ] ) ->
+                                    -- Unboxed Int arithmetic - use generateUnboxedIntAccum for recursive optimization
+                                    let
+                                        ( code1, ctx1 ) = generateUnboxedIntAccum ctx renames arg1
+                                        ( code2, ctx2 ) = generateUnboxedIntAccum ctx1 renames arg2
+                                    in
+                                    ( "elm_int(" ++ code1 ++ " " ++ op ++ " " ++ code2 ++ ")", ctx2 )
+
+                                _ ->
+                                    -- Check for comparison operators
+                                    case ( getUnboxedCompareOp funcName, allArgs ) of
+                                        ( Just op, [ arg1, arg2 ] ) ->
+                                            -- Unboxed Int comparison - use generateUnboxedIntAccum
                                             let
-                                                ( code, newCtx ) = generateExprAccum accCtx renames a
+                                                ( code1, ctx1 ) = generateUnboxedIntAccum ctx renames arg1
+                                                ( code2, ctx2 ) = generateUnboxedIntAccum ctx1 renames arg2
                                             in
-                                            ( codes ++ [ code ], newCtx )
-                                        )
-                                        ( [], ctx )
-                                        allArgs
-                            in
-                            ( mangledName ++ "(" ++ String.join ", " argCodes ++ ")", finalCtx )
+                                            ( "elm_bool(" ++ code1 ++ " " ++ op ++ " " ++ code2 ++ ")", ctx2 )
+
+                                        _ ->
+                                            -- Normal function call
+                                            let
+                                                ( argCodes, finalCtx ) =
+                                                    List.foldl
+                                                        (\a ( codes, accCtx ) ->
+                                                            let
+                                                                ( code, newCtx ) = generateExprAccum accCtx renames a
+                                                            in
+                                                            ( codes ++ [ code ], newCtx )
+                                                        )
+                                                        ( [], ctx )
+                                                        allArgs
+                                            in
+                                            ( mangledName ++ "(" ++ String.join ", " argCodes ++ ")", finalCtx )
                         else if argCount < arity then
                             generatePartialAppAccum ctx renames mangledName allArgs arity
                         else
@@ -5622,23 +5896,93 @@ generateLetRecAccum ctx renames bindings body =
 
 generateCaseAccum : GenCtx -> Dict String String -> Core.Expr -> List Core.Alt -> ( String, GenCtx )
 generateCaseAccum ctx renames scrutinee alts =
-    let
-        ( scrutCode, ctx1 ) = generateExprAccum ctx renames scrutinee
-        ( scrutVar, ctx2 ) = freshName "scrut" ctx1
-        ( resultVar, ctx3 ) = freshName "result" ctx2
+    -- Optimize boolean case: if scrutinee is a comparison and alts are True/False, use C ternary
+    case tryBooleanCaseOptimization ctx renames scrutinee alts of
+        Just ( code, ctx1 ) ->
+            ( code, ctx1 )
 
-        ( branches, ctx4 ) =
-            List.foldl
-                (\alt ( strs, accCtx ) ->
+        Nothing ->
+            let
+                ( scrutCode, ctx1 ) = generateExprAccum ctx renames scrutinee
+                ( scrutVar, ctx2 ) = freshName "scrut" ctx1
+                ( resultVar, ctx3 ) = freshName "result" ctx2
+
+                ( branches, ctx4 ) =
+                    List.foldl
+                        (\alt ( strs, accCtx ) ->
+                            let
+                                ( code, newCtx ) = generateAltAccum accCtx renames scrutVar resultVar alt
+                            in
+                            ( strs ++ [ code ], newCtx )
+                        )
+                        ( [], ctx3 )
+                        alts
+            in
+            ( "({ elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ "; elm_value_t " ++ resultVar ++ "; " ++ String.join " else " branches ++ " " ++ resultVar ++ "; })", ctx4 )
+
+
+{-| Try to optimize a boolean case expression to a C ternary.
+    Matches: case (comparison) of True -> e1; False -> e2
+    Returns: (cond ? e1 : e2) without boxing the boolean
+-}
+tryBooleanCaseOptimization : GenCtx -> Dict String String -> Core.Expr -> List Core.Alt -> Maybe ( String, GenCtx )
+tryBooleanCaseOptimization ctx renames scrutinee alts =
+    case alts of
+        [ Core.Alt (Core.PCon "True" [] _) Nothing trueBody, Core.Alt (Core.PCon "False" [] _) Nothing falseBody ] ->
+            -- True first, False second
+            tryGenerateUnboxedBoolCondition ctx renames scrutinee
+                |> Maybe.map (\( condCode, ctx1 ) ->
                     let
-                        ( code, newCtx ) = generateAltAccum accCtx renames scrutVar resultVar alt
+                        ( trueCode, ctx2 ) = generateExprAccum ctx1 renames trueBody
+                        ( falseCode, ctx3 ) = generateExprAccum ctx2 renames falseBody
                     in
-                    ( strs ++ [ code ], newCtx )
+                    ( "(" ++ condCode ++ " ? " ++ trueCode ++ " : " ++ falseCode ++ ")", ctx3 )
                 )
-                ( [], ctx3 )
-                alts
-    in
-    ( "({ elm_value_t " ++ scrutVar ++ " = " ++ scrutCode ++ "; elm_value_t " ++ resultVar ++ "; " ++ String.join " else " branches ++ " " ++ resultVar ++ "; })", ctx4 )
+
+        [ Core.Alt (Core.PCon "False" [] _) Nothing falseBody, Core.Alt (Core.PCon "True" [] _) Nothing trueBody ] ->
+            -- False first, True second - swap order
+            tryGenerateUnboxedBoolCondition ctx renames scrutinee
+                |> Maybe.map (\( condCode, ctx1 ) ->
+                    let
+                        ( trueCode, ctx2 ) = generateExprAccum ctx1 renames trueBody
+                        ( falseCode, ctx3 ) = generateExprAccum ctx2 renames falseBody
+                    in
+                    ( "(" ++ condCode ++ " ? " ++ trueCode ++ " : " ++ falseCode ++ ")", ctx3 )
+                )
+
+        _ ->
+            Nothing
+
+
+{-| Try to generate an unboxed boolean condition from a scrutinee expression.
+    Returns Just (cCode, ctx) for comparison operations that can skip boxing.
+-}
+tryGenerateUnboxedBoolCondition : GenCtx -> Dict String String -> Core.Expr -> Maybe ( String, GenCtx )
+tryGenerateUnboxedBoolCondition ctx renames expr =
+    case expr of
+        Core.EApp func arg _ ->
+            let
+                ( baseFunc, allArgs ) = collectArgs func [ arg ]
+            in
+            case baseFunc of
+                Core.EVar tv ->
+                    case ( getUnboxedCompareOp tv.name, allArgs ) of
+                        ( Just op, [ arg1, arg2 ] ) ->
+                            -- Comparison operation - generate unboxed comparison
+                            let
+                                ( code1, ctx1 ) = generateUnboxedIntAccum ctx renames arg1
+                                ( code2, ctx2 ) = generateUnboxedIntAccum ctx1 renames arg2
+                            in
+                            Just ( "(" ++ code1 ++ " " ++ op ++ " " ++ code2 ++ ")", ctx2 )
+
+                        _ ->
+                            Nothing
+
+                _ ->
+                    Nothing
+
+        _ ->
+            Nothing
 
 
 generateAltAccum : GenCtx -> Dict String String -> String -> String -> Core.Alt -> ( String, GenCtx )
@@ -5817,8 +6161,22 @@ generateApp ctx func arg =
                     -- Zero-arity function returns a closure - call it and apply args
                     generateClosureApply ctx (mangledName ++ "()") allArgs
                 else if argCount == arity then
-                    -- Full application - generate direct call
-                    mangledName ++ "(" ++ String.join ", " (List.map (generateExpr ctx) allArgs) ++ ")"
+                    -- Full application - check for unboxed arithmetic optimization
+                    case ( getUnboxedArithOp funcName, allArgs ) of
+                        ( Just ( op, _ ), [ arg1, arg2 ] ) ->
+                            -- Unboxed Int arithmetic - use generateUnboxedInt
+                            "elm_int(" ++ generateUnboxedInt ctx Dict.empty arg1 ++ " " ++ op ++ " " ++ generateUnboxedInt ctx Dict.empty arg2 ++ ")"
+
+                        _ ->
+                            -- Check for comparison operators
+                            case ( getUnboxedCompareOp funcName, allArgs ) of
+                                ( Just op, [ arg1, arg2 ] ) ->
+                                    -- Unboxed Int comparison
+                                    "elm_bool(" ++ generateUnboxedInt ctx Dict.empty arg1 ++ " " ++ op ++ " " ++ generateUnboxedInt ctx Dict.empty arg2 ++ ")"
+
+                                _ ->
+                                    -- Normal function call
+                                    mangledName ++ "(" ++ String.join ", " (List.map (generateExpr ctx) allArgs) ++ ")"
                 else if argCount < arity then
                     -- Partial application - generate closure
                     generatePartialApp ctx mangledName allArgs arity
@@ -6677,6 +7035,165 @@ isBuiltin name =
         ]
 
 
+{-| Check if a type is Int (for unboxed optimizations).
+-}
+isIntType : Type -> Bool
+isIntType t =
+    case t of
+        TCon "Int" -> True
+        _ -> False
+
+
+{-| Generate an unboxed int64_t expression from a Core expression.
+    This avoids redundant box/unbox cycles for literals and simple ops.
+-}
+generateUnboxedInt : GenCtx -> Dict String String -> Core.Expr -> String
+generateUnboxedInt ctx renames expr =
+    case expr of
+        Core.ELit (Core.LInt n) _ ->
+            -- Literal int - just emit the number
+            String.fromInt n
+
+        Core.EVar tv ->
+            -- Variable - unbox it
+            let
+                name = tv.name
+            in
+            case Dict.get name renames of
+                Just renamed -> "(" ++ renamed ++ ").data.i"
+                Nothing -> "(" ++ mangleWithModule ctx name ++ ").data.i"
+
+        Core.EApp func arg _ ->
+            -- Check if this is an arithmetic operation we can inline
+            let
+                ( baseFunc, allArgs ) = collectArgs func [ arg ]
+            in
+            case baseFunc of
+                Core.EVar tv ->
+                    case ( getUnboxedArithOp tv.name, allArgs ) of
+                        ( Just ( op, _ ), [ arg1, arg2 ] ) ->
+                            -- Inline arithmetic on unboxed values
+                            "(" ++ generateUnboxedInt ctx renames arg1 ++ " " ++ op ++ " " ++ generateUnboxedInt ctx renames arg2 ++ ")"
+                        _ ->
+                            -- Fall back to boxing
+                            "(" ++ generateExprWithRenames ctx renames expr ++ ").data.i"
+                _ ->
+                    "(" ++ generateExprWithRenames ctx renames expr ++ ").data.i"
+
+        _ ->
+            -- Fall back to generating boxed and then unboxing
+            "(" ++ generateExprWithRenames ctx renames expr ++ ").data.i"
+
+
+{-| Accumulator version of generateUnboxedInt that threads context through.
+    Generates unboxed int64_t expression avoiding redundant box/unbox cycles.
+-}
+generateUnboxedIntAccum : GenCtx -> Dict String String -> Core.Expr -> ( String, GenCtx )
+generateUnboxedIntAccum ctx renames expr =
+    case expr of
+        Core.ELit (Core.LInt n) _ ->
+            -- Literal int - just emit the number
+            ( String.fromInt n, ctx )
+
+        Core.EVar tv ->
+            -- Variable - unbox it
+            let
+                name = tv.name
+            in
+            case Dict.get name renames of
+                Just renamed -> ( "(" ++ renamed ++ ").data.i", ctx )
+                Nothing -> ( "(" ++ mangleWithModule ctx name ++ ").data.i", ctx )
+
+        Core.EApp func arg _ ->
+            -- Check if this is an arithmetic operation we can inline
+            let
+                ( baseFunc, allArgs ) = collectArgs func [ arg ]
+            in
+            case baseFunc of
+                Core.EVar tv ->
+                    case ( getUnboxedArithOp tv.name, allArgs ) of
+                        ( Just ( op, _ ), [ arg1, arg2 ] ) ->
+                            -- Inline arithmetic on unboxed values
+                            let
+                                ( code1, ctx1 ) = generateUnboxedIntAccum ctx renames arg1
+                                ( code2, ctx2 ) = generateUnboxedIntAccum ctx1 renames arg2
+                            in
+                            ( "(" ++ code1 ++ " " ++ op ++ " " ++ code2 ++ ")", ctx2 )
+                        _ ->
+                            -- Fall back to boxing
+                            let
+                                ( code, ctx1 ) = generateExprAccum ctx renames expr
+                            in
+                            ( "(" ++ code ++ ").data.i", ctx1 )
+                _ ->
+                    let
+                        ( code, ctx1 ) = generateExprAccum ctx renames expr
+                    in
+                    ( "(" ++ code ++ ").data.i", ctx1 )
+
+        _ ->
+            -- Fall back to generating boxed and then unboxing
+            let
+                ( code, ctx1 ) = generateExprAccum ctx renames expr
+            in
+            ( "(" ++ code ++ ").data.i", ctx1 )
+
+
+{-| Check if a type is Float (for unboxed optimizations).
+-}
+isFloatType : Type -> Bool
+isFloatType t =
+    case t of
+        TCon "Float" -> True
+        _ -> False
+
+
+{-| Check if a type is a primitive that can be unboxed.
+-}
+isPrimitiveType : Type -> Bool
+isPrimitiveType t =
+    isIntType t || isFloatType t
+
+
+{-| Get the C operator for an Elm arithmetic operator name.
+    Returns Just (operator, cType) if this is an unboxable arithmetic op.
+-}
+getUnboxedArithOp : String -> Maybe ( String, String )
+getUnboxedArithOp name =
+    case name of
+        "_op_add" -> Just ( "+", "int64_t" )
+        "_op_sub" -> Just ( "-", "int64_t" )
+        "_op_mul" -> Just ( "*", "int64_t" )
+        "_op_intDiv" -> Just ( "/", "int64_t" )
+        "_op_mod" -> Just ( "%", "int64_t" )
+        "+" -> Just ( "+", "int64_t" )
+        "-" -> Just ( "-", "int64_t" )
+        "*" -> Just ( "*", "int64_t" )
+        "//" -> Just ( "/", "int64_t" )
+        "%" -> Just ( "%", "int64_t" )
+        _ -> Nothing
+
+
+{-| Get the C comparison operator for an Elm comparison operator name.
+-}
+getUnboxedCompareOp : String -> Maybe String
+getUnboxedCompareOp name =
+    case name of
+        "_op_lt" -> Just "<"
+        "_op_gt" -> Just ">"
+        "_op_lte" -> Just "<="
+        "_op_gte" -> Just ">="
+        "_op_eq" -> Just "=="
+        "_op_neq" -> Just "!="
+        "<" -> Just "<"
+        ">" -> Just ">"
+        "<=" -> Just "<="
+        ">=" -> Just ">="
+        "==" -> Just "=="
+        "/=" -> Just "!="
+        _ -> Nothing
+
+
 {-| Check if a name is a foreign function.
 -}
 isForeign : GenCtx -> String -> Bool
@@ -6943,7 +7460,22 @@ generateAppWithRenames ctx renames func arg =
                         if arity == 0 then
                             generateClosureApplyWithRenames ctx renames (mangledName ++ "()") allArgs
                         else if argCount == arity then
-                            mangledName ++ "(" ++ String.join ", " (List.map (generateExprWithRenames ctx renames) allArgs) ++ ")"
+                            -- Full application - check for unboxed arithmetic optimization
+                            case ( getUnboxedArithOp funcName, allArgs ) of
+                                ( Just ( op, _ ), [ arg1, arg2 ] ) ->
+                                    -- Unboxed Int arithmetic - use generateUnboxedInt for recursive optimization
+                                    "elm_int(" ++ generateUnboxedInt ctx renames arg1 ++ " " ++ op ++ " " ++ generateUnboxedInt ctx renames arg2 ++ ")"
+
+                                _ ->
+                                    -- Check for comparison operators
+                                    case ( getUnboxedCompareOp funcName, allArgs ) of
+                                        ( Just op, [ arg1, arg2 ] ) ->
+                                            -- Unboxed Int comparison
+                                            "elm_bool(" ++ generateUnboxedInt ctx renames arg1 ++ " " ++ op ++ " " ++ generateUnboxedInt ctx renames arg2 ++ ")"
+
+                                        _ ->
+                                            -- Normal function call
+                                            mangledName ++ "(" ++ String.join ", " (List.map (generateExprWithRenames ctx renames) allArgs) ++ ")"
                         else if argCount < arity then
                             generatePartialAppWithRenames ctx renames mangledName allArgs arity
                         else
