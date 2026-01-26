@@ -168,42 +168,6 @@ jobs:
           ./$test ${{ matrix.seed }}
         done
 
-  # Test on macOS
-  build-macos:
-    runs-on: macos-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-
-    - name: Install Elm
-      run: npm install -g elm
-
-    - name: Build local TCC
-      run: |
-        git clone https://repo.or.cz/tinycc.git tcc-src
-        cd tcc-src
-        ./configure --prefix=$GITHUB_WORKSPACE/tcc
-        make
-        make install
-        cd ..
-        rm -rf tcc-src
-        ln -s bin/tcc tcc/tcc
-
-    - name: Build
-      run: |
-        elm make src/Cli.elm --output=bin/tcelm-compiler.js
-        make -C runtime
-
-    - name: Run tests
-      run: |
-        cd tests && make test-unit
-
   # Code quality checks
   quality:
     runs-on: ubuntu-latest
