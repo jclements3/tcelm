@@ -2,7 +2,7 @@
 # Parallel test suite for tcelm2
 # Uses 7 cores for parallel execution
 
-TCELM2="./bin/tcelm2"
+TCELM2="./bin/tcelm"
 CORES=7
 TMPDIR="/tmp/tcelm2_test_$$"
 

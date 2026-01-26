@@ -1,7 +1,7 @@
 #!/bin/bash
 # Comprehensive test suite for tcelm2
 
-TCELM2="./bin/tcelm2"
+TCELM2="./bin/tcelm"
 PASS=0
 FAIL=0
 

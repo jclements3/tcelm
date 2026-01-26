@@ -8,7 +8,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-TCELM2="$PROJECT_ROOT/bin/tcelm2"
+TCELM2="$PROJECT_ROOT/bin/tcelm"
 TMP_DIR="/tmp/tcelm2_integration_$$"
 
 mkdir -p "$TMP_DIR"
