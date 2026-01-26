@@ -3,13 +3,15 @@
  * tcelm2 - Elm to C compiler for embedded systems (v2 architecture)
  *
  * Usage:
- *   tcelm2 <source.elm>              # Compile single module to stdout
- *   tcelm2 <source.elm> -o out.c     # Compile to file
+ *   tcelm2 <source.elm>                # Compile and run, print result
+ *   tcelm2 <source.elm> -o out         # Compile to executable
+ *   tcelm2 <source.elm> -o out.c       # Compile to C source only
  */
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
+const os = require('os');
 
 // Re-exec with larger stack if needed
 if (!process.env.TCELM2_STACK_SET) {
@@ -22,30 +24,60 @@ if (!process.env.TCELM2_STACK_SET) {
     return;
 }
 
+// Find TCC
+function findTcc() {
+    // Check project-local tcc first
+    const projectTcc = path.join(__dirname, '..', 'tcc', 'tcc');
+    if (fs.existsSync(projectTcc)) return projectTcc;
+
+    // Check common locations
+    const locations = [
+        '/usr/local/bin/tcc',
+        '/usr/bin/tcc',
+        path.join(os.homedir(), '.local/bin/tcc')
+    ];
+    for (const loc of locations) {
+        if (fs.existsSync(loc)) return loc;
+    }
+
+    // Try PATH
+    const which = spawnSync('which', ['tcc']);
+    if (which.status === 0) {
+        return which.stdout.toString().trim();
+    }
+
+    return null;
+}
+
 // Parse arguments
 const args = process.argv.slice(2);
 let sourceFile = null;
 let outputFile = null;
+let emitC = false;
 
 for (let i = 0; i < args.length; i++) {
     if (args[i] === '-o' && args[i + 1]) {
         outputFile = args[++i];
+    } else if (args[i] === '-c' || args[i] === '--emit-c') {
+        emitC = true;
     } else if (args[i] === '--help' || args[i] === '-h') {
         console.log(`tcelm2 - Elm to C compiler for embedded systems (v2)
 
 Usage:
-  tcelm2 <source.elm>              Compile single module to stdout
-  tcelm2 <source.elm> -o out.c     Compile to file
+  tcelm2 <source.elm>              Compile and run, print result
+  tcelm2 <source.elm> -o prog      Compile to executable 'prog'
+  tcelm2 <source.elm> -o out.c     Compile to C source file
+  tcelm2 <source.elm> -c           Emit C to stdout
 
 Options:
-  -o <file>     Output to file instead of stdout
+  -o <file>     Output to file (executable if no .c extension)
+  -c, --emit-c  Emit C code to stdout instead of compiling
   --help, -h    Show this help
 
-Features:
-  - Type inference (Hindley-Milner)
-  - Type classes (infrastructure)
-  - Core IR intermediate representation
-  - Multi-line syntax support
+Examples:
+  tcelm2 hello.elm                 # Compile and run
+  tcelm2 hello.elm -o hello        # Create executable ~/.local/bin/hello
+  tcelm2 hello.elm -o hello.c      # Just generate C code
 `);
         process.exit(0);
     } else if (!args[i].startsWith('-')) {
@@ -55,7 +87,7 @@ Features:
 
 if (!sourceFile) {
     console.error('Error: No source file specified');
-    console.error('Usage: tcelm2 <source.elm> [-o output.c]');
+    console.error('Usage: tcelm2 <source.elm> [-o output]');
     process.exit(1);
 }
 
@@ -88,12 +120,74 @@ const app = Elm.Compiler.init({
 });
 
 app.ports.printOutput.subscribe(function(code) {
-    if (outputFile) {
-        fs.writeFileSync(outputFile, code);
-        console.error(`Wrote ${outputFile}`);
-    } else {
-        console.log(code);
+    // Determine output mode
+    const outputIsC = outputFile && outputFile.endsWith('.c');
+
+    if (emitC || outputIsC) {
+        // Just emit C code
+        if (outputFile) {
+            fs.writeFileSync(outputFile, code);
+            console.error(`Wrote ${outputFile}`);
+        } else {
+            console.log(code);
+        }
+        process.exit(0);
     }
+
+    // Compile to executable with TCC
+    const tcc = findTcc();
+    if (!tcc) {
+        console.error('Error: TCC not found. Install tcc or use -c to emit C code.');
+        process.exit(1);
+    }
+
+    // Write C to temp file
+    const tmpDir = os.tmpdir();
+    const tmpC = path.join(tmpDir, `tcelm_${process.pid}.c`);
+    fs.writeFileSync(tmpC, code);
+
+    try {
+        if (outputFile) {
+            // Compile to executable
+            const result = spawnSync(tcc, [tmpC, '-o', outputFile, '-lm'], {
+                stdio: ['inherit', 'inherit', 'inherit']
+            });
+
+            if (result.status !== 0) {
+                console.error('Error: TCC compilation failed');
+                process.exit(1);
+            }
+
+            // Make executable
+            fs.chmodSync(outputFile, 0o755);
+            console.error(`Wrote ${outputFile}`);
+        } else {
+            // Compile and run
+            const tmpExe = path.join(tmpDir, `tcelm_${process.pid}`);
+            const compile = spawnSync(tcc, [tmpC, '-o', tmpExe, '-lm'], {
+                stdio: ['inherit', 'inherit', 'inherit']
+            });
+
+            if (compile.status !== 0) {
+                console.error('Error: TCC compilation failed');
+                process.exit(1);
+            }
+
+            // Run the executable
+            const run = spawnSync(tmpExe, [], {
+                stdio: ['inherit', 'inherit', 'inherit']
+            });
+
+            // Clean up
+            try { fs.unlinkSync(tmpExe); } catch(e) {}
+
+            process.exit(run.status);
+        }
+    } finally {
+        // Clean up temp C file
+        try { fs.unlinkSync(tmpC); } catch(e) {}
+    }
+
     process.exit(0);
 });
 
