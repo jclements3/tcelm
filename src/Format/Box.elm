@@ -33,7 +33,7 @@ maxWidth =
 -}
 spacesInTab : Int
 spacesInTab =
-    4
+    2
 
 
 
