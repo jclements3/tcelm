@@ -720,8 +720,8 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                     qualName =
                                         mangleWithPrefix modulePrefix name
                                 in
-                                -- Handle both zero-arity values (call directly) and functions (create closure)
-                                "(" ++ qualName ++ "_ARITY == 0 ? " ++ qualName ++ "(arena) : tcelm_closure(arena, " ++ qualName ++ "_impl, " ++ qualName ++ "_ARITY))"
+                                -- Always create closure - avoids C compiler type errors in dead ternary branches
+                                "tcelm_closure(arena, " ++ qualName ++ "_impl, " ++ qualName ++ "_ARITY)"
 
                 Src.CapVar ->
                     let
@@ -1474,11 +1474,11 @@ generateExprInContextWithPrefix modulePrefix locals (Src.At _ expr) =
 
                             _ ->
                                 -- Use qualified name for intra-module function references
-                                -- Handle both zero-arity values (call directly) and functions (create closure)
+                                -- Always create closure - avoids C compiler type errors in dead ternary branches
                                 let
                                     qualName = mangleWithPrefix modulePrefix name
                                 in
-                                "(" ++ qualName ++ "_ARITY == 0 ? " ++ qualName ++ "(arena) : tcelm_closure(arena, " ++ qualName ++ "_impl, " ++ qualName ++ "_ARITY))"
+                                "tcelm_closure(arena, " ++ qualName ++ "_impl, " ++ qualName ++ "_ARITY)"
 
                 Src.CapVar ->
                     let
@@ -1885,8 +1885,8 @@ generateExprInContext locals (Src.At _ expr) =
                                 "tcelm_closure(arena, tcelm_max_impl, 2)"
 
                             _ ->
-                                -- Top-level function/value - call directly if arity 0, else create closure
-                                "(" ++ mangle name ++ "_ARITY == 0 ? " ++ mangle name ++ "(arena) : tcelm_closure(arena, " ++ mangle name ++ "_impl, " ++ mangle name ++ "_ARITY))"
+                                -- Top-level function/value - always create closure to avoid C compiler type errors
+                                "tcelm_closure(arena, " ++ mangle name ++ "_impl, " ++ mangle name ++ "_ARITY)"
 
                 Src.CapVar ->
                     -- Constructor reference - handle known cases
