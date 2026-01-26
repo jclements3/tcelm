@@ -1588,6 +1588,9 @@ generateExprInContextWithPrefix modulePrefix locals (Src.At _ expr) =
                 _ ->
                     "/* tuple with more than 3 elements not supported */"
 
+        Do _ ->
+            "/* Do-notation should be desugared before code generation */"
+
 
 {-| Generate list with prefix
 -}
@@ -2059,6 +2062,9 @@ generateExprInContext locals (Src.At _ expr) =
 
                 _ ->
                     "/* tuple with more than 3 elements not supported */"
+
+        Do _ ->
+            "/* Do-notation should be desugared before code generation */"
 
 
 {-| Generate list expression with locals context
@@ -3052,6 +3058,9 @@ generateExpr (Src.At _ expr) =
 
                 _ ->
                     "/* tuple with more than 3 elements not supported */"
+
+        Do _ ->
+            "/* Do-notation should be desugared before code generation */"
 
 
 {-| Generate a list expression

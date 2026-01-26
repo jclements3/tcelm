@@ -270,7 +270,7 @@ formatValue (At _ value) =
                     []
 
         args =
-            List.map formatPattern value.args
+            List.map formatPatternParens value.args
 
         body =
             formatExpr value.body
@@ -627,6 +627,12 @@ formatExprParens expr =
                 Src.Do _ ->
                     True
 
+                Src.Call _ _ ->
+                    True
+
+                Src.Negate _ ->
+                    True
+
                 _ ->
                     False
     in
@@ -721,7 +727,7 @@ formatLambda : List Src.Pattern -> Src.Expr -> Box
 formatLambda patterns body =
     let
         patternBoxes =
-            List.map formatPattern patterns
+            List.map formatPatternParens patterns
     in
     case ( Box.allSingles patternBoxes, formatExpr body ) of
         ( Ok patternLines, SingleLine bodyLine ) ->
@@ -839,11 +845,11 @@ formatDef (At _ def) =
             in
             Box.stack1
                 (annotation
-                    ++ [ ES.definition "=" False (line (Box.identifier name)) (List.map formatPattern args) (formatExpr body) ]
+                    ++ [ ES.definition "=" False (line (Box.identifier name)) (List.map formatPatternParens args) (formatExpr body) ]
                 )
 
         Src.Destruct pattern body ->
-            ES.equalsPair "=" False (formatPattern pattern) (formatExpr body)
+            ES.equalsPair "=" False (formatPatternParens pattern) (formatExpr body)
 
 
 formatCase : Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> Box
@@ -1158,7 +1164,7 @@ formatTypeParens typ =
 
 
 {-| Format a type for use as a union constructor argument.
-Only adds parentheses for function types, not type applications.
+Adds parentheses for function types and type applications.
 -}
 formatTypeForCtor : Src.Type -> Box
 formatTypeForCtor typ =
@@ -1166,6 +1172,12 @@ formatTypeForCtor typ =
         needsParens =
             case Src.toValue typ of
                 Src.TLambda _ _ ->
+                    True
+
+                Src.TType _ _ (_ :: _) ->
+                    True
+
+                Src.TTypeQual _ _ _ (_ :: _) ->
                     True
 
                 _ ->
