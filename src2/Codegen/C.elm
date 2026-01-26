@@ -7510,8 +7510,16 @@ generateMain ctx =
         mainFunc = mangle (ctx.moduleName ++ "_main")
 
         hasMain = Dict.member "main" ctx.functions
+
+        -- Check if this is a Platform.worker program by looking for init/update functions
+        -- This is more reliable than trying to detect Platform.worker in the Core IR
+        hasInit = Dict.member "init" ctx.functions
+        hasUpdate = Dict.member "update" ctx.functions
+        isPlatformWorker = hasInit && hasUpdate
     in
-    if hasMain then
+    if isPlatformWorker then
+        generatePlatformWorkerMain ctx
+    else if hasMain then
         String.join "\n"
             [ "/* ===== MAIN ===== */"
             , ""
@@ -7597,6 +7605,116 @@ generateMain ctx =
             ]
     else
         "/* No main function defined */"
+
+
+{-| Generate main() for Platform.worker programs.
+
+This generates a runtime loop that:
+1. Reads source from stdin (or file argument)
+2. Calls init with flags
+3. Sends ReceiveSource message to update
+4. Extracts output from Cmd and writes to stdout
+-}
+generatePlatformWorkerMain : GenCtx -> String
+generatePlatformWorkerMain ctx =
+    let
+        initFunc = mangle (ctx.moduleName ++ "_init")
+        updateFunc = mangle (ctx.moduleName ++ "_update")
+    in
+    String.join "\n"
+        [ "/* ===== PLATFORM.WORKER RUNTIME ===== */"
+        , ""
+        , "/* Read entire file/stdin into buffer */"
+        , "static char *read_all_input(const char *filename) {"
+        , "    FILE *f = filename ? fopen(filename, \"rb\") : stdin;"
+        , "    if (!f) return NULL;"
+        , "    "
+        , "    size_t capacity = 4096;"
+        , "    size_t size = 0;"
+        , "    char *buf = malloc(capacity);"
+        , "    "
+        , "    while (1) {"
+        , "        size_t n = fread(buf + size, 1, capacity - size - 1, f);"
+        , "        size += n;"
+        , "        if (n == 0) break;"
+        , "        if (size + 1 >= capacity) {"
+        , "            capacity *= 2;"
+        , "            buf = realloc(buf, capacity);"
+        , "        }"
+        , "    }"
+        , "    buf[size] = '\\0';"
+        , "    if (filename) fclose(f);"
+        , "    return buf;"
+        , "}"
+        , ""
+        , "/* Extract string from sendOutput command */"
+        , "static const char *extract_output(elm_value_t cmd) {"
+        , "    /* Cmd is typically a batch or single command */"
+        , "    /* Look for the output value - structure depends on port implementation */"
+        , "    /* For sendOutput port, the value is typically wrapped in the command */"
+        , "    if (cmd.tag == 101) { /* Cons - batch of commands */"
+        , "        elm_value_t first = *cmd.data.c;"
+        , "        return extract_output(first);"
+        , "    }"
+        , "    if (cmd.data.c && cmd.data.c->tag == 2) {"
+        , "        return cmd.data.c->data.s;"
+        , "    }"
+        , "    if (cmd.tag == 2) {"
+        , "        return cmd.data.s;"
+        , "    }"
+        , "    /* Try to find string in nested structure */"
+        , "    if (cmd.data.p) {"
+        , "        elm_value_t *inner = (elm_value_t *)cmd.data.p;"
+        , "        if (inner->tag == 2) return inner->data.s;"
+        , "    }"
+        , "    return NULL;"
+        , "}"
+        , ""
+        , "int main(int argc, char **argv) {"
+        , "    /* Read source from file arg or stdin */"
+        , "    const char *input_file = (argc > 1) ? argv[1] : NULL;"
+        , "    char *source = read_all_input(input_file);"
+        , "    if (!source) {"
+        , "        fprintf(stderr, \"Error: could not read input\\n\");"
+        , "        return 1;"
+        , "    }"
+        , "    "
+        , "    /* Create flags record: { target = \"tcc\" } */"
+        , "    elm_value_t target_field = elm_string(\"tcc\");"
+        , "    elm_value_t *target_ptr = elm_alloc();"
+        , "    *target_ptr = target_field;"
+        , "    elm_value_t flags = (elm_value_t){ .tag = 500, .data.p = target_ptr };"
+        , "    "
+        , "    /* Call init to get (model, cmd) */"
+        , "    elm_value_t init_result = " ++ initFunc ++ "(flags);"
+        , "    elm_value_t model = *init_result.data.c;  /* First element of tuple */"
+        , "    "
+        , "    /* Create ReceiveSource message with the source string */"
+        , "    elm_value_t source_val = elm_string(source);"
+        , "    elm_value_t *source_ptr = elm_alloc();"
+        , "    *source_ptr = source_val;"
+        , "    /* ReceiveSource is typically a custom type constructor */"
+        , "    /* Tag depends on order in Msg type - usually first constructor */"
+        , "    elm_value_t msg = (elm_value_t){ .tag = 1000, .data.c = source_ptr };"
+        , "    "
+        , "    /* Call update with message and model */"
+        , "    elm_value_t update_result = " ++ updateFunc ++ "(msg, model);"
+        , "    elm_value_t new_model = *update_result.data.c;"
+        , "    elm_value_t cmd = *update_result.next;"
+        , "    "
+        , "    /* Extract and print output */"
+        , "    const char *output = extract_output(cmd);"
+        , "    if (output) {"
+        , "        printf(\"%s\", output);"
+        , "    } else {"
+        , "        fprintf(stderr, \"Error: no output generated\\n\");"
+        , "        return 1;"
+        , "    }"
+        , "    "
+        , "    free(source);"
+        , "    return 0;"
+        , "}"
+        ]
 
 
 
