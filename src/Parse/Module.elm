@@ -58,6 +58,9 @@ module_ =
                                                                 , aliases = categorized.aliases
                                                                 , binops = categorized.binops
                                                                 , ports = categorized.ports
+                                                                , classes = []
+                                                                , instances = []
+                                                                , foreigns = []
                                                                 }
 
                                                         Nothing ->
@@ -71,6 +74,9 @@ module_ =
                                                                 , aliases = categorized.aliases
                                                                 , binops = categorized.binops
                                                                 , ports = categorized.ports
+                                                                , classes = []
+                                                                , instances = []
+                                                                , foreigns = []
                                                                 }
                                                 )
                                     )

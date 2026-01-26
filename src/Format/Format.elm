@@ -119,11 +119,23 @@ formatModule mod =
         ports =
             List.map formatPort mod.ports
 
+        classes =
+            List.map formatTypeClass mod.classes
+
+        instances =
+            List.map formatInstance mod.instances
+
+        foreigns =
+            List.map formatForeign mod.foreigns
+
         sections =
             [ [ header ]
             , imports
             , aliases
             , unions
+            , classes
+            , instances
+            , foreigns
             , values
             , ports
             ]
@@ -367,6 +379,156 @@ formatPort port_ =
 
 
 
+-- TYPE CLASSES
+
+
+{-| Format a type class declaration.
+
+    class Eq a where
+        eq : a -> a -> Bool
+        neq : a -> a -> Bool
+
+-}
+formatTypeClass : Src.Located Src.TypeClass -> Box
+formatTypeClass (At _ cls) =
+    let
+        (At _ name) =
+            cls.name
+
+        typeArgs =
+            List.map (\(At _ arg) -> Box.identifier arg) cls.args
+
+        supersClause =
+            if List.isEmpty cls.supers then
+                []
+            else
+                [ punc "("
+                , row (List.intersperse (row [ punc ",", space ]) (List.map formatConstraintLine cls.supers))
+                , punc ")"
+                , space
+                , punc "=>"
+                , space
+                ]
+
+        header =
+            line (row ([ punc "class", space ] ++ supersClause ++ [ Box.identifier name, space ] ++ List.intersperse space typeArgs ++ [ space, punc "where" ]))
+
+        methods =
+            List.map formatMethodSig cls.methods
+
+        declBox =
+            Box.stack1 (header :: List.map Box.indent methods)
+    in
+    withDocComment cls.docs declBox
+
+
+formatConstraintLine : Src.ClassConstraint -> Line
+formatConstraintLine constraint =
+    row (Box.identifier constraint.class_ :: space :: List.intersperse space (List.map formatTypeLine constraint.args))
+
+
+formatTypeLine : Src.Type -> Line
+formatTypeLine typ =
+    case formatType typ of
+        SingleLine l ->
+            l
+
+        _ ->
+            punc "..."
+
+
+formatMethodSig : Src.MethodSig -> Box
+formatMethodSig method =
+    let
+        (At _ name) =
+            method.name
+    in
+    ES.equalsPair ":" False (line (Box.identifier name)) (formatType method.type_)
+
+
+
+-- INSTANCES
+
+
+{-| Format an instance declaration.
+
+    instance Eq Int where
+        eq = primEqInt
+        neq x y = not (eq x y)
+
+-}
+formatInstance : Src.Located Src.Instance -> Box
+formatInstance (At _ inst) =
+    let
+        contextClause =
+            if List.isEmpty inst.context then
+                []
+            else
+                [ punc "("
+                , row (List.intersperse (row [ punc ",", space ]) (List.map formatConstraintLine inst.context))
+                , punc ")"
+                , space
+                , punc "=>"
+                , space
+                ]
+
+        typeArgs =
+            List.map formatTypeLine inst.args
+
+        header =
+            line (row ([ punc "instance", space ] ++ contextClause ++ [ Box.identifier inst.class_, space ] ++ List.intersperse space typeArgs ++ [ space, punc "where" ]))
+
+        methods =
+            List.map formatMethodImpl inst.methods
+    in
+    Box.stack1 (header :: List.map Box.indent methods)
+
+
+formatMethodImpl : Src.MethodImpl -> Box
+formatMethodImpl method =
+    let
+        (At _ name) =
+            method.name
+
+        args =
+            List.map formatPattern method.args
+    in
+    ES.definition "=" False (line (Box.identifier name)) args (formatExpr method.body)
+
+
+
+-- FOREIGN IMPORTS
+
+
+{-| Format a foreign function import.
+
+    foreign foo : Int -> Int = "c_foo"
+
+-}
+formatForeign : Src.Located Src.Foreign -> Box
+formatForeign (At _ ffi) =
+    let
+        (At _ name) =
+            ffi.name
+
+        typeBox =
+            formatType ffi.type_
+
+        declBox =
+            case typeBox of
+                SingleLine typeLine ->
+                    line (row [ punc "foreign", space, Box.identifier name, space, punc ":", space, typeLine, space, punc "=", space, punc "\"", Box.literal ffi.cName, punc "\"" ])
+
+                _ ->
+                    Box.stack1
+                        [ ES.equalsPair ":" False (line (row [ punc "foreign", space, Box.identifier name ])) typeBox
+                        , Box.indent (line (row [ punc "=", space, punc "\"", Box.literal ffi.cName, punc "\"" ]))
+                        ]
+    in
+    withDocComment ffi.docs declBox
+
+
+
 -- EXPRESSIONS
 
 
@@ -438,6 +600,9 @@ formatExpr (At _ expr) =
         Src.Tuple a b rest ->
             formatTuple a b rest
 
+        Src.Do statements ->
+            formatDo statements
+
 
 formatExprParens : Src.Expr -> Box
 formatExprParens expr =
@@ -457,6 +622,9 @@ formatExprParens expr =
                     True
 
                 Src.Case _ _ ->
+                    True
+
+                Src.Do _ ->
                     True
 
                 _ ->
@@ -678,7 +846,7 @@ formatDef (At _ def) =
             ES.equalsPair "=" False (formatPattern pattern) (formatExpr body)
 
 
-formatCase : Src.Expr -> List ( Src.Pattern, Src.Expr ) -> Box
+formatCase : Src.Expr -> List ( Src.Pattern, Maybe Src.Expr, Src.Expr ) -> Box
 formatCase subject branches =
     let
         subjectBox =
@@ -696,11 +864,40 @@ formatCase subject branches =
                         , line (punc "of")
                         ]
 
+        -- Format a branch with optional guard
+        formatBranch ( pattern, maybeGuard, body ) =
+            let
+                patternBox =
+                    formatPattern pattern
+
+                patternWithGuard =
+                    case maybeGuard of
+                        Nothing ->
+                            patternBox
+
+                        Just guard ->
+                            case ( patternBox, formatExpr guard ) of
+                                ( SingleLine patLine, SingleLine guardLine ) ->
+                                    line (row [ patLine, space, punc "if", space, guardLine ])
+
+                                ( SingleLine patLine, guardBox ) ->
+                                    Box.stack1
+                                        [ line (row [ patLine, space, punc "if" ])
+                                        , Box.indent guardBox
+                                        ]
+
+                                ( _, guardBox ) ->
+                                    Box.stack1
+                                        [ patternBox
+                                        , Box.indent (line (punc "if"))
+                                        , Box.indent (Box.indent guardBox)
+                                        ]
+            in
+            ( patternWithGuard, formatExpr body )
+
         -- Convert branches to pattern/body box pairs for alignment
         branchPairs =
-            List.map
-                (\( pattern, body ) -> ( formatPattern pattern, formatExpr body ))
-                branches
+            List.map formatBranch branches
 
         -- Use aligned case branches for nice formatting
         alignedBranches =
@@ -750,6 +947,36 @@ formatRecord fields =
 formatTuple : Src.Expr -> Src.Expr -> List Src.Expr -> Box
 formatTuple a b rest =
     ES.group True "(" "," ")" False (List.map formatExpr (a :: b :: rest))
+
+
+{-| Format a do-block.
+
+    do
+        x <- action1
+        let y = pure 5
+        action2 x y
+
+-}
+formatDo : List Src.DoStatement -> Box
+formatDo statements =
+    let
+        formatStatement stmt =
+            case stmt of
+                Src.DoBind pattern expr ->
+                    ES.equalsPair "<-" False (formatPattern pattern) (formatExpr expr)
+
+                Src.DoLet defs ->
+                    let
+                        defBoxes =
+                            List.map formatDef defs
+                                |> List.intersperse Box.blankLine
+                    in
+                    Box.stack1 (line (punc "let") :: List.map Box.indent defBoxes)
+
+                Src.DoExpr expr ->
+                    formatExpr expr
+    in
+    Box.stack1 (line (punc "do") :: List.map (Box.indent << formatStatement) statements)
 
 
 

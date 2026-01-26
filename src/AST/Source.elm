@@ -1,9 +1,10 @@
 module AST.Source exposing
     ( Module, Import, Exposing(..), Exposed(..), Privacy(..)
-    , Expr, Expr_(..), VarType(..)
+    , Expr, Expr_(..), VarType(..), DoStatement(..)
     , Pattern, Pattern_(..)
     , Type, Type_(..)
     , Def(..), Value, Union, Alias, Infix, Port, Associativity(..)
+    , TypeClass, Instance, Foreign, ClassConstraint, MethodSig, MethodImpl
     , DocComment
     , Located(..), Region, Position
     , at, merge, toValue, toRegion
@@ -99,6 +100,15 @@ type Expr_
     | Record (List ( Located String, Expr ))
     | Unit
     | Tuple Expr Expr (List Expr)
+    | Do (List DoStatement)  -- do-notation
+
+
+{-| Statements within a do-block.
+-}
+type DoStatement
+    = DoBind Pattern Expr           -- pattern <- expr
+    | DoLet (List (Located Def))    -- let x = expr
+    | DoExpr Expr                   -- expr (usually last)
 
 
 type VarType
@@ -171,6 +181,9 @@ type alias Module =
     , aliases : List (Located Alias)
     , binops : List (Located Infix)
     , ports : List Port
+    , classes : List (Located TypeClass)
+    , instances : List (Located Instance)
+    , foreigns : List (Located Foreign)
     }
 
 
@@ -223,6 +236,62 @@ type Associativity
 type alias Port =
     { name : Located String
     , type_ : Type
+    , docs : Maybe DocComment
+    }
+
+
+{-| Type class declaration: class Eq a where eq : a -> a -> Bool
+-}
+type alias TypeClass =
+    { name : Located String
+    , args : List (Located String)
+    , supers : List ClassConstraint
+    , methods : List MethodSig
+    , docs : Maybe DocComment
+    }
+
+
+{-| Class constraint like `Eq a` or `Functor f`
+-}
+type alias ClassConstraint =
+    { class_ : String
+    , args : List Type
+    }
+
+
+{-| Method signature in a type class
+-}
+type alias MethodSig =
+    { name : Located String
+    , type_ : Type
+    }
+
+
+{-| Instance declaration: instance Eq Int where eq = primEqInt
+-}
+type alias Instance =
+    { context : List ClassConstraint
+    , class_ : String
+    , args : List Type
+    , methods : List MethodImpl
+    }
+
+
+{-| Method implementation in an instance
+-}
+type alias MethodImpl =
+    { name : Located String
+    , args : List Pattern
+    , body : Expr
+    }
+
+
+{-| Foreign function import: foreign foo : Int -> Int = "c_foo"
+-}
+type alias Foreign =
+    { name : Located String
+    , type_ : Type
+    , cName : String
     , docs : Maybe DocComment
     }
 

@@ -30,6 +30,7 @@ expression =
                     [ let_ start
                     , if_ start
                     , case_ start
+                    , do_ start
                     , lambda start
                     , possiblyNegativeTerm start
                         |> P.andThen
@@ -762,6 +763,93 @@ chompCaseEnd branches end =
                 )
         ]
         ( List.reverse branches, end )
+
+
+
+-- DO
+
+
+do_ : Position -> Parser E.Problem ( Expr, Position )
+do_ start =
+    P.inContext E.Let (Keyword.do_ E.Start)
+        (Space.chompAndCheckIndent E.LetSpace E.LetIndentDef
+            |> P.andThen
+                (\_ ->
+                    P.withIndent
+                        (chompDoStatements [])
+                        |> P.andThen
+                            (\( stmts, end ) ->
+                                P.succeed ( Src.at start end (Do stmts), end )
+                            )
+                )
+        )
+
+
+chompDoStatements : List Src.DoStatement -> Parser E.Problem ( List Src.DoStatement, Position )
+chompDoStatements revStmts =
+    P.getPosition
+        |> P.andThen
+            (\pos ->
+                P.oneOf E.Start
+                    [ -- let binding: let x = expr
+                      Keyword.let_ E.Start
+                        |> P.andThen
+                            (\_ ->
+                                Space.chompAndCheckIndent E.LetSpace E.LetIndentDef
+                                    |> P.andThen
+                                        (\_ ->
+                                            chompLetDef
+                                                |> P.andThen
+                                                    (\( def, defEnd ) ->
+                                                        chompMoreDoStatements (Src.DoLet [ def ] :: revStmts) defEnd
+                                                    )
+                                        )
+                            )
+                    , -- bind: pattern <- expr (backtrackable to allow falling through to plain expr)
+                      P.backtrackable
+                        (Pattern.term
+                            |> P.andThen
+                                (\pattern ->
+                                    Space.chomp E.Space
+                                        |> P.andThen
+                                            (\_ ->
+                                                Symbol.leftArrow E.Start
+                                                    |> P.andThen
+                                                        (\_ ->
+                                                            Space.chompAndCheckIndent E.LetSpace E.LetIndentDef
+                                                                |> P.andThen
+                                                                    (\_ ->
+                                                                        expression
+                                                                            |> P.andThen
+                                                                                (\( expr, exprEnd ) ->
+                                                                                    P.succeed ( Src.DoBind pattern expr, exprEnd )
+                                                                                )
+                                                                    )
+                                                        )
+                                            )
+                                )
+                        )
+                        |> P.andThen
+                            (\( stmt, stmtEnd ) ->
+                                chompMoreDoStatements (stmt :: revStmts) stmtEnd
+                            )
+                    , -- fall through: just an expression
+                      expression
+                        |> P.andThen
+                            (\( expr, end ) ->
+                                chompMoreDoStatements (Src.DoExpr expr :: revStmts) end
+                            )
+                    ]
+            )
+
+
+chompMoreDoStatements : List Src.DoStatement -> Position -> Parser E.Problem ( List Src.DoStatement, Position )
+chompMoreDoStatements revStmts end =
+    P.oneOfWithFallback
+        [ Space.checkAligned E.LetDefAlignment
+            |> P.andThen (\_ -> chompDoStatements revStmts)
+        ]
+        ( List.reverse revStmts, end )
 
 
 

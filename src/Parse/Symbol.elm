@@ -1,4 +1,4 @@
-module Parse.Symbol exposing (operator)
+module Parse.Symbol exposing (operator, leftArrow)
 
 {-| Symbol/operator parsing for Elm.
 -}
@@ -101,3 +101,8 @@ getCharAt offset src =
 fromState : P.State -> x -> P.Bag (P.DeadEnd x)
 fromState s x =
     P.AddRight P.Empty { row = s.row, col = s.col, problem = x, contextStack = [] }
+
+
+leftArrow : x -> Parser x ()
+leftArrow expecting =
+    P.symbol "<-" expecting

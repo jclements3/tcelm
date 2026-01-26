@@ -6,6 +6,7 @@ module Parse.Keyword exposing
     , port_
     , module_, exposing_, import_, as_
     , where_
+    , do_, class_, instance_, foreign_
     , effect_, command_, subscription_
     , infix_, left_, right_, non_
     )
@@ -124,3 +125,23 @@ right_ expecting =
 non_ : x -> Parser x ()
 non_ expecting =
     keyword "non" expecting
+
+
+do_ : x -> Parser x ()
+do_ expecting =
+    keyword "do" expecting
+
+
+class_ : x -> Parser x ()
+class_ expecting =
+    keyword "class" expecting
+
+
+instance_ : x -> Parser x ()
+instance_ expecting =
+    keyword "instance" expecting
+
+
+foreign_ : x -> Parser x ()
+foreign_ expecting =
+    keyword "foreign" expecting
