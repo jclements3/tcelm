@@ -20,6 +20,7 @@ Two representations are provided:
 -}
 
 import AST.Source as Src
+import Dict exposing (Dict)
 
 
 {-| A local function to be lifted to module level (used in standalone codegen).
@@ -43,6 +44,7 @@ type alias LiftedLambda =
     , args : List Src.Pattern -- Lambda parameters
     , body : Src.Expr
     , outerLocals : List String -- All locals visible in enclosing scope
+    , importMap : Dict String String -- Mapping from imported function names to source module prefix
     }
 
 

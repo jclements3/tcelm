@@ -8,11 +8,54 @@ For RTEMS targets, generates task definitions and shell registration.
 
 -}
 
-import AST.Source as Src exposing (Expr, Expr_(..), Module, Pattern, Pattern_(..), Type, Value)
+import AST.Source as Src exposing (Exposed(..), Exposing(..), Expr, Expr_(..), Import, Module, Pattern, Pattern_(..), Type, Value)
 import Codegen.Lambda exposing (LambdaState, LiftedLambda)
 import Codegen.Shared as Shared exposing (escapeC, extractCtorName, getModuleName, getModulePrefix, mangle, mangleLocal, mangleWithPrefix, patternVars, uniqueStrings)
+import Dict exposing (Dict)
 
 
+{-| Build a mapping from imported function names to their source module prefix.
+    This is used to generate correct references for imported functions.
+-}
+buildImportMap : List Import -> Dict String String
+buildImportMap imports =
+    List.foldl
+        (\imp acc ->
+            let
+                sourceModuleName =
+                    case imp.name of
+                        Src.At _ name -> name
+
+                -- Convert module name to C prefix (e.g., "Codegen.Shared" -> "elm_Codegen_Shared")
+                sourcePrefix =
+                    "elm_" ++ String.replace "." "_" sourceModuleName
+            in
+            case imp.exposing_ of
+                Open ->
+                    -- For `exposing (..)`, we can't know all names statically
+                    -- This would require type information which we don't have
+                    acc
+
+                Explicit exposedList ->
+                    List.foldl
+                        (\exposed innerAcc ->
+                            case exposed of
+                                Lower (Src.At _ name) ->
+                                    Dict.insert name sourcePrefix innerAcc
+
+                                Upper _ _ ->
+                                    -- Type constructors handled differently
+                                    innerAcc
+
+                                Operator _ _ ->
+                                    -- Operators handled differently
+                                    innerAcc
+                        )
+                        acc
+                        exposedList
+        )
+        Dict.empty
+        imports
 
 
 {-| Generate C code for an entire module
@@ -26,6 +69,10 @@ generateModule mod =
         -- Convert module name to C prefix (e.g., "AST.Source" -> "AST_Source")
         modulePrefix =
             getModulePrefix mod
+
+        -- Build mapping from imported function names to their source module prefix
+        importMap =
+            buildImportMap mod.imports
 
         includes =
             [ "#include <stdio.h>"
@@ -50,7 +97,7 @@ generateModule mod =
             { nextId = 0, lambdas = [] }
 
         lambdaState =
-            List.foldl (collectLambdasFromValue modulePrefix) initialState mod.values
+            List.foldl (collectLambdasFromValue modulePrefix importMap) initialState mod.values
 
         -- Generate lifted lambda forward declarations and implementations
         liftedLambdaForwardDecls =
@@ -66,7 +113,7 @@ generateModule mod =
         -- Generate function implementations with module prefix
         -- Pass lambda counter state so lambdas emit references to lifted functions
         valueDefs =
-            generateValuesWithLiftedLambdas modulePrefix mod.values
+            generateValuesWithLiftedLambdas modulePrefix importMap mod.values
 
         -- Generate type definitions for custom types
         typeDefs =
@@ -97,15 +144,15 @@ generateModule mod =
 {-| Generate values with lifted lambda references
     Uses counter-based approach to match lambdas with their lifted versions
 -}
-generateValuesWithLiftedLambdas : String -> List (Src.Located Value) -> List String
-generateValuesWithLiftedLambdas modulePrefix values =
+generateValuesWithLiftedLambdas : String -> Dict String String -> List (Src.Located Value) -> List String
+generateValuesWithLiftedLambdas modulePrefix importMap values =
     let
         ( _, results ) =
             List.foldl
                 (\value ( counter, acc ) ->
                     let
                         ( newCounter, code ) =
-                            generateValueWithLiftedLambdas modulePrefix counter value
+                            generateValueWithLiftedLambdas modulePrefix importMap counter value
                     in
                     ( newCounter, acc ++ [ code ] )
                 )
@@ -118,8 +165,8 @@ generateValuesWithLiftedLambdas modulePrefix values =
 {-| Generate a single value with lifted lambda references
     Returns (new counter, generated code)
 -}
-generateValueWithLiftedLambdas : String -> Int -> Src.Located Value -> ( Int, String )
-generateValueWithLiftedLambdas modulePrefix lambdaCounter (Src.At _ value) =
+generateValueWithLiftedLambdas : String -> Dict String String -> Int -> Src.Located Value -> ( Int, String )
+generateValueWithLiftedLambdas modulePrefix importMap lambdaCounter (Src.At _ value) =
     let
         (Src.At _ name) =
             value.name
@@ -145,7 +192,7 @@ generateValueWithLiftedLambdas modulePrefix lambdaCounter (Src.At _ value) =
 
         -- Generate body with lambda counter
         ( newCounter, body ) =
-            generateExprWithLiftedLambdas modulePrefix localVars lambdaCounter value.body
+            generateExprWithLiftedLambdas modulePrefix importMap localVars lambdaCounter value.body
 
         -- Implementation function (NOT static - exported for cross-module linking)
         implFunc =
@@ -196,8 +243,8 @@ generateValueWithLiftedLambdas modulePrefix lambdaCounter (Src.At _ value) =
 {-| Generate expression with lifted lambda references
     Returns (new counter, generated code)
 -}
-generateExprWithLiftedLambdas : String -> List String -> Int -> Expr -> ( Int, String )
-generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
+generateExprWithLiftedLambdas : String -> Dict String String -> List String -> Int -> Expr -> ( Int, String )
+generateExprWithLiftedLambdas modulePrefix importMap locals counter (Src.At _ expr) =
     case expr of
         Lambda args body ->
             let
@@ -226,7 +273,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
 
                 -- First, traverse the body to update counter for nested lambdas
                 ( counterAfterBody, _ ) =
-                    generateExprWithLiftedLambdas modulePrefix (lambdaLocals ++ locals) (counter + 1) body
+                    generateExprWithLiftedLambdas modulePrefix importMap (lambdaLocals ++ locals) (counter + 1) body
 
                 -- Generate code to create closure and apply captures
                 closureCode =
@@ -275,7 +322,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                     if List.isEmpty defArgs then
                                         let
                                             ( c2, defCode ) =
-                                                generateExprWithLiftedLambdas modulePrefix allLocals c defBody
+                                                generateExprWithLiftedLambdas modulePrefix importMap allLocals c defBody
                                         in
                                         ( c2, acc ++ [ "tcelm_value_t *" ++ mangleLocal defName ++ " = " ++ defCode ++ ";" ], destructIdx )
 
@@ -306,7 +353,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                                 numCaptures + defArity
 
                                             ( c2, _ ) =
-                                                generateExprWithLiftedLambdas modulePrefix (defLocals ++ allLocals) (c + 1) defBody
+                                                generateExprWithLiftedLambdas modulePrefix importMap (defLocals ++ allLocals) (c + 1) defBody
 
                                             closureCode =
                                                 if numCaptures == 0 then
@@ -325,7 +372,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                 Src.Destruct pat defBody ->
                                     let
                                         ( c2, defCode ) =
-                                            generateExprWithLiftedLambdas modulePrefix allLocals c defBody
+                                            generateExprWithLiftedLambdas modulePrefix importMap allLocals c defBody
 
                                         -- Use unique index for destruct name
                                         destructName =
@@ -345,7 +392,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
 
                 -- Process body
                 ( counterAfterBody, bodyCode ) =
-                    generateExprWithLiftedLambdas modulePrefix allLocals counterAfterDefs body
+                    generateExprWithLiftedLambdas modulePrefix importMap allLocals counterAfterDefs body
             in
             ( counterAfterBody
             , "({\n        " ++ String.join "\n        " defBindings ++ "\n        " ++ bodyCode ++ ";\n    })"
@@ -358,10 +405,10 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\( cond, thenExpr ) ( c, acc ) ->
                             let
                                 ( c2, condCode ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c cond
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c cond
 
                                 ( c3, thenCode ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c2 thenExpr
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c2 thenExpr
                             in
                             ( c3, acc ++ [ ( condCode, thenCode ) ] )
                         )
@@ -369,7 +416,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         branches
 
                 ( counterAfterElse, elseCode ) =
-                    generateExprWithLiftedLambdas modulePrefix locals counterAfterBranches elseExpr
+                    generateExprWithLiftedLambdas modulePrefix importMap locals counterAfterBranches elseExpr
             in
             ( counterAfterElse
             , generateIfChain branchCodes elseCode
@@ -378,7 +425,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
         Case scrutinee branches ->
             let
                 ( counterAfterScrutinee, scrutineeCode ) =
-                    generateExprWithLiftedLambdas modulePrefix locals counter scrutinee
+                    generateExprWithLiftedLambdas modulePrefix importMap locals counter scrutinee
 
                 ( counterAfterBranches, branchCodes ) =
                     List.foldl
@@ -388,7 +435,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                                     patternVars pat ++ locals
 
                                 ( c2, branchCode ) =
-                                    generateExprWithLiftedLambdas modulePrefix patLocals c branchExpr
+                                    generateExprWithLiftedLambdas modulePrefix importMap patLocals c branchExpr
                             in
                             ( c2, acc ++ [ ( pat, branchCode ) ] )
                         )
@@ -402,14 +449,14 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
         Call fn args ->
             let
                 ( counterAfterFn, fnCode ) =
-                    generateExprWithLiftedLambdas modulePrefix locals counter fn
+                    generateExprWithLiftedLambdas modulePrefix importMap locals counter fn
 
                 ( counterAfterArgs, argCodes ) =
                     List.foldl
                         (\arg ( c, acc ) ->
                             let
                                 ( c2, argCode ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c arg
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c arg
                             in
                             ( c2, acc ++ [ argCode ] )
                         )
@@ -523,7 +570,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\( e, op ) ( c, acc ) ->
                             let
                                 ( c2, code ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c e
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c e
                             in
                             ( c2, acc ++ [ ( code, op ) ] )
                         )
@@ -531,7 +578,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         pairs
 
                 ( counterAfterFinal, finalCode ) =
-                    generateExprWithLiftedLambdas modulePrefix locals counterAfterPairs final
+                    generateExprWithLiftedLambdas modulePrefix importMap locals counterAfterPairs final
 
                 -- Fold the binops from left to right
                 result =
@@ -551,7 +598,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\item ( c, acc ) ->
                             let
                                 ( c2, code ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c item
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c item
                             in
                             ( c2, acc ++ [ code ] )
                         )
@@ -572,7 +619,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\elem ( c, acc ) ->
                             let
                                 ( c2, code ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c elem
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c elem
                             in
                             ( c2, acc ++ [ code ] )
                         )
@@ -598,7 +645,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\( Src.At _ fieldName, fieldExpr ) ( c, acc ) ->
                             let
                                 ( c2, code ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c fieldExpr
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c fieldExpr
                             in
                             ( c2, acc ++ [ ( fieldName, code ) ] )
                         )
@@ -623,7 +670,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
                         (\( Src.At _ fieldName, fieldExpr ) ( c, acc ) ->
                             let
                                 ( c2, code ) =
-                                    generateExprWithLiftedLambdas modulePrefix locals c fieldExpr
+                                    generateExprWithLiftedLambdas modulePrefix importMap locals c fieldExpr
                             in
                             ( c2, acc ++ [ ( fieldName, code ) ] )
                         )
@@ -651,7 +698,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
         Access inner (Src.At _ fieldName) ->
             let
                 ( counterAfterInner, innerCode ) =
-                    generateExprWithLiftedLambdas modulePrefix locals counter inner
+                    generateExprWithLiftedLambdas modulePrefix importMap locals counter inner
             in
             ( counterAfterInner
             , "tcelm_record_get(" ++ innerCode ++ ", \"" ++ fieldName ++ "\")"
@@ -660,7 +707,7 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
         Negate inner ->
             let
                 ( counterAfterInner, innerCode ) =
-                    generateExprWithLiftedLambdas modulePrefix locals counter inner
+                    generateExprWithLiftedLambdas modulePrefix importMap locals counter inner
             in
             ( counterAfterInner
             , "tcelm_negate(arena, " ++ innerCode ++ ")"
@@ -717,8 +764,14 @@ generateExprWithLiftedLambdas modulePrefix locals counter (Src.At _ expr) =
 
                             _ ->
                                 let
+                                    -- Look up in import map first, fall back to current module
                                     qualName =
-                                        mangleWithPrefix modulePrefix name
+                                        case Dict.get name importMap of
+                                            Just sourcePrefix ->
+                                                sourcePrefix ++ "_" ++ name
+
+                                            Nothing ->
+                                                mangleWithPrefix modulePrefix name
                                 in
                                 -- Always create closure - avoids C compiler type errors in dead ternary branches
                                 "tcelm_closure(arena, " ++ qualName ++ "_impl, " ++ qualName ++ "_ARITY)"
@@ -1034,8 +1087,8 @@ patternVarss patterns =
 {-| Collect all lambdas from an expression, assigning unique IDs
     Returns updated state with new lambdas added
 -}
-collectLambdasFromExpr : String -> List String -> Expr -> LambdaState -> LambdaState
-collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
+collectLambdasFromExpr : String -> Dict String String -> List String -> Expr -> LambdaState -> LambdaState
+collectLambdasFromExpr modulePrefix importMap outerLocals (Src.At _ expr) state =
     case expr of
         Lambda args body ->
             let
@@ -1059,6 +1112,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                     , args = args
                     , body = body
                     , outerLocals = outerLocals
+                    , importMap = importMap
                     }
 
                 stateWithLambda =
@@ -1070,7 +1124,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                 allLocals =
                     lambdaLocals ++ outerLocals
             in
-            collectLambdasFromExpr modulePrefix allLocals body stateWithLambda
+            collectLambdasFromExpr modulePrefix importMap allLocals body stateWithLambda
 
         Let defs body ->
             let
@@ -1098,7 +1152,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                                 Src.Define _ defArgs defBody _ ->
                                     if List.isEmpty defArgs then
                                         -- Simple value binding - just descend into body
-                                        collectLambdasFromExpr modulePrefix allLocals defBody st
+                                        collectLambdasFromExpr modulePrefix importMap allLocals defBody st
 
                                     else
                                         -- Local function - treat as a lambda
@@ -1122,6 +1176,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                                                 , args = defArgs
                                                 , body = defBody
                                                 , outerLocals = allLocals
+                                                , importMap = importMap
                                                 }
 
                                             stateWithLambda =
@@ -1130,33 +1185,33 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                                                 }
                                         in
                                         -- Also collect lambdas from the function body
-                                        collectLambdasFromExpr modulePrefix (defLocals ++ allLocals) defBody stateWithLambda
+                                        collectLambdasFromExpr modulePrefix importMap (defLocals ++ allLocals) defBody stateWithLambda
 
                                 Src.Destruct _ defBody ->
-                                    collectLambdasFromExpr modulePrefix allLocals defBody st
+                                    collectLambdasFromExpr modulePrefix importMap allLocals defBody st
                         )
                         state
                         defs
             in
-            collectLambdasFromExpr modulePrefix allLocals body stateAfterDefs
+            collectLambdasFromExpr modulePrefix importMap allLocals body stateAfterDefs
 
         If branches elseExpr ->
             let
                 stateAfterBranches =
                     List.foldl
                         (\( cond, thenExpr ) st ->
-                            collectLambdasFromExpr modulePrefix outerLocals thenExpr
-                                (collectLambdasFromExpr modulePrefix outerLocals cond st)
+                            collectLambdasFromExpr modulePrefix importMap outerLocals thenExpr
+                                (collectLambdasFromExpr modulePrefix importMap outerLocals cond st)
                         )
                         state
                         branches
             in
-            collectLambdasFromExpr modulePrefix outerLocals elseExpr stateAfterBranches
+            collectLambdasFromExpr modulePrefix importMap outerLocals elseExpr stateAfterBranches
 
         Case scrutinee branches ->
             let
                 stateAfterScrutinee =
-                    collectLambdasFromExpr modulePrefix outerLocals scrutinee state
+                    collectLambdasFromExpr modulePrefix importMap outerLocals scrutinee state
             in
             List.foldl
                 (\( pat, _, branchExpr ) st ->
@@ -1164,7 +1219,7 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
                         patLocals =
                             patternVars pat ++ outerLocals
                     in
-                    collectLambdasFromExpr modulePrefix patLocals branchExpr st
+                    collectLambdasFromExpr modulePrefix importMap patLocals branchExpr st
                 )
                 stateAfterScrutinee
                 branches
@@ -1172,43 +1227,43 @@ collectLambdasFromExpr modulePrefix outerLocals (Src.At _ expr) state =
         Call fn args ->
             let
                 stateAfterFn =
-                    collectLambdasFromExpr modulePrefix outerLocals fn state
+                    collectLambdasFromExpr modulePrefix importMap outerLocals fn state
             in
-            List.foldl (collectLambdasFromExpr modulePrefix outerLocals) stateAfterFn args
+            List.foldl (collectLambdasFromExpr modulePrefix importMap outerLocals) stateAfterFn args
 
         Binops pairs final ->
             let
                 stateAfterPairs =
                     List.foldl
-                        (\( e, _ ) st -> collectLambdasFromExpr modulePrefix outerLocals e st)
+                        (\( e, _ ) st -> collectLambdasFromExpr modulePrefix importMap outerLocals e st)
                         state
                         pairs
             in
-            collectLambdasFromExpr modulePrefix outerLocals final stateAfterPairs
+            collectLambdasFromExpr modulePrefix importMap outerLocals final stateAfterPairs
 
         List items ->
-            List.foldl (collectLambdasFromExpr modulePrefix outerLocals) state items
+            List.foldl (collectLambdasFromExpr modulePrefix importMap outerLocals) state items
 
         Tuple first second rest ->
-            List.foldl (collectLambdasFromExpr modulePrefix outerLocals) state (first :: second :: rest)
+            List.foldl (collectLambdasFromExpr modulePrefix importMap outerLocals) state (first :: second :: rest)
 
         Record fields ->
             List.foldl
-                (\( _, fieldExpr ) st -> collectLambdasFromExpr modulePrefix outerLocals fieldExpr st)
+                (\( _, fieldExpr ) st -> collectLambdasFromExpr modulePrefix importMap outerLocals fieldExpr st)
                 state
                 fields
 
         Update _ fields ->
             List.foldl
-                (\( _, fieldExpr ) st -> collectLambdasFromExpr modulePrefix outerLocals fieldExpr st)
+                (\( _, fieldExpr ) st -> collectLambdasFromExpr modulePrefix importMap outerLocals fieldExpr st)
                 state
                 fields
 
         Access inner _ ->
-            collectLambdasFromExpr modulePrefix outerLocals inner state
+            collectLambdasFromExpr modulePrefix importMap outerLocals inner state
 
         Negate inner ->
-            collectLambdasFromExpr modulePrefix outerLocals inner state
+            collectLambdasFromExpr modulePrefix importMap outerLocals inner state
 
         _ ->
             state
@@ -1318,13 +1373,13 @@ collectFreeVars boundVars (Src.At _ expr) =
 
 {-| Collect all lambdas from a module value (function definition)
 -}
-collectLambdasFromValue : String -> Src.Located Value -> LambdaState -> LambdaState
-collectLambdasFromValue modulePrefix (Src.At _ value) state =
+collectLambdasFromValue : String -> Dict String String -> Src.Located Value -> LambdaState -> LambdaState
+collectLambdasFromValue modulePrefix importMap (Src.At _ value) state =
     let
         localVars =
             patternVarss value.args
     in
-    collectLambdasFromExpr modulePrefix localVars value.body state
+    collectLambdasFromExpr modulePrefix importMap localVars value.body state
 
 
 {-| Generate a lifted lambda as a module-level function
@@ -1370,7 +1425,7 @@ generateLiftedLambdaWithCounter startCounter lambda =
 
         -- Use the counter-based generator so nested lambdas are properly referenced
         ( newCounter, bodyCode ) =
-            generateExprWithLiftedLambdas lambda.modulePrefix allLocals startCounter lambda.body
+            generateExprWithLiftedLambdas lambda.modulePrefix lambda.importMap allLocals startCounter lambda.body
 
         code =
             String.join "\n"
