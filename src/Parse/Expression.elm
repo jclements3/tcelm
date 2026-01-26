@@ -791,17 +791,23 @@ chompDoStatements revStmts =
         |> P.andThen
             (\pos ->
                 P.oneOf E.Start
-                    [ -- let binding: let x = expr
+                    [ -- let binding: let x = expr (may have multiple defs)
                       Keyword.let_ E.Start
                         |> P.andThen
                             (\_ ->
                                 Space.chompAndCheckIndent E.LetSpace E.LetIndentDef
                                     |> P.andThen
                                         (\_ ->
-                                            chompLetDef
+                                            P.withIndent
+                                                (chompLetDef
+                                                    |> P.andThen
+                                                        (\( def, defEnd ) ->
+                                                            chompLetDefs [ def ] defEnd
+                                                        )
+                                                )
                                                 |> P.andThen
-                                                    (\( def, defEnd ) ->
-                                                        chompMoreDoStatements (Src.DoLet [ def ] :: revStmts) defEnd
+                                                    (\( defs, defsEnd ) ->
+                                                        chompMoreDoStatements (Src.DoLet defs :: revStmts) defsEnd
                                                     )
                                         )
                             )
